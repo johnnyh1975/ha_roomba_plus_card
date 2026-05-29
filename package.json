@@ -1,0 +1,16 @@
+{
+  "name": "roomba-plus-card",
+  "version": "0.1-beta",
+  "description": "HACS Lovelace card for the roomba_plus Home Assistant integration",
+  "keywords": ["home-assistant", "lovelace", "roomba", "irobot", "hacs"],
+  "license": "MIT",
+  "scripts": {
+    "build": "esbuild src/roomba-plus-card.ts --bundle --outfile=dist/roomba-plus-card.js --format=esm --target=es2020 --minify",
+    "dev":   "esbuild src/roomba-plus-card.ts --bundle --outfile=dist/roomba-plus-card.js --format=esm --target=es2020 --watch",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  }
+}
