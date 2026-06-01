@@ -284,3 +284,55 @@ describe('renderRoomSelectorZone() — F5 room chip icons', () => {
     expect(html).not.toContain('📍');
   });
 });
+
+// ── F3b: show_settings gate + renderSettingsPanel export ─────────────────────
+import { renderSettingsPanel } from '../../src/zones/room-selector-zone';
+
+describe('renderSettingsPanel()', () => {
+  const n = 'roomba';
+  const cfg = baseConfig;
+
+  it('returns empty string when show_settings:false', () => {
+    const hass = makeHass({ [`switch.${n}_edge_clean`]: st('on') });
+    expect(renderSettingsPanel(hass, { ...cfg, show_settings: false }, n, false)).toBe('');
+  });
+
+  it('returns empty string when no settings entities present', () => {
+    expect(renderSettingsPanel(makeHass(), cfg, n, false)).toBe('');
+  });
+
+  it('renders toggle row when edge_clean entity present', () => {
+    const hass = makeHass({ [`switch.${n}_edge_clean`]: st('on') });
+    const html = renderSettingsPanel(hass, cfg, n, true);
+    expect(html).toContain('Edge clean');
+    expect(html).toContain('data-switch-entity');
+  });
+
+  it('renders carpet boost cycle button when entity present', () => {
+    const hass = makeHass({
+      [`select.${n}_carpet_boost_mode`]: st('Auto', { options: ['Auto', 'Eco', 'Performance'] }),
+    });
+    const html = renderSettingsPanel(hass, cfg, n, true);
+    expect(html).toContain('Carpet boost');
+    expect(html).toContain('data-cycle-entity');
+  });
+
+  it('panel collapsed when settingsPanelOpen is false', () => {
+    const hass = makeHass({ [`switch.${n}_edge_clean`]: st('on') });
+    const html = renderSettingsPanel(hass, cfg, n, false);
+    expect(html).toContain('data-settings-toggle');
+    expect(html).not.toContain('rpc-settings-panel');
+  });
+});
+
+describe('renderRoomSelectorZone() — show_settings gate', () => {
+  it('hides settings when show_settings:false', () => {
+    const html = renderRoomSelectorZone(props(
+      { hasZones: true, hasSmartZones: true },
+      { [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen'] }),
+        [`switch.${n}_edge_clean`]: st('on') },
+      { config: { ...baseConfig, show_settings: false } },
+    ));
+    expect(html).not.toContain('data-settings-toggle');
+  });
+});
