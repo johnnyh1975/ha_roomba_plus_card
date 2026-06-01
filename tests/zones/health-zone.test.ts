@@ -150,7 +150,7 @@ describe('renderHealthZone() — Wave A4 mop config', () => {
         [`sensor.${n}_mop_behavior`]:         st('Standard'),
         [`sensor.${n}_filter_remaining_hours`]: st('100', { threshold_hours: 200 }),
       },
-      { ...defaultCaps, hasPad: true, isMop: true },
+      { ...defaultCaps, hasPad: true, isMop: true, hasMopBehavior: true },
     );
     expect(html).toContain('Wet (reusable)');
     expect(html).toContain('Standard intensity');
@@ -206,5 +206,222 @@ describe('renderHealthZone() — popover', () => {
     );
     expect(html).toContain('disabled');
     expect(html).toContain('rpc-spinner');
+  });
+});
+
+// ── v1.3 F6a: Battery retention bar ──────────────────────────────────────────
+describe('renderHealthZone() — F6a battery retention bar', () => {
+  const n = 'roomba';
+
+  it('renders retention bar when hasBatteryRetention and sensor present', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_battery_capacity_retention`]: st('82'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('Health');
+    expect(html).toContain('82%');
+  });
+
+  it('shows popover with EOL when hasBatteryEol and eol sensor present', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_battery_capacity_retention`]: st('65'),
+      [`sensor.${n}_estimated_battery_eol`]: st('42'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true, hasBatteryEol: true }, n, {
+      openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('~42 days remaining');
+  });
+
+  it('shows end-of-life warning when eol sensor is 0', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_battery_capacity_retention`]: st('55'),
+      [`sensor.${n}_estimated_battery_eol`]: st('0'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true, hasBatteryEol: true }, n, {
+      openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('end of life');
+  });
+
+  it('does not render retention bar when cap absent', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+    });
+    const html = renderHealthZone(hass, baseConfig, defaultCaps, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).not.toContain('data-bar="retention"');
+  });
+});
+
+// ── v1.3 F6a: Coverage percentage bar ────────────────────────────────────────
+describe('renderHealthZone() — F6a coverage pct bar', () => {
+  const n = 'roomba';
+
+  it('renders coverage bar with percentage when ≥10 missions', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_recent_coverage_pct`]: st('78'),
+      [`sensor.${n}_missions_last_30d`]: st('15'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('78%');
+    expect(html).toContain('last mission');
+    expect(html).toContain('data-bar="coverage"');
+  });
+
+  it('shows "Building history…" skeleton when fewer than 10 missions', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_recent_coverage_pct`]: st('62'),
+      [`sensor.${n}_missions_last_30d`]: st('7'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('Building history');
+    expect(html).not.toContain('last mission');
+  });
+});
+
+// ── T2: coverage bar skeleton when mission count absent or < 10 (L1 regression) ──
+describe('renderHealthZone() — F6a coverage bar skeleton fallback (L1)', () => {
+  const n = 'roomba';
+
+  it('shows skeleton when missions_last_30d entity is absent (NaN guard)', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_recent_coverage_pct`]: st('72'),
+      // missions_last_30d intentionally absent
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('Building history');
+    expect(html).not.toContain('last mission');
+  });
+
+  it('shows bar when missions_last_30d >= 10', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_recent_coverage_pct`]: st('82'),
+      [`sensor.${n}_missions_last_30d`]: st('14'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('last mission');
+    expect(html).toContain('data-bar="coverage"');
+    expect(html).not.toContain('Building history');
+  });
+});
+
+// ── T1b: retention popover close button uses correct data attribute (B1 regression) ──
+describe('renderHealthZone() — F6a retention popover close button (B1)', () => {
+  const n = 'roomba';
+
+  it('close button uses data-close not data-bar-close', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_battery_capacity_retention`]: st('78'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('data-close="retention"');
+    expect(html).not.toContain('data-bar-close');
+    // U3: label should be "Bat. Health", not ambiguous "Health"
+    expect(html).toContain('Bat. Health');
+  });
+});
+
+// ── B4 regression: separator only rendered when a new bar actually appears ────
+describe('renderHealthZone() — B4 orphaned separator regression', () => {
+  const n = 'roomba';
+
+  it('does not render separator when retention entity is absent', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      // battery_capacity_retention intentionally absent
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).not.toContain('rpc-health-battery-sep');
+  });
+
+  it('does not render separator when retention entity is unavailable', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_battery_capacity_retention`]: st('unavailable'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).not.toContain('rpc-health-battery-sep');
+  });
+
+  it('renders separator when retention bar renders', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_battery_capacity_retention`]: st('82'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('rpc-health-battery-sep');
+  });
+});
+
+// ── Coverage bar popover ───────────────────────────────────────────────────────
+describe('renderHealthZone() — F6a coverage bar popover', () => {
+  const n = 'roomba';
+
+  it('renders coverage bar as interactive (data-bar="coverage")', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_recent_coverage_pct`]: st('78'),
+      [`sensor.${n}_missions_last_30d`]: st('15'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('data-bar="coverage"');
+    expect(html).toContain('role="button"');
+  });
+
+  it('renders popover with mission count context when openPopover is coverage', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_recent_coverage_pct`]: st('72'),
+      [`sensor.${n}_missions_last_30d`]: st('20'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
+      openPopover: 'coverage', resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('Floor Coverage');
+    expect(html).toContain('72% of floor area');
+    expect(html).toContain('20 missions');
+  });
+
+  it('clamps coverage pct at 100', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_recent_coverage_pct`]: st('103'),
+      [`sensor.${n}_missions_last_30d`]: st('12'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('100%');
+    expect(html).not.toContain('103%');
   });
 });

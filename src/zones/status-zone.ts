@@ -1,5 +1,6 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary } from '../types.js';
-import { esc } from '../utils.js';
+import { esc, timeSince } from '../utils.js';
+import { renderSettingsPanel } from './room-selector-zone.js';
 
 type VacuumState = 'cleaning' | 'paused' | 'returning' | 'docked' | 'idle' | 'error' | 'unavailable';
 
@@ -16,6 +17,8 @@ export interface StatusZoneProps {
    * null when history not yet loaded or show_history: false.
    */
   missionData: DaySummary[] | null;
+  /** F3b: settings panel expanded state — passed when show_rooms:false so settings render here */
+  settingsPanelOpen: boolean;
 }
 
 function st(hass: HomeAssistant, entityId: string): string {
@@ -28,31 +31,21 @@ function formatArea(sqft: number, unit: 'auto' | 'sqft' | 'm2', isMetric: boolea
   return `${sqft} ft²`;
 }
 
-function timeSince(isoStr: string): string {
-  const diff = Date.now() - new Date(isoStr).getTime();
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
 /**
  * F1: Returns a human-readable "X ago" string for the most recent completed mission.
  * Scans missionData from most-recent backward; returns null if no data yet.
  */
-function lastCleanedAgo(missionData: DaySummary[] | null): string | null {
+function lastCleanedAgo(missionData: DaySummary[] | null, locale: string): string | null {
   if (!missionData) return null;
   for (let i = missionData.length - 1; i >= 0; i--) {
     const day = missionData[i];
     if (day.missions && day.missions.length > 0) {
       for (let j = day.missions.length - 1; j >= 0; j--) {
         const m = day.missions[j];
-        if (m.result === 'completed') return timeSince(m.started_at);
+        if (m.result === 'completed') return timeSince(m.started_at, locale);
       }
     } else if (day.completed > 0) {
-      return timeSince(day.date + 'T12:00:00Z');
+      return timeSince(day.date + 'T12:00:00Z', locale);
     }
   }
   return null;
@@ -65,7 +58,7 @@ function ordinal(n: number): string {
 }
 
 export function renderStatusZone(props: StatusZoneProps): string {
-  const { hass, config, caps, robotName, loadingAction, todayMissionCount } = props;
+  const { hass, config, caps, robotName, loadingAction, todayMissionCount, settingsPanelOpen } = props;
   const entityId = config.entity;
   const vacState = (st(hass, entityId)) as VacuumState;
   const attrs = hass.states[entityId]?.attributes ?? {};
@@ -226,13 +219,12 @@ export function renderStatusZone(props: StatusZoneProps): string {
   let dockedHtml = '';
   if (vacState === 'docked' && !isRecharging) {
     // Prefer history data (accurate started_at) over entity last_changed (less precise)
-    const lastCleaned = lastCleanedAgo(props.missionData);
+    const lastCleaned = lastCleanedAgo(props.missionData, hass.language);
     if (lastCleaned) {
       dockedHtml = `<div class="rpc-docked-since">Last cleaned: ${lastCleaned}</div>`;
     } else {
-      // Fallback: entity last_changed (pre-history or history not loaded)
       const lastChanged = hass.states[entityId]?.last_changed;
-      if (lastChanged) dockedHtml = `<div class="rpc-docked-since">Last mission: ${timeSince(lastChanged)}</div>`;
+      if (lastChanged) dockedHtml = `<div class="rpc-docked-since">Last mission: ${timeSince(lastChanged, hass.language)}</div>`;
     }
 
     // F1: Demand-blocked indicator — floor needs cleaning but robot can't run yet
@@ -270,6 +262,20 @@ export function renderStatusZone(props: StatusZoneProps): string {
     buttons = btn('start', 'Start', '▶ Start') + btn('locate', 'Locate', '⊙ Locate');
   }
 
+  // F3b: when show_rooms:false, repeat-last joins the action button row; settings renders below
+  const showRooms = config.show_rooms !== false;
+  if (!showRooms) {
+    const repeatEntity = hass.states[`button.${robotName}_repeat_mission`];
+    const canRepeat    = !!repeatEntity && repeatEntity.state !== 'unavailable';
+    if (canRepeat) {
+      buttons += `<button class="rpc-btn-text" data-action="repeat-last">↩ Repeat last</button>`;
+    }
+  }
+
+  const relocatedSettings = !showRooms
+    ? renderSettingsPanel(hass, config, robotName, settingsPanelOpen, true)
+    : '';
+
   return `
     <div class="rpc-zone rpc-zone1${extraClass ? ' ' + extraClass : ''}">
       <div class="rpc-robot-identity">
@@ -286,6 +292,7 @@ export function renderStatusZone(props: StatusZoneProps): string {
       ${metricsHtml}
       ${dockedHtml}
       ${buttons ? `<div class="rpc-actions">${buttons}</div>` : ''}
+      ${relocatedSettings}
     </div>
   `;
 }
