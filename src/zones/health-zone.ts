@@ -1,5 +1,5 @@
 import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
-import { esc } from '../utils.js';
+import { esc, timeSince } from '../utils.js';
 
 interface Bar {
   key: string;
@@ -52,12 +52,6 @@ function trendArrow(wearRate: number, threshold: number): string {
   return '→';
 }
 
-function timeSince(iso: string): string {
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
-  if (days === 0) return 'today';
-  if (days === 1) return 'yesterday';
-  return `${days} days ago`;
-}
 
 /** Convert Clean Base sensor state to "~N uses remaining" display */
 function cleanBaseDisplay(state: string): string {
@@ -162,11 +156,118 @@ export function renderHealthZone(
 
   const barsHtml = bars.map(bar => renderBar(bar, hass, n, state)).join('');
 
+  // F6a — Battery capacity retention bar (v2.1+, no reset button — it's a health indicator)
+  // Separated from the consumable/battery bars above by a thin divider.
+  // Separator is only emitted if at least one of the two new bars actually renders.
+  let retentionBarHtml = '';
+  if (caps.hasBatteryRetention) {
+    const retEntity = hass.states[`sensor.${n}_battery_capacity_retention`];
+    if (retEntity && retEntity.state !== 'unavailable' && retEntity.state !== 'unknown') {
+      const retPct = Math.round(parseFloat(retEntity.state));
+      if (!isNaN(retPct)) {
+        const colour = retPct > 85 ? 'var(--rpc-green)' : retPct > 70 ? 'var(--rpc-amber)' : 'var(--rpc-red)';
+        const cyclesEntity = hass.states[`sensor.${n}_charge_cycles`];
+        const cyclesVal    = cyclesEntity ? parseInt(cyclesEntity.state, 10) : NaN;
+        const cycleText    = !isNaN(cyclesVal) ? `${cyclesVal} charge cycle${cyclesVal !== 1 ? 's' : ''}` : '';
+
+        let eolHtml = '';
+        if (caps.hasBatteryEol) {
+          const eolEntity = hass.states[`sensor.${n}_estimated_battery_eol`];
+          if (eolEntity && eolEntity.state !== 'unavailable' && eolEntity.state !== 'unknown') {
+            const eolDays = parseInt(eolEntity.state, 10);
+            if (!isNaN(eolDays)) {
+              eolHtml = eolDays > 0
+                ? `<div class="rpc-retention-eol">Battery life: ~${eolDays} days remaining</div>`
+                : `<div class="rpc-retention-eol rpc-retention-eol--warn">Consider replacing — battery at end of life</div>`;
+            }
+          }
+        }
+
+        const isOpen = state.openPopover === 'retention';
+        const popover = isOpen ? `
+          <div class="rpc-popover">
+            <div class="rpc-popover-header">
+              <span>Battery Health</span>
+              <button class="rpc-popover-close" data-close="retention" aria-label="Close">×</button>
+            </div>
+            <div class="rpc-popover-divider"></div>
+            <div class="rpc-popover-body">
+              <div>${retPct}% of original capacity</div>
+              ${cycleText ? `<div class="rpc-popover-sub">${cycleText}</div>` : ''}
+              ${eolHtml}
+            </div>
+          </div>` : '';
+
+        retentionBarHtml = `
+          <div class="rpc-bar-row" data-bar="retention" role="button" aria-expanded="${isOpen}" tabindex="0"
+               aria-label="Bat. Health — ${retPct}%">
+            <span class="rpc-bar-label">Bat. Health</span>
+            <span class="rpc-bar-track"><span class="rpc-bar-fill" style="width:${retPct}%;background:${colour}"></span></span>
+            <span class="rpc-bar-pct" style="color:${colour}">${retPct}%</span>
+          </div>
+          ${popover}`;
+      }
+    }
+  }
+
+  // F6a — Coverage percentage bar (v2.1+)
+  let coverageBarHtml = '';
+  if (caps.hasCoveragePct) {
+    const covEntity = hass.states[`sensor.${n}_recent_coverage_pct`];
+    if (covEntity && covEntity.state !== 'unavailable' && covEntity.state !== 'unknown') {
+      const missionCountEntity = hass.states[`sensor.${n}_missions_last_30d`];
+      const missionCount       = missionCountEntity ? parseInt(missionCountEntity.state, 10) : NaN;
+      if (isNaN(missionCount) || missionCount < 10) {
+        coverageBarHtml = `
+          <div class="rpc-bar-row rpc-bar-row--static">
+            <span class="rpc-bar-label">Coverage</span>
+            <span class="rpc-coverage-building">Building history…</span>
+          </div>`;
+      } else {
+        const covPct = Math.min(100, Math.round(parseFloat(covEntity.state)));
+        if (!isNaN(covPct)) {
+          const colour  = covPct >= 85 ? 'var(--rpc-green)' : covPct >= 65 ? 'var(--rpc-amber)' : 'var(--rpc-red)';
+          const isOpen  = state.openPopover === 'coverage';
+          const missionText = !isNaN(missionCount)
+            ? `Based on ${missionCount} mission${missionCount !== 1 ? 's' : ''} in the last 30 days.`
+            : '';
+          const popover = isOpen ? `
+            <div class="rpc-popover">
+              <div class="rpc-popover-header">
+                <span>Floor Coverage</span>
+                <button class="rpc-popover-close" data-close="coverage" aria-label="Close">×</button>
+              </div>
+              <div class="rpc-popover-divider"></div>
+              <div class="rpc-popover-body">
+                <div>${covPct}% of floor area covered on the last mission.</div>
+                ${missionText ? `<div class="rpc-popover-sub">${missionText}</div>` : ''}
+                <div class="rpc-popover-sub">Low coverage may indicate obstacles, map drift, or a missed room.</div>
+              </div>
+            </div>` : '';
+          coverageBarHtml = `
+            <div class="rpc-bar-row" data-bar="coverage" role="button" aria-expanded="${isOpen}" tabindex="0"
+                 aria-label="Coverage ${covPct}% last mission">
+              <span class="rpc-bar-label">Coverage</span>
+              <span class="rpc-bar-track"><span class="rpc-bar-fill" style="width:${covPct}%;background:${colour}"></span></span>
+              <span class="rpc-bar-pct" style="color:${colour}">${covPct}%</span>
+              <span class="rpc-bar-hours">last mission</span>
+            </div>
+            ${popover}`;
+        }
+      }
+    }
+  }
+
+  // Only emit the separator when at least one new bar rendered
+  const retentionHtml = (retentionBarHtml || coverageBarHtml)
+    ? `<div class="rpc-health-battery-sep"></div>${retentionBarHtml}${coverageBarHtml}`
+    : '';
+
   // Wave A4 — Braava pad type + intensity row
   let mopConfigHtml = '';
   if (caps.isMop) {
     const padType   = hass.states[`sensor.${n}_mop_pad`];
-    const mopBehav  = hass.states[`sensor.${n}_mop_behavior`];
+    const mopBehav  = caps.hasMopBehavior ? hass.states[`sensor.${n}_mop_behavior`] : null;
     const parts: string[] = [];
     if (padType  && padType.state  !== 'unknown' && padType.state  !== 'unavailable') parts.push(esc(padType.state));
     if (mopBehav && mopBehav.state !== 'unknown' && mopBehav.state !== 'unavailable') parts.push(`${esc(mopBehav.state)} intensity`);
@@ -182,12 +283,13 @@ export function renderHealthZone(
     <div class="rpc-zone rpc-zone3">
       <div class="rpc-zone-header">HEALTH</div>
       ${barsHtml}
+      ${retentionHtml}
       ${mopConfigHtml}
     </div>
   `;
 }
 
-function renderBar(bar: Bar, hass: HomeAssistant, n: string, state: HealthZoneState): string {
+function renderBar(bar: Bar, hass: HomeAssistant, _n: string, state: HealthZoneState): string {
   const isOpen = state.openPopover === bar.key;
 
   // Clean Base — text-only row
@@ -285,7 +387,7 @@ function renderConsumablePopover(
     lastReplacedHtml = `
       <div class="rpc-popover-row">
         <span>Last replaced</span>
-        <span>${d.toLocaleDateString()} (${timeSince(lastReplacedEntity.state)})</span>
+        <span>${d.toLocaleDateString(hass.language)} (${timeSince(lastReplacedEntity.state, hass.language)})</span>
       </div>`;
   }
 

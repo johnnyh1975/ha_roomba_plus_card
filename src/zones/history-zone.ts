@@ -1,5 +1,5 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord } from '../types.js';
-import { renderHeatmap, renderSkeletonHeatmap } from '../heatmap.js';
+import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct } from '../heatmap.js';
 import { esc } from '../utils.js';
 
 export interface HistoryZoneState {
@@ -45,7 +45,23 @@ export function renderHistoryZone(
   const summaryParts: string[] = [];
   if (streakVal > 0) summaryParts.push(`🔥 ${streakVal}-day streak`);
   if (!isNaN(completionVal)) summaryParts.push(`${completionVal}% completion rate`);
-  if (summaryParts.length) summaryHtml = `<div class="rpc-history-summary">${summaryParts.join(' · ')}</div>`;
+
+  // F6a — Speed trend indicator (v2.1+). Corrected from spec: belongs in History zone,
+  // not Status zone — it's a 14-day analytical signal, not a real-time operational one.
+  // 'stable' is intentionally silent — no noise when things are normal.
+  if (caps.hasCleaningSpeedTrend) {
+    const trendEntity = hass.states[`sensor.${n}_cleaning_speed_trend`];
+    const trend = trendEntity?.state;
+    if (trend === 'declining') summaryParts.push('<span class="rpc-trend-declining">↓ Speed declining</span>');
+    else if (trend === 'improving') summaryParts.push('<span class="rpc-trend-improving">↑ Speed improving</span>');
+    // 'stable': no indicator — normal state, no noise
+  }
+
+  if (summaryParts.length) {
+    summaryHtml = `<div class="rpc-history-summary">${
+      summaryParts.map((p, i) => i === 0 ? p : `<span class="rpc-summary-sep">·</span>${p}`).join('')
+    }</div>`;
+  }
 
   // Heatmap area
   let heatmapHtml = '';
@@ -54,7 +70,7 @@ export function renderHistoryZone(
   } else if (state.error) {
     heatmapHtml = `<div class="rpc-history-error">${esc(state.error)}</div>`;
   } else if (state.data) {
-    heatmapHtml = renderHeatmap(state.data, days, unit);
+    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language);
     // Show partial message if API returned fewer calendar days than requested
     if (state.data.length < days) {
       heatmapHtml += `<div class="rpc-history-partial">Showing ${state.data.length} of ${days} days — full history builds over time</div>`;
@@ -78,7 +94,7 @@ export function renderHistoryZone(
   let popoverHtml = '';
   if (state.openDay) {
     const date     = new Date(state.openDay + 'T00:00:00');
-    const dateLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    const dateLabel = date.toLocaleDateString(hass.language, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
     const missions  = state.dayMissions;
     const summary   = state.openDaySummary;
 
@@ -93,7 +109,7 @@ export function renderHistoryZone(
       missionRows = missions.map(m => {
         const icon  = m.result === 'completed' ? '✓' : '✗';
         const cls   = m.result === 'completed' ? 'rpc-day-ok' : 'rpc-day-err';
-        const start = new Date(m.started_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const start = new Date(m.started_at).toLocaleTimeString(hass.language, { hour: '2-digit', minute: '2-digit', hour12: false });
         const area  = m.area_sqft !== null ? formatArea(m.area_sqft, useMetric) : '—';
         const zones = m.zones?.map(z => esc(z)).join(' · ') ?? '';
         // C2 — dirt events (opt-in, requires integration ≥ v2.0 with dirt_events in record)
@@ -101,6 +117,17 @@ export function renderHistoryZone(
           ? `${m.dirt_events} dirt event${m.dirt_events !== 1 ? 's' : ''}`
           : '';
         const meta = [zones, dirtPart].filter(Boolean).join(' · ');
+
+        // F6b — WiFi sparkline (v2.1+ cloud records with wifi_signal array).
+        // Normalise wlBars (0–4 int) → percentage before rendering.
+        let wifiHtml = '';
+        if (m.wifi_signal && m.wifi_signal.length > 0) {
+          const pctReadings = normalisedWifiPct(m.wifi_signal);
+          const minWifi     = Math.min(...pctReadings);
+          const sparkSvg    = renderSparkline(pctReadings, minWifi);
+          wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal: minimum ${minWifi}% during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${minWifi}% min</span></div>`;
+        }
+
         return `
           <div class="rpc-day-mission">
             <span class="rpc-day-icon ${cls}">${icon}</span>
@@ -108,6 +135,7 @@ export function renderHistoryZone(
             <span class="rpc-day-dur">${m.duration_min} min</span>
             <span class="rpc-day-area">${area}</span>
             ${meta ? `<div class="rpc-day-zones">${meta}</div>` : ''}
+            ${wifiHtml}
           </div>`;
       }).join('');
     } else if (summary && summary.total > 0) {
