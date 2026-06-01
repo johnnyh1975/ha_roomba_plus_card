@@ -70,6 +70,21 @@ export function renderAlertZone(
     }
   }
 
+  // Priority 5 — navigation quality (Wave B4, v1.9+ robots with VSLAM)
+  const navQualityEntity = hass.states[`sensor.${n}_nav_quality`];
+  if (navQualityEntity
+      && navQualityEntity.state !== 'unknown'
+      && navQualityEntity.state !== 'unavailable') {
+    const navQuality = parseInt(navQualityEntity.state, 10);
+    if (!isNaN(navQuality) && navQuality < 60) {
+      alerts.push({
+        priority: 5,
+        text:    `Navigation quality low (${navQuality}/100)`,
+        subtext: 'Check lighting or move obstacles in the cleaning area.',
+      });
+    }
+  }
+
   // Return '' (not a hidden div) so the Zone 5 empty-state causes zero DOM impact.
   // A hidden-but-present div would trigger the .rpc-zone + .rpc-zone border rule on Zone 6.
   if (alerts.length === 0) return '';

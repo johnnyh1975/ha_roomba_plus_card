@@ -11,6 +11,8 @@ export interface HistoryZoneState {
   dayMissions: MissionRecord[] | null;
   /** The DaySummary for openDay, for showing aggregate when missions array is empty */
   openDaySummary: DaySummary | null;
+  /** C1: whether the lifetime stats footer is expanded */
+  lifetimeExpanded: boolean;
 }
 
 function formatArea(sqft: number, useMetric: boolean): string {
@@ -91,16 +93,21 @@ export function renderHistoryZone(
       missionRows = missions.map(m => {
         const icon  = m.result === 'completed' ? '✓' : '✗';
         const cls   = m.result === 'completed' ? 'rpc-day-ok' : 'rpc-day-err';
-        const start = new Date(m.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const start = new Date(m.started_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
         const area  = m.area_sqft !== null ? formatArea(m.area_sqft, useMetric) : '—';
         const zones = m.zones?.map(z => esc(z)).join(' · ') ?? '';
+        // C2 — dirt events (opt-in, requires integration ≥ v2.0 with dirt_events in record)
+        const dirtPart = config.show_dirt_events && m.dirt_events != null && m.dirt_events > 0
+          ? `${m.dirt_events} dirt event${m.dirt_events !== 1 ? 's' : ''}`
+          : '';
+        const meta = [zones, dirtPart].filter(Boolean).join(' · ');
         return `
           <div class="rpc-day-mission">
             <span class="rpc-day-icon ${cls}">${icon}</span>
             <span class="rpc-day-time">${start}</span>
             <span class="rpc-day-dur">${m.duration_min} min</span>
             <span class="rpc-day-area">${area}</span>
-            ${zones ? `<div class="rpc-day-zones">${zones}</div>` : ''}
+            ${meta ? `<div class="rpc-day-zones">${meta}</div>` : ''}
           </div>`;
       }).join('');
     } else if (summary && summary.total > 0) {
@@ -130,6 +137,37 @@ export function renderHistoryZone(
     `;
   }
 
+  // C1 — Lifetime stats collapsed footer (cloud sensors, requires credentials)
+  let lifetimeHtml = '';
+  if (config.show_lifetime !== false) {
+    const lifetimeMissions = hass.states[`sensor.${n}_lifetime_missions`];
+    const lifetimeArea     = hass.states[`sensor.${n}_lifetime_area`];
+    const lifetimeTime     = hass.states[`sensor.${n}_lifetime_time`];
+
+    if (lifetimeMissions && lifetimeArea && lifetimeTime) {
+      const missions = parseInt(lifetimeMissions.state, 10);
+      const hours    = parseInt(lifetimeTime.state, 10);
+      const areaSqft = parseFloat(lifetimeArea.state);
+      const areaStr  = !isNaN(areaSqft) ? formatArea(areaSqft, useMetric) : null;
+
+      const expandedContent = state.lifetimeExpanded ? `
+        <div class="rpc-lifetime-stats">
+          <span class="rpc-lifetime-arrow">→</span>
+          ${!isNaN(missions) ? `<span>${missions.toLocaleString()} missions</span>` : ''}
+          ${areaStr ? `<span>${areaStr}</span>` : ''}
+          ${!isNaN(hours) ? `<span>${hours.toLocaleString()} h</span>` : ''}
+        </div>` : '';
+
+      lifetimeHtml = `
+        <div class="rpc-lifetime-divider"></div>
+        <button class="rpc-lifetime-toggle" data-lifetime-toggle aria-expanded="${state.lifetimeExpanded}">
+          Lifetime ${state.lifetimeExpanded ? '▲' : '▼'}
+        </button>
+        ${expandedContent}
+      `;
+    }
+  }
+
   return `
     <div class="rpc-zone rpc-zone6">
       <div class="rpc-zone-header">LAST ${days} DAYS</div>
@@ -139,6 +177,7 @@ export function renderHistoryZone(
       </div>
       ${problemHtml}
       ${popoverHtml}
+      ${lifetimeHtml}
     </div>
   `;
 }

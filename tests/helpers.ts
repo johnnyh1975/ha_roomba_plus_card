@@ -1,0 +1,41 @@
+import { HomeAssistant, HAState, RobotCapabilities, CardConfig } from '../src/types';
+
+export function st(state: string, attributes: Record<string, unknown> = {}): HAState {
+  return { entity_id: '', state, attributes, last_changed: '2025-05-14T10:00:00Z', last_updated: '2025-05-14T10:00:00Z' };
+}
+
+export function makeHass(states: Record<string, Partial<HAState>> = {}): HomeAssistant {
+  return {
+    states: Object.fromEntries(
+      Object.entries(states).map(([id, partial]) => [
+        id,
+        { entity_id: id, state: 'unavailable', attributes: {}, last_changed: '2025-05-14T10:00:00Z', last_updated: '2025-05-14T10:00:00Z', ...partial },
+      ])
+    ),
+    callService: async () => {},
+    callWS: async () => ({ config_entry_id: 'test-entry' }),
+    fetchWithAuth: async () => ({ ok: true, json: async () => [] } as unknown as Response),
+    language: 'en',
+    config: { unit_system: { length: 'ft' } },
+  };
+}
+
+export const defaultCaps: RobotCapabilities = {
+  hasArea: false, hasBrush: true, hasPad: false, hasWater: false,
+  hasCleanBase: false, hasZones: false, hasSmartZones: false,
+  hasProblemZone: false, hasLifetimeArea: false, hasWearRate: false,
+  isMop: false, hasMissionActive: false, hasMissionPhase: false,
+  hasDemandBlocked: false, hasEnergyConsumption: false,
+};
+
+export const fullCaps: RobotCapabilities = {
+  hasArea: true, hasBrush: true, hasPad: false, hasWater: false,
+  hasCleanBase: true, hasZones: true, hasSmartZones: true,
+  hasProblemZone: true, hasLifetimeArea: true, hasWearRate: true,
+  isMop: false, hasMissionActive: true, hasMissionPhase: true,
+  hasDemandBlocked: true, hasEnergyConsumption: false,
+};
+
+export const baseConfig: CardConfig = {
+  entity: 'vacuum.roomba',
+};

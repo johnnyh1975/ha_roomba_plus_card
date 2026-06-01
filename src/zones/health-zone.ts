@@ -18,6 +18,8 @@ export interface HealthZoneState {
   openPopover: string | null;
   resetting: string | null;
   resetError: string | null;
+  /** True once the user has seen the wear-arrow legend — shown only once per session */
+  legendShown: boolean;
 }
 
 function pct(remaining: number, threshold: number): number {
@@ -287,6 +289,21 @@ function renderConsumablePopover(
       </div>`;
   }
 
+  // Wear legend — shown once per session in the first popover that has a wear arrow
+  let wearLegendHtml = '';
+  if (bar.wearSensorId && !state.legendShown) {
+    const wearEntity = hass.states[bar.wearSensorId];
+    if (wearEntity && wearEntity.state !== 'unknown' && wearEntity.state !== 'unavailable') {
+      wearLegendHtml = `
+        <div class="rpc-wear-legend" data-wear-legend>
+          <span class="rpc-wear-legend-title">Wear trend</span>
+          <span>↑ wearing faster than normal</span>
+          <span>→ wearing at normal rate</span>
+          <span>↓ wearing slower than normal</span>
+        </div>`;
+    }
+  }
+
   const spinnerSvg = `<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>`;
 
   return `
@@ -302,6 +319,7 @@ function renderConsumablePopover(
       <div class="rpc-popover-bar-track">
         <div class="rpc-popover-bar-fill" style="width:${barPct}%;background:${colour}"></div>
       </div>
+      ${wearLegendHtml}
       ${bar.resetService ? `
         <button class="rpc-btn rpc-btn-secondary${isResetting ? ' rpc-btn-loading' : ''}"
                 data-reset="${bar.key}" data-service="${bar.resetService}"

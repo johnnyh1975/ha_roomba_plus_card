@@ -1,5 +1,6 @@
 import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
 import { esc } from '../utils.js';
+import { MDI_TO_EMOJI, MDI_FALLBACK } from '../const.js';
 
 export interface RoomSelectorProps {
   hass: HomeAssistant;
@@ -10,6 +11,8 @@ export interface RoomSelectorProps {
   passes: string;
   isSending: boolean;
   sendError: string | null;
+  /** B3: whether the settings panel is expanded */
+  settingsPanelOpen: boolean;
 }
 
 /** Maps display chip labels → integration select option strings */
@@ -29,7 +32,8 @@ const OPTION_TO_CHIP: Record<string, string> = {
 export { CHIP_TO_OPTION, OPTION_TO_CHIP };
 
 export function renderRoomSelectorZone(props: RoomSelectorProps): string {
-  const { hass, config, caps, robotName, selectedRooms, passes, isSending, sendError } = props;
+  const { hass, config, caps, robotName, selectedRooms, passes,
+          isSending, sendError, settingsPanelOpen } = props;
 
   if (!caps.hasZones) return '';
   if (config.show_rooms === false) return '';
@@ -45,26 +49,41 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
 
   const repeatEntity = hass.states[`button.${n}_repeat_mission`];
   const canRepeat    = !!repeatEntity && repeatEntity.state !== 'unavailable';
-
   const passesEntity = hass.states[`select.${n}_cleaning_passes`];
+
+  // B3 — settings panel entities
+  const edgeCleanEntity   = hass.states[`switch.${n}_edge_clean`];
+  const alwaysFinishEntity= hass.states[`switch.${n}_always_finish`];
+  const carpetBoostEntity = hass.states[`select.${n}_carpet_boost_mode`];
+  const hasSettings       = !!(edgeCleanEntity || alwaysFinishEntity || carpetBoostEntity);
 
   const isMop      = caps.isMop;
   const cleanLabel = isMop ? '▶ Mop selected rooms' : '▶ Clean selected rooms';
   const count      = selectedRooms.size;
-
   const spinnerSvg = `<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>`;
 
+  // F5: region_icons attribute — maps room name → MDI icon name (no "mdi:" prefix)
+  const regionIcons = (() => {
+    const selectId = caps.hasSmartZones
+      ? `select.${robotName}_smart_zone_select`
+      : `select.${robotName}_zone_select`;
+    const raw = hass.states[selectId]?.attributes?.['region_icons'];
+    return (raw && typeof raw === 'object' && !Array.isArray(raw))
+      ? raw as Record<string, string>
+      : {} as Record<string, string>;
+  })();
+
   const chipsHtml = options.map(room => {
-    const sel = selectedRooms.has(room);
+    const sel  = selectedRooms.has(room);
+    const mdi  = regionIcons[room];
+    const icon = mdi ? (MDI_TO_EMOJI[mdi] ?? MDI_FALLBACK) : '';
+    const label = icon ? `${icon} ${esc(room)}` : esc(room);
     return `<button class="rpc-room-chip${sel ? ' rpc-room-chip--selected' : ''}"
-      data-room="${esc(room)}" aria-pressed="${sel}">${esc(room)}</button>`;
+      data-room="${esc(room)}" aria-pressed="${sel}">${label}</button>`;
   }).join('');
 
   let passesHtml = '';
   if (passesEntity) {
-    // Sync displayed selection to entity state when entity has updated
-    const entityChip = OPTION_TO_CHIP[passesEntity.state] ?? 'Auto';
-    // Local `passes` is optimistic; if they match, show local; entity is source of truth on init
     const activeChip = passes;
     passesHtml = `
       <div class="rpc-passes-row">
@@ -75,6 +94,62 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
             data-pass-option="${esc(CHIP_TO_OPTION[p] ?? p)}">${p}</button>`
         ).join('')}
       </div>
+    `;
+  }
+
+  // ── B3: Settings panel ──
+  let settingsHtml = '';
+  if (hasSettings) {
+    let panelHtml = '';
+    if (settingsPanelOpen) {
+      const edgeOn   = edgeCleanEntity?.state === 'on';
+      const finishOn = alwaysFinishEntity?.state === 'on';
+      const carpetOptions: string[] = carpetBoostEntity
+        ? (carpetBoostEntity.attributes.options as string[] ?? [])
+        : [];
+
+      panelHtml = `
+        <div class="rpc-settings-panel">
+          ${edgeCleanEntity ? `
+            <div class="rpc-setting-item">
+              <span class="rpc-setting-label">Edge clean</span>
+              <button class="rpc-setting-toggle${edgeOn ? ' rpc-setting-on' : ''}"
+                      data-switch-entity="switch.${n}_edge_clean"
+                      aria-pressed="${edgeOn}">
+                ${edgeOn ? '●' : '○'}
+              </button>
+            </div>` : ''}
+          ${alwaysFinishEntity ? `
+            <div class="rpc-setting-item">
+              <span class="rpc-setting-label">Always finish</span>
+              <button class="rpc-setting-toggle${finishOn ? ' rpc-setting-on' : ''}"
+                      data-switch-entity="switch.${n}_always_finish"
+                      aria-pressed="${finishOn}">
+                ${finishOn ? '●' : '○'}
+              </button>
+            </div>` : ''}
+          ${carpetBoostEntity ? `
+            <div class="rpc-setting-item">
+              <span class="rpc-setting-label">Carpet boost</span>
+              <button class="rpc-setting-cycle"
+                      data-cycle-entity="select.${n}_carpet_boost_mode"
+                      data-cycle-options="${esc(JSON.stringify(carpetOptions))}"
+                      data-cycle-current="${esc(carpetBoostEntity.state)}">
+                ${esc(carpetBoostEntity.state)} ▼
+              </button>
+            </div>` : ''}
+        </div>
+      `;
+    }
+
+    settingsHtml = `
+      <div class="rpc-settings-divider"></div>
+      <button class="rpc-settings-row" data-settings-toggle aria-expanded="${settingsPanelOpen}">
+        <span class="rpc-settings-icon">⚙</span>
+        <span class="rpc-settings-label">Settings</span>
+        <span class="rpc-settings-arrow">${settingsPanelOpen ? '▲' : '▼'}</span>
+      </button>
+      ${panelHtml}
     `;
   }
 
@@ -96,6 +171,7 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
         ${canRepeat ? `<button class="rpc-btn-text" data-action="repeat-last">↩ Repeat last</button>` : ''}
       </div>
       ${sendError ? `<div class="rpc-send-error">${esc(sendError)}</div>` : ''}
+      ${settingsHtml}
     </div>
   `;
 }

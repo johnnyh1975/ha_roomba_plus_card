@@ -1,4 +1,4 @@
-import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
+import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary } from '../types.js';
 import { esc } from '../utils.js';
 
 type VacuumState = 'cleaning' | 'paused' | 'returning' | 'docked' | 'idle' | 'error' | 'unavailable';
@@ -11,6 +11,11 @@ export interface StatusZoneProps {
   loadingAction: string | null;
   /** Today's DaySummary from history data, for Wave A3 context line */
   todayMissionCount: number | null;
+  /**
+   * F1: Full history data for "Last cleaned X ago" display when docked.
+   * null when history not yet loaded or show_history: false.
+   */
+  missionData: DaySummary[] | null;
 }
 
 function st(hass: HomeAssistant, entityId: string): string {
@@ -33,6 +38,26 @@ function timeSince(isoStr: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/**
+ * F1: Returns a human-readable "X ago" string for the most recent completed mission.
+ * Scans missionData from most-recent backward; returns null if no data yet.
+ */
+function lastCleanedAgo(missionData: DaySummary[] | null): string | null {
+  if (!missionData) return null;
+  for (let i = missionData.length - 1; i >= 0; i--) {
+    const day = missionData[i];
+    if (day.missions && day.missions.length > 0) {
+      for (let j = day.missions.length - 1; j >= 0; j--) {
+        const m = day.missions[j];
+        if (m.result === 'completed') return timeSince(m.started_at);
+      }
+    } else if (day.completed > 0) {
+      return timeSince(day.date + 'T12:00:00Z');
+    }
+  }
+  return null;
+}
+
 function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd'];
   const v = n % 100;
@@ -52,10 +77,9 @@ export function renderStatusZone(props: StatusZoneProps): string {
   const n = robotName;
 
   // Sensors
-  const errorSensor     = `sensor.${n}_last_error_code`;
-  const errorZoneSensor = `sensor.${n}_last_error_zone`;
-  const rechargeTimeSensor = `sensor.${n}_mission_recharge_time`;
-  const missionExpireSensor = `sensor.${n}_mission_expire_time`;
+  const errorSensor        = `sensor.${n}_last_error_code`;
+  const errorZoneSensor    = `sensor.${n}_last_error_zone`;
+  const rechargeTimeSensor = `sensor.${n}_mission_recharge_time`;  // pre-1.9 fallback only
   const avgDurationSensor  = `sensor.${n}_missions_last_30d`;
   const avgAreaSensor      = `sensor.${n}_average_area_30d`;
   const areaCleanedToday   = `sensor.${n}_area_cleaned_today`;
@@ -71,23 +95,49 @@ export function renderStatusZone(props: StatusZoneProps): string {
   const robotIcon  = isMop ? '🧹' : '🤖';
   const friendlyName = esc((attrs.friendly_name as string) ?? entityId);
 
-  // ── Recharging mid-mission ──
-  const rechargeState = st(hass, rechargeTimeSensor);
-  const expireState   = st(hass, missionExpireSensor);
-  const rechargeValid = rechargeState !== 'unavailable' && rechargeState !== 'unknown'
-                     && expireState   !== 'unavailable' && expireState   !== 'unknown';
-  const expireDate    = rechargeValid ? new Date(expireState) : null;
-  const isRecharging  = vacState === 'docked' && rechargeValid && !!expireDate && expireDate > new Date();
+  // ── Mission phase (v1.9+) ──
+  // These give precise state that the vacuum entity alone cannot convey.
+  const missionPhase      = hass.states[`sensor.${n}_mission_phase`]?.state ?? '';
+  const missionActiveRaw  = hass.states[`binary_sensor.${n}_mission_active`]?.state ?? '';
+  const isMissionActive   = missionActiveRaw === 'on';
+  const hasMissionActive  = caps.hasMissionActive;
+
+  // ── Recharge ETA (independent of detection method) ──
+  // mission_expire_time gives the resumption time regardless of whether we detected
+  // the recharge via mission_active (v1.9+) or the recharge/expire pair (pre-1.9).
+  const expireRaw  = hass.states[`sensor.${n}_mission_expire_time`]?.state ?? '';
+  const expireDate = expireRaw && expireRaw !== 'unavailable' && expireRaw !== 'unknown'
+    ? new Date(expireRaw) : null;
+  const hasETA     = !!expireDate && !isNaN(expireDate.getTime()) && expireDate > new Date();
+  const resumeMin  = hasETA ? Math.max(1, Math.round((expireDate!.getTime() - Date.now()) / 60000)) : null;
+
+  // ── Recharging mid-mission detection ──
+  // v1.9+: binary_sensor.mission_active = on while vacuum is docked → mid-mission recharge.
+  // Pre-1.9 fallback: recharge/expire sensor pair.
+  let isRecharging = false;
+  if (hasMissionActive) {
+    isRecharging = vacState === 'docked' && isMissionActive;
+  } else {
+    const rechargeState = st(hass, rechargeTimeSensor);
+    const rechargeValid = rechargeState !== 'unavailable' && rechargeState !== 'unknown'
+                       && expireRaw      !== 'unavailable' && expireRaw      !== 'unknown';
+    isRecharging = vacState === 'docked' && rechargeValid && hasETA;
+  }
 
   // ── State label ──
   let stateDot = '';
   let stateLabel = '';
   let extraClass = '';
 
-  if (isRecharging && expireDate) {
-    const resumeMin = Math.max(1, Math.round((expireDate.getTime() - Date.now()) / 60000));
+  // Evac (Clean Base emptying) — phase takes precedence over vacuum state
+  if (missionPhase === 'evac') {
+    stateDot   = '⬆';
+    stateLabel = 'Emptying bin';
+  } else if (isRecharging) {
     stateDot   = '⚡';
-    stateLabel = `Resuming in ~${resumeMin} min`;
+    stateLabel = resumeMin !== null
+      ? `Recharging — resuming in ~${resumeMin} min`
+      : 'Recharging — mission continues';
   } else {
     switch (vacState) {
       case 'cleaning':    stateDot = '●'; stateLabel = isMop ? 'Mopping'         : 'Cleaning';          break;
@@ -120,8 +170,12 @@ export function renderStatusZone(props: StatusZoneProps): string {
   }
 
   // ── Wave A3: area-today context line ──
+  // Show during any active mission state: cleaning, paused, or mid-mission recharge.
   let areaTodayHtml = '';
-  if (vacState === 'cleaning' && caps.hasArea) {
+  const missionInProgress = hasMissionActive
+    ? isMissionActive
+    : (vacState === 'cleaning' || isRecharging);
+  if (missionInProgress && caps.hasArea) {
     const todayAreaRaw = parseFloat(st(hass, areaCleanedToday));
     if (!isNaN(todayAreaRaw) && todayAreaRaw > 0) {
       const areaStr = formatArea(todayAreaRaw, unit, isMetric);
@@ -168,11 +222,26 @@ export function renderStatusZone(props: StatusZoneProps): string {
     if (parts.length) metricsHtml = `<div class="rpc-metrics-row">${parts.join('')}</div>`;
   }
 
-  // ── Docked: last mission hint ──
+  // ── Docked: last cleaned hint from mission history (F1) ──
   let dockedHtml = '';
   if (vacState === 'docked' && !isRecharging) {
-    const lastChanged = hass.states[entityId]?.last_changed;
-    if (lastChanged) dockedHtml = `<div class="rpc-docked-since">Last mission: ${timeSince(lastChanged)}</div>`;
+    // Prefer history data (accurate started_at) over entity last_changed (less precise)
+    const lastCleaned = lastCleanedAgo(props.missionData);
+    if (lastCleaned) {
+      dockedHtml = `<div class="rpc-docked-since">Last cleaned: ${lastCleaned}</div>`;
+    } else {
+      // Fallback: entity last_changed (pre-history or history not loaded)
+      const lastChanged = hass.states[entityId]?.last_changed;
+      if (lastChanged) dockedHtml = `<div class="rpc-docked-since">Last mission: ${timeSince(lastChanged)}</div>`;
+    }
+
+    // F1: Demand-blocked indicator — floor needs cleaning but robot can't run yet
+    if (caps.hasDemandBlocked) {
+      const demandBlockedId = `binary_sensor.${robotName}_demand_clean_blocked`;
+      if (hass.states[demandBlockedId]?.state === 'on') {
+        dockedHtml += `<div class="rpc-demand-blocked">🧹 Floor needs cleaning — waiting for home to be empty</div>`;
+      }
+    }
   }
 
   // ── Quick action buttons ──
@@ -190,10 +259,13 @@ export function renderStatusZone(props: StatusZoneProps): string {
   };
 
   let buttons = '';
-  if (vacState === 'cleaning') {
+  if (vacState === 'cleaning' || missionPhase === 'evac') {
     buttons = btn('pause', 'Pause', '⏸ Pause') + btn('return_home', 'Return home', '↩ Return home');
   } else if (vacState === 'paused') {
     buttons = btn('resume', 'Resume', '▶ Resume') + btn('return_home', 'Return home', '↩ Return home');
+  } else if (isRecharging) {
+    // Mid-mission recharge: mission is still live — offer pause/cancel, not Start
+    buttons = btn('return_home', 'Cancel mission', '✕ Cancel mission');
   } else if (vacState !== 'returning' && !unavailable) {
     buttons = btn('start', 'Start', '▶ Start') + btn('locate', 'Locate', '⊙ Locate');
   }
