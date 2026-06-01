@@ -1,128 +1,174 @@
-function J(t,r){let e=l=>!!t.states[`sensor.${r}_${l}`],o=l=>!!t.states[`select.${r}_${l}`],n=l=>!!t.states[`binary_sensor.${r}_${l}`],s=e("mop_pad"),a=e("brush_remaining_hours");return{hasArea:e("area_cleaned_today"),hasBrush:a,hasPad:s,hasWater:e("mop_tank_level"),hasCleanBase:e("clean_base_status"),hasZones:o("smart_zone_select")||o("zone_select"),hasSmartZones:o("smart_zone_select"),hasProblemZone:e("problem_zone"),hasLifetimeArea:e("lifetime_area"),hasWearRate:e("filter_wear_rate"),isMop:s&&!a,hasMissionActive:n("mission_active"),hasMissionPhase:e("mission_phase"),hasDemandBlocked:n("demand_clean_blocked"),hasEnergyConsumption:e("total_energy_consumed")}}var j=class{constructor(r,e,o){this.hass=r;this.config=e;this.entryId=null;this.entityId=o??e.entity}updateHass(r){this.hass=r}async fetchSummary(r){let o=`/api/roomba_plus/${await this.resolveEntryId()}/mission_history?format=summary&days=${r}`,n=await this.hass.fetchWithAuth(o);if(!n.ok)throw new Error(`${n.status}`);return n.json()}async fetchRecords(r){let o=`/api/roomba_plus/${await this.resolveEntryId()}/mission_history?format=records&days=${r}`,n=await this.hass.fetchWithAuth(o);return n.ok?n.json():[]}async resolveEntryId(){if(this.entryId)return this.entryId;let r=await this.hass.callWS({type:"config/entity_registry/get",entity_id:this.entityId});return this.entryId=r.config_entry_id,this.entryId}};function g(t){return String(t??"").replace(/[&<>"']/g,r=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[r]??r)}function q(t,r){return t.states[r]?.state??"unavailable"}function ie(t,r,e){return r==="m2"||r==="auto"&&e?`${Math.round(t*.0929)} m\xB2`:`${t} ft\xB2`}function K(t){let r=Date.now()-new Date(t).getTime(),e=Math.floor(r/6e4);if(e<1)return"just now";if(e<60)return`${e}m ago`;let o=Math.floor(e/60);return o<24?`${o}h ago`:`${Math.floor(o/24)}d ago`}function Te(t){if(!t)return null;for(let r=t.length-1;r>=0;r--){let e=t[r];if(e.missions&&e.missions.length>0)for(let o=e.missions.length-1;o>=0;o--){let n=e.missions[o];if(n.result==="completed")return K(n.started_at)}else if(e.completed>0)return K(e.date+"T12:00:00Z")}return null}function Ce(t){let r=["th","st","nd","rd"],e=t%100;return t+(r[(e-20)%10]??r[e]??r[0])}function le(t){let{hass:r,config:e,caps:o,robotName:n,loadingAction:s,todayMissionCount:a}=t,l=e.entity,i=q(r,l),c=r.states[l]?.attributes??{},p=r.config?.unit_system?.length==="m",d=e.area_unit??"auto",u=i==="unavailable",f=s!==null,$=n,T=`sensor.${$}_last_error_code`,A=`sensor.${$}_last_error_zone`,C=`sensor.${$}_mission_recharge_time`,h=`sensor.${$}_missions_last_30d`,x=`sensor.${$}_average_area_30d`,m=`sensor.${$}_area_cleaned_today`,y=c.mission_elapsed_min??null,v=c.mission_area_sqft??null,b=parseFloat(q(r,h)),w=isNaN(b)||b<=0?45:b,E=parseFloat(q(r,x)),S=o.isMop,L=S?"\u{1F9F9}":"\u{1F916}",O=g(c.friendly_name??l),B=r.states[`sensor.${$}_mission_phase`]?.state??"",k=(r.states[`binary_sensor.${$}_mission_active`]?.state??"")==="on",P=o.hasMissionActive,M=r.states[`sensor.${$}_mission_expire_time`]?.state??"",Z=M&&M!=="unavailable"&&M!=="unknown"?new Date(M):null,te=!!Z&&!isNaN(Z.getTime())&&Z>new Date,se=te?Math.max(1,Math.round((Z.getTime()-Date.now())/6e4)):null,W=!1;if(P)W=i==="docked"&&k;else{let _=q(r,C);W=i==="docked"&&(_!=="unavailable"&&_!=="unknown"&&M!=="unavailable"&&M!=="unknown")&&te}let N="",H="",Y="";if(B==="evac")N="\u2B06",H="Emptying bin";else if(W)N="\u26A1",H=se!==null?`Recharging \u2014 resuming in ~${se} min`:"Recharging \u2014 mission continues";else switch(i){case"cleaning":N="\u25CF",H=S?"Mopping":"Cleaning";break;case"paused":N="\u23F8",H="Paused";break;case"returning":N="\u21A9",H="Returning to dock";break;case"docked":N="\u2713",H="Docked";break;case"idle":N="\u25CB",H="Idle";break;case"error":N="\u26A0",H="Error",Y="rpc-error-state";break;case"unavailable":N="\u2014",H="Unavailable";break}let re="";if(i==="error"){let _=r.states[T];if(_&&_.state!=="0"&&_.state!==""&&_.state!=="unavailable"){let R=g(_.attributes.description??"Unknown error"),D=g(_.attributes.action??""),I=q(r,A),G=I&&I!=="unknown"&&I!=="unavailable";H=`Error ${g(_.state)} \u2014 ${R}`,re=`
-        ${D?`<div class="rpc-error-action">${D}</div>`:""}
-        ${G?`<div class="rpc-error-zone">Zone: ${g(I)}</div>`:""}
-      `}else H="Robot error \u2014 check the iRobot app"}let ae="";if((P?k:i==="cleaning"||W)&&o.hasArea){let _=parseFloat(q(r,m));if(!isNaN(_)&&_>0){let R=ie(_,d,p),D=a!==null?a+1:null,I=D!==null&&D>1?` \xB7 ${g(Ce(D))} mission`:"";ae=`<div class="rpc-area-today">${R} already today${I}</div>`}}let ne="";i==="cleaning"&&y!==null&&(ne=`<div class="rpc-progress-track"><div class="rpc-progress-fill" style="width:${Math.min(y/w*100,95)}%"></div></div>`);let oe="";if(i==="cleaning"){let _=[];if(y!==null){let R=Math.max(0,Math.round(w-y));_.push(`<div class="rpc-metric"><span class="rpc-metric-val">~${R} min</span><span class="rpc-metric-lbl">Remaining</span></div>`)}if(o.hasArea&&v!==null&&(_.push(`<div class="rpc-metric"><span class="rpc-metric-val">${ie(v,d,p)}</span><span class="rpc-metric-lbl">Cleaned</span></div>`),!isNaN(E)&&E>0)){let R=parseFloat(q(r,`sensor.${$}_mission_count_30d`));if(!isNaN(R)&&R>=5){let D=Math.round((v-E)/E*100),I=D>=0?"\u25B2":"\u25BC",G=D>=0?"rpc-delta-up":"rpc-delta-down";_.push(`<div class="rpc-metric"><span class="rpc-metric-val ${G}">${I} ${Math.abs(D)}%</span><span class="rpc-metric-lbl">vs usual</span></div>`)}}_.length&&(oe=`<div class="rpc-metrics-row">${_.join("")}</div>`)}let U="";if(i==="docked"&&!W){let _=Te(t.missionData);if(_)U=`<div class="rpc-docked-since">Last cleaned: ${_}</div>`;else{let R=r.states[l]?.last_changed;R&&(U=`<div class="rpc-docked-since">Last mission: ${K(R)}</div>`)}if(o.hasDemandBlocked){let R=`binary_sensor.${n}_demand_clean_blocked`;r.states[R]?.state==="on"&&(U+='<div class="rpc-demand-blocked">\u{1F9F9} Floor needs cleaning \u2014 waiting for home to be empty</div>')}}let ke='<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>',F=(_,R,D)=>{let I=s===_;return`<button class="rpc-btn${I?" rpc-btn-loading":""}"
-      data-action="${_}"
-      ${u||f?"disabled":""}
-      aria-label="${R}">
-      ${I?ke:D}
-    </button>`},V="";return i==="cleaning"||B==="evac"?V=F("pause","Pause","\u23F8 Pause")+F("return_home","Return home","\u21A9 Return home"):i==="paused"?V=F("resume","Resume","\u25B6 Resume")+F("return_home","Return home","\u21A9 Return home"):W?V=F("return_home","Cancel mission","\u2715 Cancel mission"):i!=="returning"&&!u&&(V=F("start","Start","\u25B6 Start")+F("locate","Locate","\u2299 Locate")),`
-    <div class="rpc-zone rpc-zone1${Y?" "+Y:""}">
-      <div class="rpc-robot-identity">
-        <span class="rpc-robot-icon">${L}</span>
-        <span class="rpc-robot-name">${O}</span>
+function X(e,a,t,n,r){let s=d=>!!e.states[`sensor.${a}_${d}`],o=d=>!!e.states[`select.${a}_${d}`],l=d=>!!e.states[`binary_sensor.${a}_${d}`],i=d=>!!e.states[`image.${a}_${d}`],c=s("mop_pad"),p=s("brush_remaining_hours");return{hasArea:s("area_cleaned_today"),hasBrush:p,hasPad:c,hasWater:s("mop_tank_level"),hasCleanBase:s("clean_base_status"),hasZones:o("smart_zone_select")||o("zone_select"),hasSmartZones:o("smart_zone_select"),hasProblemZone:s("problem_zone"),hasLifetimeArea:s("lifetime_area"),hasWearRate:s("filter_wear_rate"),isMop:c&&!p,hasMissionActive:l("mission_active"),hasMissionPhase:s("mission_phase"),hasDemandBlocked:l("demand_clean_blocked"),hasEnergyConsumption:s("total_energy_consumed"),hasCleaningSpeedTrend:s("cleaning_speed_trend"),hasBatteryRetention:s("battery_capacity_retention"),hasWifiFloor:s("recent_wifi_floor"),hasCoveragePct:s("recent_coverage_pct"),hasBatteryEol:s("estimated_battery_eol"),hasConsecutiveSkips:l("consecutive_clean_skips"),hasMopBehavior:s("mop_behavior"),hasCoverageImage:i("coverage_map"),hasWifiSignal:n?.wifi_signal!=null,hasRoomCoverage:n!=null&&"room_coverage"in n,hasDirtDensity:r!=null&&"dirt_density"in r,hasRobotSelectorHelper:!!t.robot_selector_helper&&!!e.states[t.robot_selector_helper]}}var G=class{constructor(a,t,n){this.hass=a;this.entryId=null;this.entityId=n??t.entity}updateHass(a){this.hass=a}async fetchSummary(a){let n=`/api/roomba_plus/${await this.resolveEntryId()}/mission_history?format=summary&days=${a}`,r=await this.hass.fetchWithAuth(n);if(!r.ok)throw new Error(`${r.status}`);return r.json()}async fetchRecords(a){let n=`/api/roomba_plus/${await this.resolveEntryId()}/mission_history?format=records&days=${a}`,r=await this.hass.fetchWithAuth(n);return r.ok?r.json():[]}async resolveEntryId(){if(this.entryId)return this.entryId;let a=await this.hass.callWS({type:"config/entity_registry/get",entity_id:this.entityId});return this.entryId=a.config_entry_id,this.entryId}};function x(e){return String(e??"").replace(/[&<>"']/g,a=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[a]??a)}function V(e,a="en"){let t=Date.now()-new Date(e).getTime(),n=Math.floor(t/6e4);try{let r=new Intl.RelativeTimeFormat(a,{numeric:"auto"});if(n<1)return r.format(0,"minute");if(n<60)return r.format(-n,"minute");let s=Math.floor(n/60);if(s<24)return r.format(-s,"hour");let o=Math.floor(s/24);return o<30?r.format(-o,"day"):r.format(-Math.floor(o/30),"month")}catch{if(n<1)return"just now";if(n<60)return`${n}m ago`;let r=Math.floor(n/60);return r<24?`${r}h ago`:`${Math.floor(r/24)}d ago`}}var pe={sofa:"\u{1F6CB}\uFE0F",bed:"\u{1F6CF}\uFE0F","bed-double":"\u{1F6CF}\uFE0F","silverware-fork-knife":"\u{1F37D}\uFE0F",stove:"\u{1F373}",microwave:"\u{1F4E6}",fridge:"\u{1F9CA}",toilet:"\u{1F6BD}",shower:"\u{1F6BF}",bathtub:"\u{1F6C1}",desk:"\u{1F5A5}\uFE0F","chair-rolling":"\u{1F4BA}",television:"\u{1F4FA}",bookshelf:"\u{1F4DA}",wardrobe:"\u{1F454}",home:"\u{1F3E0}",garage:"\u{1F697}",door:"\u{1F6AA}",stairs:"\u{1FA9C}",balcony:"\u{1F305}",pool:"\u{1F3CA}","washing-machine":"\u{1FAE7}",hanger:"\u{1F9F9}","baby-carriage":"\u{1F37C}",dog:"\u{1F415}",cat:"\u{1F408}","floor-plan":"\u{1F4D0}","map-marker":"\u{1F4CD}",star:"\u2B50",heart:"\u2764\uFE0F","office-building":"\u{1F3E2}",school:"\u{1F3EB}"},de="\u{1F4CD}";var ee={Auto:"Auto","\xD71":"One pass","\xD72":"Two passes"},ue={Auto:"Auto","One pass":"\xD71","Two passes":"\xD72"};function te(e,a,t,n,r=!1){if(a.show_settings===!1)return"";let s=t,o=e.states[`switch.${s}_edge_clean`],l=e.states[`switch.${s}_always_finish`],i=e.states[`select.${s}_carpet_boost_mode`];if(!o&&!l&&!i)return"";let c="";if(n){let u=o?.state==="on",y=l?.state==="on",f=i?i.attributes.options??[]:[];c=`
+      <div class="rpc-settings-panel">
+        ${o?`
+          <div class="rpc-setting-item">
+            <span class="rpc-setting-label">Edge clean</span>
+            <button class="rpc-setting-toggle${u?" rpc-setting-on":""}"
+                    data-switch-entity="switch.${s}_edge_clean"
+                    aria-pressed="${u}">
+              ${u?"\u25CF":"\u25CB"}
+            </button>
+          </div>`:""}
+        ${l?`
+          <div class="rpc-setting-item">
+            <span class="rpc-setting-label">Always finish</span>
+            <button class="rpc-setting-toggle${y?" rpc-setting-on":""}"
+                    data-switch-entity="switch.${s}_always_finish"
+                    aria-pressed="${y}">
+              ${y?"\u25CF":"\u25CB"}
+            </button>
+          </div>`:""}
+        ${i?`
+          <div class="rpc-setting-item">
+            <span class="rpc-setting-label">Carpet boost</span>
+            <button class="rpc-setting-cycle"
+                    data-cycle-entity="select.${s}_carpet_boost_mode"
+                    data-cycle-options="${x(JSON.stringify(f))}"
+                    data-cycle-current="${x(i.state)}">
+              ${x(i.state)} \u25BC
+            </button>
+          </div>`:""}
       </div>
-      <div class="rpc-state-row">
-        <span class="rpc-state-dot rpc-state-${i}">${N}</span>
-        <span class="rpc-state-label">${H}</span>
-      </div>
-      ${ae}
-      ${re}
-      ${ne}
-      ${oe}
-      ${U}
-      ${V?`<div class="rpc-actions">${V}</div>`:""}
-    </div>
-  `}var ce={sofa:"\u{1F6CB}\uFE0F",bed:"\u{1F6CF}\uFE0F","bed-double":"\u{1F6CF}\uFE0F","silverware-fork-knife":"\u{1F37D}\uFE0F",stove:"\u{1F373}",microwave:"\u{1F4E6}",fridge:"\u{1F9CA}",toilet:"\u{1F6BD}",shower:"\u{1F6BF}",bathtub:"\u{1F6C1}",desk:"\u{1F5A5}\uFE0F","chair-rolling":"\u{1F4BA}",television:"\u{1F4FA}",bookshelf:"\u{1F4DA}",wardrobe:"\u{1F454}",home:"\u{1F3E0}",garage:"\u{1F697}",door:"\u{1F6AA}",stairs:"\u{1FA9C}",balcony:"\u{1F305}",pool:"\u{1F3CA}","washing-machine":"\u{1FAE7}",hanger:"\u{1F9F9}","baby-carriage":"\u{1F37C}",dog:"\u{1F415}",cat:"\u{1F408}","floor-plan":"\u{1F4D0}","map-marker":"\u{1F4CD}",star:"\u2B50",heart:"\u2764\uFE0F","office-building":"\u{1F3E2}",school:"\u{1F3EB}"},pe="\u{1F4CD}";var Q={Auto:"Auto","\xD71":"One pass","\xD72":"Two passes"},de={Auto:"Auto","One pass":"\xD71","Two passes":"\xD72"};function ue(t){let{hass:r,config:e,caps:o,robotName:n,selectedRooms:s,passes:a,isSending:l,sendError:i,settingsPanelOpen:c}=t;if(!o.hasZones||e.show_rooms===!1)return"";let p=n,d=r.states[`select.${p}_smart_zone_select`],u=r.states[`select.${p}_zone_select`],f=d??u;if(!f)return"";let $=f.attributes.options??[];if($.length===0)return"";let T=r.states[`button.${p}_repeat_mission`],A=!!T&&T.state!=="unavailable",C=r.states[`select.${p}_cleaning_passes`],h=r.states[`switch.${p}_edge_clean`],x=r.states[`switch.${p}_always_finish`],m=r.states[`select.${p}_carpet_boost_mode`],y=!!(h||x||m),b=o.isMop?"\u25B6 Mop selected rooms":"\u25B6 Clean selected rooms",w=s.size,E='<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>',S=(()=>{let z=o.hasSmartZones?`select.${n}_smart_zone_select`:`select.${n}_zone_select`,k=r.states[z]?.attributes?.region_icons;return k&&typeof k=="object"&&!Array.isArray(k)?k:{}})(),L=$.map(z=>{let k=s.has(z),P=S[z],M=P?ce[P]??pe:"",Z=M?`${M} ${g(z)}`:g(z);return`<button class="rpc-room-chip${k?" rpc-room-chip--selected":""}"
-      data-room="${g(z)}" aria-pressed="${k}">${Z}</button>`}).join(""),O="";if(C){let z=a;O=`
+    `}return`
+    ${r?'<div class="rpc-settings-divider rpc-settings-divider--compact"></div>':'<div class="rpc-settings-divider"></div>'}
+    ${r?'<div class="rpc-zone-header rpc-controls-label">CONTROLS</div>':""}
+    <button class="rpc-settings-row" data-settings-toggle aria-expanded="${n}">
+      <span class="rpc-settings-icon">\u2699</span>
+      <span class="rpc-settings-label">Settings</span>
+      <span class="rpc-settings-arrow">${n?"\u25B2":"\u25BC"}</span>
+    </button>
+    ${c}
+  `}function me(e){let{hass:a,config:t,caps:n,robotName:r,selectedRooms:s,passes:o,isSending:l,sendError:i,settingsPanelOpen:c}=e;if(!n.hasZones||t.show_rooms===!1)return"";let p=r,d=a.states[`select.${p}_smart_zone_select`],u=a.states[`select.${p}_zone_select`],y=d??u;if(!y)return"";let f=y.attributes.options??[];if(f.length===0)return"";let m=a.states[`button.${p}_repeat_mission`],k=!!m&&m.state!=="unavailable",T=a.states[`select.${p}_cleaning_passes`],v=n.isMop?"\u25B6 Mop selected rooms":"\u25B6 Clean selected rooms",h=s.size,b='<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>',w=(()=>{let g=n.hasSmartZones?`select.${r}_smart_zone_select`:`select.${r}_zone_select`,R=a.states[g]?.attributes?.region_icons;return R&&typeof R=="object"&&!Array.isArray(R)?R:{}})(),_=f.map(g=>{let R=s.has(g),D=w[g],I=D?pe[D]??de:"",B=I?`${I} ${x(g)}`:x(g);return`<button class="rpc-room-chip${R?" rpc-room-chip--selected":""}"
+      data-room="${x(g)}" aria-pressed="${R}">${B}</button>`}).join(""),C="";if(T){let g=o;C=`
       <div class="rpc-passes-row">
         <span class="rpc-passes-label">Passes:</span>
-        ${["Auto","\xD71","\xD72"].map(k=>`<button class="rpc-pass-chip${z===k?" rpc-pass-chip--selected":""}"
-            data-pass="${k}"
-            data-pass-option="${g(Q[k]??k)}">${k}</button>`).join("")}
+        ${["Auto","\xD71","\xD72"].map(R=>`<button class="rpc-pass-chip${g===R?" rpc-pass-chip--selected":""}"
+            data-pass="${R}"
+            data-pass-option="${x(ee[R]??R)}">${R}</button>`).join("")}
       </div>
-    `}let B="";if(y){let z="";if(c){let k=h?.state==="on",P=x?.state==="on",M=m?m.attributes.options??[]:[];z=`
-        <div class="rpc-settings-panel">
-          ${h?`
-            <div class="rpc-setting-item">
-              <span class="rpc-setting-label">Edge clean</span>
-              <button class="rpc-setting-toggle${k?" rpc-setting-on":""}"
-                      data-switch-entity="switch.${p}_edge_clean"
-                      aria-pressed="${k}">
-                ${k?"\u25CF":"\u25CB"}
-              </button>
-            </div>`:""}
-          ${x?`
-            <div class="rpc-setting-item">
-              <span class="rpc-setting-label">Always finish</span>
-              <button class="rpc-setting-toggle${P?" rpc-setting-on":""}"
-                      data-switch-entity="switch.${p}_always_finish"
-                      aria-pressed="${P}">
-                ${P?"\u25CF":"\u25CB"}
-              </button>
-            </div>`:""}
-          ${m?`
-            <div class="rpc-setting-item">
-              <span class="rpc-setting-label">Carpet boost</span>
-              <button class="rpc-setting-cycle"
-                      data-cycle-entity="select.${p}_carpet_boost_mode"
-                      data-cycle-options="${g(JSON.stringify(M))}"
-                      data-cycle-current="${g(m.state)}">
-                ${g(m.state)} \u25BC
-              </button>
-            </div>`:""}
-        </div>
-      `}B=`
-      <div class="rpc-settings-divider"></div>
-      <button class="rpc-settings-row" data-settings-toggle aria-expanded="${c}">
-        <span class="rpc-settings-icon">\u2699</span>
-        <span class="rpc-settings-label">Settings</span>
-        <span class="rpc-settings-arrow">${c?"\u25B2":"\u25BC"}</span>
-      </button>
-      ${z}
-    `}return`
+    `}let E=te(a,t,r,c);return`
     <div class="rpc-zone rpc-zone2">
       <div class="rpc-zone-header">ROOMS</div>
       <div class="rpc-chips-row">
-        ${L}
-        ${w>0?`<span class="rpc-selected-count">${w} selected</span>`:""}
+        ${_}
+        ${h>0?`<span class="rpc-selected-count">${h} selected</span>`:""}
       </div>
-      ${O}
+      ${C}
       <div class="rpc-room-actions">
-        <button class="rpc-btn rpc-btn-primary${w===0||l?" rpc-btn-disabled":""}"
+        <button class="rpc-btn rpc-btn-primary${h===0||l?" rpc-btn-disabled":""}"
                 data-action="clean-selected"
-                ${w===0||l?"disabled":""}
-                aria-label="${b}">
-          ${l?E+" Sending\u2026":b}
+                ${h===0||l?"disabled":""}
+                aria-label="${v}">
+          ${l?b+" Sending\u2026":v}
         </button>
-        ${A?'<button class="rpc-btn-text" data-action="repeat-last">\u21A9 Repeat last</button>':""}
+        ${k?'<button class="rpc-btn-text" data-action="repeat-last">\u21A9 Repeat last</button>':""}
       </div>
-      ${i?`<div class="rpc-send-error">${g(i)}</div>`:""}
-      ${B}
+      ${i?`<div class="rpc-send-error">${x(i)}</div>`:""}
+      ${E}
     </div>
-  `}function he(t,r){return Math.min(100,Math.max(0,Math.round(t/r*100)))}function me(t,r){return r==="battery"?t>20?"var(--rpc-green)":t>10?"var(--rpc-amber)":"var(--rpc-red)":r==="tank"?t>40?"var(--rpc-green)":t>20?"var(--rpc-amber)":"var(--rpc-red)":t>50?"var(--rpc-green)":t>10?"var(--rpc-amber)":"var(--rpc-red)"}function Ee(t,r){let e=r/90;if(!e)return"";let o=t/e;return o>1.2?"\u2191":o<.8?"\u2193":"\u2192"}function Re(t){let r=Math.floor((Date.now()-new Date(t).getTime())/864e5);return r===0?"today":r===1?"yesterday":`${r} days ago`}function ge(t){let r=parseInt(t,10);return!isNaN(r)&&r>=0?`~${r} use${r!==1?"s":""} remaining`:t==="Empty"?"Bag full \u2014 replace soon":t==="Full"?"Bag has capacity":g(t)}function fe(t,r,e,o,n){if(r.show_health===!1)return"";let s=o,a=[];t.states[`sensor.${s}_filter_remaining_hours`]&&a.push({key:"filter",label:"Filter",sensorId:`sensor.${s}_filter_remaining_hours`,thresholdAttr:"threshold_hours",type:"consumable",wearSensorId:e.hasWearRate?`sensor.${s}_filter_wear_rate`:void 0,resetService:"reset_filter",lastReplacedId:`sensor.${s}_filter_last_replaced`}),e.hasBrush&&t.states[`sensor.${s}_brush_remaining_hours`]&&a.push({key:"brush",label:"Brush",sensorId:`sensor.${s}_brush_remaining_hours`,thresholdAttr:"threshold_hours",type:"consumable",wearSensorId:e.hasWearRate?`sensor.${s}_brush_wear_rate`:void 0,resetService:"reset_brush",lastReplacedId:`sensor.${s}_brush_last_replaced`}),e.hasPad&&t.states[`sensor.${s}_mop_pad_remaining_hours`]&&a.push({key:"pad",label:"Pad",sensorId:`sensor.${s}_mop_pad_remaining_hours`,thresholdAttr:"threshold_hours",type:"consumable",wearSensorId:e.hasWearRate?`sensor.${s}_pad_wear_rate`:void 0,resetService:"reset_pad",lastReplacedId:`sensor.${s}_pad_last_replaced`}),e.hasWater&&t.states[`sensor.${s}_mop_tank_level`]&&a.push({key:"tank",label:"Tank",sensorId:`sensor.${s}_mop_tank_level`,thresholdAttr:null,type:"tank"});let l=t.states[`sensor.${s}_battery_level`]?`sensor.${s}_battery_level`:t.states[`sensor.${s}_battery`]?`sensor.${s}_battery`:null,i=l?void 0:t.states[`vacuum.${s}`]?.attributes?.battery_level;if((l||i!==void 0)&&a.push({key:"battery",label:"Battery",sensorId:l??"",thresholdAttr:null,type:"battery",rawPct:i}),e.hasCleanBase&&t.states[`sensor.${s}_clean_base_status`]&&a.push({key:"cleanbase",label:"Clean Base",sensorId:`sensor.${s}_clean_base_status`,thresholdAttr:null,type:"cleanbase"}),a.length===0)return"";let c=a.map(d=>ze(d,t,s,n)).join(""),p="";if(e.isMop){let d=t.states[`sensor.${s}_mop_pad`],u=t.states[`sensor.${s}_mop_behavior`],f=[];d&&d.state!=="unknown"&&d.state!=="unavailable"&&f.push(g(d.state)),u&&u.state!=="unknown"&&u.state!=="unavailable"&&f.push(`${g(u.state)} intensity`),f.length&&(p=`
+  `}function W(e,a){return e.states[a]?.state??"unavailable"}function he(e,a,t){return a==="m2"||a==="auto"&&t?`${Math.round(e*.0929)} m\xB2`:`${e} ft\xB2`}function He(e,a){if(!e)return null;for(let t=e.length-1;t>=0;t--){let n=e[t];if(n.missions&&n.missions.length>0)for(let r=n.missions.length-1;r>=0;r--){let s=n.missions[r];if(s.result==="completed")return V(s.started_at,a)}else if(n.completed>0)return V(n.date+"T12:00:00Z",a)}return null}function De(e){let a=["th","st","nd","rd"],t=e%100;return e+(a[(t-20)%10]??a[t]??a[0])}function ge(e){let{hass:a,config:t,caps:n,robotName:r,loadingAction:s,todayMissionCount:o,settingsPanelOpen:l}=e,i=t.entity,c=W(a,i),p=a.states[i]?.attributes??{},d=a.config?.unit_system?.length==="m",u=t.area_unit??"auto",y=c==="unavailable",f=s!==null,m=r,k=`sensor.${m}_last_error_code`,T=`sensor.${m}_last_error_zone`,$=`sensor.${m}_mission_recharge_time`,v=`sensor.${m}_missions_last_30d`,h=`sensor.${m}_average_area_30d`,b=`sensor.${m}_area_cleaned_today`,w=p.mission_elapsed_min??null,_=p.mission_area_sqft??null,C=parseFloat(W(a,v)),E=isNaN(C)||C<=0?45:C,g=parseFloat(W(a,h)),R=n.isMop,D=R?"\u{1F9F9}":"\u{1F916}",I=x(p.friendly_name??i),B=a.states[`sensor.${m}_mission_phase`]?.state??"",U=(a.states[`binary_sensor.${m}_mission_active`]?.state??"")==="on",j=n.hasMissionActive,N=a.states[`sensor.${m}_mission_expire_time`]?.state??"",L=N&&N!=="unavailable"&&N!=="unknown"?new Date(N):null,Z=!!L&&!isNaN(L.getTime())&&L>new Date,Y=Z?Math.max(1,Math.round((L.getTime()-Date.now())/6e4)):null,q=!1;if(j)q=c==="docked"&&U;else{let S=W(a,$);q=c==="docked"&&(S!=="unavailable"&&S!=="unknown"&&N!=="unavailable"&&N!=="unknown")&&Z}let P="",M="",Q="";if(B==="evac")P="\u2B06",M="Emptying bin";else if(q)P="\u26A1",M=Y!==null?`Recharging \u2014 resuming in ~${Y} min`:"Recharging \u2014 mission continues";else switch(c){case"cleaning":P="\u25CF",M=R?"Mopping":"Cleaning";break;case"paused":P="\u23F8",M="Paused";break;case"returning":P="\u21A9",M="Returning to dock";break;case"docked":P="\u2713",M="Docked";break;case"idle":P="\u25CB",M="Idle";break;case"error":P="\u26A0",M="Error",Q="rpc-error-state";break;case"unavailable":P="\u2014",M="Unavailable";break}let ne="";if(c==="error"){let S=a.states[k];if(S&&S.state!=="0"&&S.state!==""&&S.state!=="unavailable"){let z=x(S.attributes.description??"Unknown error"),A=x(S.attributes.action??""),H=W(a,T),K=H&&H!=="unknown"&&H!=="unavailable";M=`Error ${x(S.state)} \u2014 ${z}`,ne=`
+        ${A?`<div class="rpc-error-action">${A}</div>`:""}
+        ${K?`<div class="rpc-error-zone">Zone: ${x(H)}</div>`:""}
+      `}else M="Robot error \u2014 check the iRobot app"}let oe="";if((j?U:c==="cleaning"||q)&&n.hasArea){let S=parseFloat(W(a,b));if(!isNaN(S)&&S>0){let z=he(S,u,d),A=o!==null?o+1:null,H=A!==null&&A>1?` \xB7 ${x(De(A))} mission`:"";oe=`<div class="rpc-area-today">${z} already today${H}</div>`}}let ie="";c==="cleaning"&&w!==null&&(ie=`<div class="rpc-progress-track"><div class="rpc-progress-fill" style="width:${Math.min(w/E*100,95)}%"></div></div>`);let le="";if(c==="cleaning"){let S=[];if(w!==null){let z=Math.max(0,Math.round(E-w));S.push(`<div class="rpc-metric"><span class="rpc-metric-val">~${z} min</span><span class="rpc-metric-lbl">Remaining</span></div>`)}if(n.hasArea&&_!==null&&(S.push(`<div class="rpc-metric"><span class="rpc-metric-val">${he(_,u,d)}</span><span class="rpc-metric-lbl">Cleaned</span></div>`),!isNaN(g)&&g>0)){let z=parseFloat(W(a,`sensor.${m}_mission_count_30d`));if(!isNaN(z)&&z>=5){let A=Math.round((_-g)/g*100),H=A>=0?"\u25B2":"\u25BC",K=A>=0?"rpc-delta-up":"rpc-delta-down";S.push(`<div class="rpc-metric"><span class="rpc-metric-val ${K}">${H} ${Math.abs(A)}%</span><span class="rpc-metric-lbl">vs usual</span></div>`)}}S.length&&(le=`<div class="rpc-metrics-row">${S.join("")}</div>`)}let J="";if(c==="docked"&&!q){let S=He(e.missionData,a.language);if(S)J=`<div class="rpc-docked-since">Last cleaned: ${S}</div>`;else{let z=a.states[i]?.last_changed;z&&(J=`<div class="rpc-docked-since">Last mission: ${V(z,a.language)}</div>`)}if(n.hasDemandBlocked){let z=`binary_sensor.${r}_demand_clean_blocked`;a.states[z]?.state==="on"&&(J+='<div class="rpc-demand-blocked">\u{1F9F9} Floor needs cleaning \u2014 waiting for home to be empty</div>')}}let Me='<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>',O=(S,z,A)=>{let H=s===S;return`<button class="rpc-btn${H?" rpc-btn-loading":""}"
+      data-action="${S}"
+      ${y||f?"disabled":""}
+      aria-label="${z}">
+      ${H?Me:A}
+    </button>`},F="";c==="cleaning"||B==="evac"?F=O("pause","Pause","\u23F8 Pause")+O("return_home","Return home","\u21A9 Return home"):c==="paused"?F=O("resume","Resume","\u25B6 Resume")+O("return_home","Return home","\u21A9 Return home"):q?F=O("return_home","Cancel mission","\u2715 Cancel mission"):c!=="returning"&&!y&&(F=O("start","Start","\u25B6 Start")+O("locate","Locate","\u2299 Locate"));let ce=t.show_rooms!==!1;if(!ce){let S=a.states[`button.${r}_repeat_mission`];!!S&&S.state!=="unavailable"&&(F+='<button class="rpc-btn-text" data-action="repeat-last">\u21A9 Repeat last</button>')}let Ae=ce?"":te(a,t,r,l,!0);return`
+    <div class="rpc-zone rpc-zone1${Q?" "+Q:""}">
+      <div class="rpc-robot-identity">
+        <span class="rpc-robot-icon">${D}</span>
+        <span class="rpc-robot-name">${I}</span>
+      </div>
+      <div class="rpc-state-row">
+        <span class="rpc-state-dot rpc-state-${c}">${P}</span>
+        <span class="rpc-state-label">${M}</span>
+      </div>
+      ${oe}
+      ${ne}
+      ${ie}
+      ${le}
+      ${J}
+      ${F?`<div class="rpc-actions">${F}</div>`:""}
+      ${Ae}
+    </div>
+  `}function fe(e,a){return Math.min(100,Math.max(0,Math.round(e/a*100)))}function ve(e,a){return a==="battery"?e>20?"var(--rpc-green)":e>10?"var(--rpc-amber)":"var(--rpc-red)":a==="tank"?e>40?"var(--rpc-green)":e>20?"var(--rpc-amber)":"var(--rpc-red)":e>50?"var(--rpc-green)":e>10?"var(--rpc-amber)":"var(--rpc-red)"}function Pe(e,a){let t=a/90;if(!t)return"";let n=e/t;return n>1.2?"\u2191":n<.8?"\u2193":"\u2192"}function be(e){let a=parseInt(e,10);return!isNaN(a)&&a>=0?`~${a} use${a!==1?"s":""} remaining`:e==="Empty"?"Bag full \u2014 replace soon":e==="Full"?"Bag has capacity":x(e)}function ye(e,a,t,n,r){if(a.show_health===!1)return"";let s=n,o=[];e.states[`sensor.${s}_filter_remaining_hours`]&&o.push({key:"filter",label:"Filter",sensorId:`sensor.${s}_filter_remaining_hours`,thresholdAttr:"threshold_hours",type:"consumable",wearSensorId:t.hasWearRate?`sensor.${s}_filter_wear_rate`:void 0,resetService:"reset_filter",lastReplacedId:`sensor.${s}_filter_last_replaced`}),t.hasBrush&&e.states[`sensor.${s}_brush_remaining_hours`]&&o.push({key:"brush",label:"Brush",sensorId:`sensor.${s}_brush_remaining_hours`,thresholdAttr:"threshold_hours",type:"consumable",wearSensorId:t.hasWearRate?`sensor.${s}_brush_wear_rate`:void 0,resetService:"reset_brush",lastReplacedId:`sensor.${s}_brush_last_replaced`}),t.hasPad&&e.states[`sensor.${s}_mop_pad_remaining_hours`]&&o.push({key:"pad",label:"Pad",sensorId:`sensor.${s}_mop_pad_remaining_hours`,thresholdAttr:"threshold_hours",type:"consumable",wearSensorId:t.hasWearRate?`sensor.${s}_pad_wear_rate`:void 0,resetService:"reset_pad",lastReplacedId:`sensor.${s}_pad_last_replaced`}),t.hasWater&&e.states[`sensor.${s}_mop_tank_level`]&&o.push({key:"tank",label:"Tank",sensorId:`sensor.${s}_mop_tank_level`,thresholdAttr:null,type:"tank"});let l=e.states[`sensor.${s}_battery_level`]?`sensor.${s}_battery_level`:e.states[`sensor.${s}_battery`]?`sensor.${s}_battery`:null,i=l?void 0:e.states[`vacuum.${s}`]?.attributes?.battery_level;if((l||i!==void 0)&&o.push({key:"battery",label:"Battery",sensorId:l??"",thresholdAttr:null,type:"battery",rawPct:i}),t.hasCleanBase&&e.states[`sensor.${s}_clean_base_status`]&&o.push({key:"cleanbase",label:"Clean Base",sensorId:`sensor.${s}_clean_base_status`,thresholdAttr:null,type:"cleanbase"}),o.length===0)return"";let c=o.map(f=>Ne(f,e,s,r)).join(""),p="";if(t.hasBatteryRetention){let f=e.states[`sensor.${s}_battery_capacity_retention`];if(f&&f.state!=="unavailable"&&f.state!=="unknown"){let m=Math.round(parseFloat(f.state));if(!isNaN(m)){let k=m>85?"var(--rpc-green)":m>70?"var(--rpc-amber)":"var(--rpc-red)",T=e.states[`sensor.${s}_charge_cycles`],$=T?parseInt(T.state,10):NaN,v=isNaN($)?"":`${$} charge cycle${$!==1?"s":""}`,h="";if(t.hasBatteryEol){let _=e.states[`sensor.${s}_estimated_battery_eol`];if(_&&_.state!=="unavailable"&&_.state!=="unknown"){let C=parseInt(_.state,10);isNaN(C)||(h=C>0?`<div class="rpc-retention-eol">Battery life: ~${C} days remaining</div>`:'<div class="rpc-retention-eol rpc-retention-eol--warn">Consider replacing \u2014 battery at end of life</div>')}}let b=r.openPopover==="retention",w=b?`
+          <div class="rpc-popover">
+            <div class="rpc-popover-header">
+              <span>Battery Health</span>
+              <button class="rpc-popover-close" data-close="retention" aria-label="Close">\xD7</button>
+            </div>
+            <div class="rpc-popover-divider"></div>
+            <div class="rpc-popover-body">
+              <div>${m}% of original capacity</div>
+              ${v?`<div class="rpc-popover-sub">${v}</div>`:""}
+              ${h}
+            </div>
+          </div>`:"";p=`
+          <div class="rpc-bar-row" data-bar="retention" role="button" aria-expanded="${b}" tabindex="0"
+               aria-label="Bat. Health \u2014 ${m}%">
+            <span class="rpc-bar-label">Bat. Health</span>
+            <span class="rpc-bar-track"><span class="rpc-bar-fill" style="width:${m}%;background:${k}"></span></span>
+            <span class="rpc-bar-pct" style="color:${k}">${m}%</span>
+          </div>
+          ${w}`}}}let d="";if(t.hasCoveragePct){let f=e.states[`sensor.${s}_recent_coverage_pct`];if(f&&f.state!=="unavailable"&&f.state!=="unknown"){let m=e.states[`sensor.${s}_missions_last_30d`],k=m?parseInt(m.state,10):NaN;if(isNaN(k)||k<10)d=`
+          <div class="rpc-bar-row rpc-bar-row--static">
+            <span class="rpc-bar-label">Coverage</span>
+            <span class="rpc-coverage-building">Building history\u2026</span>
+          </div>`;else{let T=Math.min(100,Math.round(parseFloat(f.state)));if(!isNaN(T)){let $=T>=85?"var(--rpc-green)":T>=65?"var(--rpc-amber)":"var(--rpc-red)",v=r.openPopover==="coverage",h=isNaN(k)?"":`Based on ${k} mission${k!==1?"s":""} in the last 30 days.`,b=v?`
+            <div class="rpc-popover">
+              <div class="rpc-popover-header">
+                <span>Floor Coverage</span>
+                <button class="rpc-popover-close" data-close="coverage" aria-label="Close">\xD7</button>
+              </div>
+              <div class="rpc-popover-divider"></div>
+              <div class="rpc-popover-body">
+                <div>${T}% of floor area covered on the last mission.</div>
+                ${h?`<div class="rpc-popover-sub">${h}</div>`:""}
+                <div class="rpc-popover-sub">Low coverage may indicate obstacles, map drift, or a missed room.</div>
+              </div>
+            </div>`:"";d=`
+            <div class="rpc-bar-row" data-bar="coverage" role="button" aria-expanded="${v}" tabindex="0"
+                 aria-label="Coverage ${T}% last mission">
+              <span class="rpc-bar-label">Coverage</span>
+              <span class="rpc-bar-track"><span class="rpc-bar-fill" style="width:${T}%;background:${$}"></span></span>
+              <span class="rpc-bar-pct" style="color:${$}">${T}%</span>
+              <span class="rpc-bar-hours">last mission</span>
+            </div>
+            ${b}`}}}}let u=p||d?`<div class="rpc-health-battery-sep"></div>${p}${d}`:"",y="";if(t.isMop){let f=e.states[`sensor.${s}_mop_pad`],m=t.hasMopBehavior?e.states[`sensor.${s}_mop_behavior`]:null,k=[];f&&f.state!=="unknown"&&f.state!=="unavailable"&&k.push(x(f.state)),m&&m.state!=="unknown"&&m.state!=="unavailable"&&k.push(`${x(m.state)} intensity`),k.length&&(y=`
         <div class="rpc-health-divider"></div>
-        <div class="rpc-mop-config">${f.join(" \xB7 ")}</div>
+        <div class="rpc-mop-config">${k.join(" \xB7 ")}</div>
       `)}return`
     <div class="rpc-zone rpc-zone3">
       <div class="rpc-zone-header">HEALTH</div>
       ${c}
-      ${p}
+      ${u}
+      ${y}
     </div>
-  `}function ze(t,r,e,o){let n=o.openPopover===t.key;if(t.type==="cleanbase"){let u=r.states[t.sensorId];return u?`
-      <div class="rpc-bar-row" data-bar="${t.key}" role="button" aria-expanded="${n}" tabindex="0"
-           aria-label="${t.label}">
-        <span class="rpc-bar-label">${t.label}</span>
-        <span class="rpc-bar-cleanbase-state">${ge(u.state)}</span>
+  `}function Ne(e,a,t,n){let r=n.openPopover===e.key;if(e.type==="cleanbase"){let u=a.states[e.sensorId];return u?`
+      <div class="rpc-bar-row" data-bar="${e.key}" role="button" aria-expanded="${r}" tabindex="0"
+           aria-label="${e.label}">
+        <span class="rpc-bar-label">${e.label}</span>
+        <span class="rpc-bar-cleanbase-state">${be(u.state)}</span>
       </div>
-      ${n?Me(t.label,u.state):""}
-    `:""}let s=0,a="",l="",i=null;if(t.rawPct!==void 0)s=Math.min(100,Math.max(0,t.rawPct)),a=`${Math.round(s)}%`;else{let u=r.states[t.sensorId];if(!u)return"";let f=parseFloat(u.state);if(isNaN(f))return"";if(t.type==="tank"||t.type==="battery")s=Math.min(100,Math.max(0,f)),a=`${Math.round(s)}%`;else{if(i=t.thresholdAttr?u.attributes[t.thresholdAttr]:null,!i)return"";s=he(f,i),a=`${s}%`,l=`${Math.round(f)}h`}}let c=me(s,t.type),p="";if(t.wearSensorId&&i){let u=r.states[t.wearSensorId];u&&u.state!=="unknown"&&u.state!=="unavailable"&&(p=Ee(parseFloat(u.state),i))}let d=t.rawPct!==void 0?{state:String(Math.round(t.rawPct)),attributes:{}}:r.states[t.sensorId];return`
-    <div class="rpc-bar-row" data-bar="${t.key}" role="button" aria-expanded="${n}" tabindex="0"
-         aria-label="${t.label} \u2014 ${a}">
-      <span class="rpc-bar-label">${t.label}</span>
+      ${r?Ie(e.label,u.state):""}
+    `:""}let s=0,o="",l="",i=null;if(e.rawPct!==void 0)s=Math.min(100,Math.max(0,e.rawPct)),o=`${Math.round(s)}%`;else{let u=a.states[e.sensorId];if(!u)return"";let y=parseFloat(u.state);if(isNaN(y))return"";if(e.type==="tank"||e.type==="battery")s=Math.min(100,Math.max(0,y)),o=`${Math.round(s)}%`;else{if(i=e.thresholdAttr?u.attributes[e.thresholdAttr]:null,!i)return"";s=fe(y,i),o=`${s}%`,l=`${Math.round(y)}h`}}let c=ve(s,e.type),p="";if(e.wearSensorId&&i){let u=a.states[e.wearSensorId];u&&u.state!=="unknown"&&u.state!=="unavailable"&&(p=Pe(parseFloat(u.state),i))}let d=e.rawPct!==void 0?{state:String(Math.round(e.rawPct)),attributes:{}}:a.states[e.sensorId];return`
+    <div class="rpc-bar-row" data-bar="${e.key}" role="button" aria-expanded="${r}" tabindex="0"
+         aria-label="${e.label} \u2014 ${o}">
+      <span class="rpc-bar-label">${e.label}</span>
       <div class="rpc-bar-track">
         <div class="rpc-bar-fill" style="width:${s}%;background:${c}"></div>
       </div>
-      <span class="rpc-bar-pct" style="color:${c}">${a}</span>
+      <span class="rpc-bar-pct" style="color:${c}">${o}</span>
       ${l?`<span class="rpc-bar-hours">${l}</span>`:""}
       ${p?`<span class="rpc-bar-arrow" style="color:${c}">${p}</span>`:""}
     </div>
-    ${n&&d?Ae(t,d,i,r,o):""}
-  `}function Ae(t,r,e,o,n){let s=parseFloat(r.state),a=e?he(s,e):Math.min(100,Math.max(0,s)),l=me(a,t.type),i=n.resetting===t.key,c=t.lastReplacedId?o.states[t.lastReplacedId]:null,p="";c&&c.state!=="unavailable"&&c.state!=="unknown"&&(p=`
+    ${r&&d?Le(e,d,i,a,n):""}
+  `}function Le(e,a,t,n,r){let s=parseFloat(a.state),o=t?fe(s,t):Math.min(100,Math.max(0,s)),l=ve(o,e.type),i=r.resetting===e.key,c=e.lastReplacedId?n.states[e.lastReplacedId]:null,p="";c&&c.state!=="unavailable"&&c.state!=="unknown"&&(p=`
       <div class="rpc-popover-row">
         <span>Last replaced</span>
-        <span>${new Date(c.state).toLocaleDateString()} (${Re(c.state)})</span>
-      </div>`);let d="";if(t.wearSensorId&&!n.legendShown){let f=o.states[t.wearSensorId];f&&f.state!=="unknown"&&f.state!=="unavailable"&&(d=`
+        <span>${new Date(c.state).toLocaleDateString(n.language)} (${V(c.state,n.language)})</span>
+      </div>`);let d="";if(e.wearSensorId&&!r.legendShown){let y=n.states[e.wearSensorId];y&&y.state!=="unknown"&&y.state!=="unavailable"&&(d=`
         <div class="rpc-wear-legend" data-wear-legend>
           <span class="rpc-wear-legend-title">Wear trend</span>
           <span>\u2191 wearing faster than normal</span>
@@ -131,77 +177,77 @@ function J(t,r){let e=l=>!!t.states[`sensor.${r}_${l}`],o=l=>!!t.states[`select.
         </div>`)}return`
     <div class="rpc-popover">
       <div class="rpc-popover-header">
-        <span>${g(t.label)}</span>
-        <button class="rpc-popover-close" data-close="${t.key}" aria-label="Close">\xD7</button>
+        <span>${x(e.label)}</span>
+        <button class="rpc-popover-close" data-close="${e.key}" aria-label="Close">\xD7</button>
       </div>
       <div class="rpc-popover-divider"></div>
       ${p}
-      ${e?`<div class="rpc-popover-row"><span>Threshold</span><span>${e} h</span></div>`:""}
-      ${e?`<div class="rpc-popover-row"><span>Remaining</span><span>${Math.round(s)} h (${a}%)</span></div>`:""}
+      ${t?`<div class="rpc-popover-row"><span>Threshold</span><span>${t} h</span></div>`:""}
+      ${t?`<div class="rpc-popover-row"><span>Remaining</span><span>${Math.round(s)} h (${o}%)</span></div>`:""}
       <div class="rpc-popover-bar-track">
-        <div class="rpc-popover-bar-fill" style="width:${a}%;background:${l}"></div>
+        <div class="rpc-popover-bar-fill" style="width:${o}%;background:${l}"></div>
       </div>
       ${d}
-      ${t.resetService?`
+      ${e.resetService?`
         <button class="rpc-btn rpc-btn-secondary${i?" rpc-btn-loading":""}"
-                data-reset="${t.key}" data-service="${t.resetService}"
+                data-reset="${e.key}" data-service="${e.resetService}"
                 ${i?"disabled":""}>
           ${i?'<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>':"Mark as replaced"}
         </button>
-        ${n.resetError===t.key?'<div class="rpc-send-error">Reset failed \u2014 try again</div>':""}
+        ${r.resetError===e.key?'<div class="rpc-send-error">Reset failed \u2014 try again</div>':""}
       `:""}
     </div>
-  `}function Me(t,r){return`
+  `}function Ie(e,a){return`
     <div class="rpc-popover">
       <div class="rpc-popover-header">
-        <span>${g(t)}</span>
+        <span>${x(e)}</span>
         <button class="rpc-popover-close" data-close="cleanbase" aria-label="Close">\xD7</button>
       </div>
       <div class="rpc-popover-divider"></div>
-      <div class="rpc-popover-row"><span>Status</span><span>${ge(r)}</span></div>
+      <div class="rpc-popover-row"><span>Status</span><span>${be(a)}</span></div>
       <div class="rpc-popover-row"><span>Function</span><span>Auto-empties bin after missions</span></div>
     </div>
-  `}function He(t){if(!t||t==="unavailable"||t==="unknown")return"No schedule set";try{let r=new Date(t);return r.toLocaleDateString("en-US",{weekday:"short"})+" "+r.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:!1})}catch{return g(t)}}function De(t){if(!t||t==="unavailable"||t==="unknown")return"";try{let r=new Date(t);if(isNaN(r.getTime()))return"";let e=r.toLocaleDateString("en-US",{weekday:"short"}),o=r.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:!1});return`${e} ~${o}`}catch{return""}}function ye(t,r,e,o,n){if(r.show_schedule===!1)return"";let s=o,a=t.states[`sensor.${s}_next_clean`],l=t.states[`binary_sensor.${s}_schedule_hold_active`],i=t.states[`sensor.${s}_presence_clean_opportunities_7d`],c=t.states[`sensor.${s}_presence_clean_utilisation_7d`],p=t.states[`sensor.${s}_next_likely_clean_window`],d=!!i&&!!c&&i.state!=="unknown"&&i.state!=="unavailable"&&c.state!=="unknown"&&c.state!=="unavailable",u=!!p&&p.state!=="unknown"&&p.state!=="unavailable";if(!a&&!l&&!d&&!u)return"";let f="";if(l){let h=l.state==="on",m=l.attributes.source==="presence_manager",y="rpc-badge-green",v="Schedule active",b="";h&&(m?(y="rpc-badge-blue",v="Away hold",b="\u{1F3C3}"):(y="rpc-badge-amber",v="Hold active",b="\u{1F512}")),f=`
-      <button class="rpc-hold-badge ${y}"
-              data-hold-action="${m?"tooltip":"toggle"}"
-              aria-label="${g(v)}">
-        ${n.holdToggling?'<svg class="rpc-spinner rpc-spinner-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>':`${b} ${v}`}
+  `}function Be(e,a){if(!e||e==="unavailable"||e==="unknown")return"No schedule set";try{let t=new Date(e);return t.toLocaleDateString(a,{weekday:"short"})+" "+t.toLocaleTimeString(a,{hour:"2-digit",minute:"2-digit",hour12:!1})}catch{return x(e)}}function Oe(e,a){if(!e||e==="unavailable"||e==="unknown")return"";try{let t=new Date(e);if(isNaN(t.getTime()))return"";let n=t.toLocaleDateString(a,{weekday:"short"}),r=t.toLocaleTimeString(a,{hour:"2-digit",minute:"2-digit",hour12:!1});return`${n} ~${r}`}catch{return""}}function _e(e,a,t,n,r){if(a.show_schedule===!1)return"";let s=n,o=e.states[`sensor.${s}_next_clean`],l=e.states[`binary_sensor.${s}_schedule_hold_active`],i=e.states[`sensor.${s}_presence_clean_opportunities_7d`],c=e.states[`sensor.${s}_presence_clean_utilisation_7d`],p=e.states[`sensor.${s}_next_likely_clean_window`],d=!!i&&!!c&&i.state!=="unknown"&&i.state!=="unavailable"&&c.state!=="unknown"&&c.state!=="unavailable",u=!!p&&p.state!=="unknown"&&p.state!=="unavailable";if(!o&&!l&&!d&&!u)return"";let y="";if(l){let $=l.state==="on",h=l.attributes.source==="presence_manager",b="rpc-badge-green",w="Schedule active",_="";$&&(h?(b="rpc-badge-blue",w="Away hold",_="\u{1F3C3}"):(b="rpc-badge-amber",w="Hold active",_="\u{1F512}")),y=`
+      <button class="rpc-hold-badge ${b}"
+              data-hold-action="${h?"tooltip":"toggle"}"
+              aria-label="${x(w)}">
+        ${r.holdToggling?'<svg class="rpc-spinner rpc-spinner-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>':`${_} ${w}`}
       </button>
-      ${n.holdTooltipVisible?`
+      ${r.holdTooltipVisible?`
         <div class="rpc-hold-tooltip" role="status">
           Schedule managed by presence automation \u2014 controlled automatically
         </div>`:""}
-    `}let $="";if(u){let h=De(p.state);h&&($=`
+    `}let f="";if(u){let $=Oe(p.state,e.language);$&&(f=`
         <div class="rpc-next-clean rpc-next-clean--likely">
           <span class="rpc-schedule-label">Next likely window</span>
-          <span class="rpc-schedule-time rpc-schedule-time--approx">${h}</span>
+          <span class="rpc-schedule-time rpc-schedule-time--approx">${$}</span>
         </div>
-      `)}let T="",A=r.presence_entities??[];if(A.length>0){let h=A.map(x=>{let m=t.states[x];if(!m)return"";let y=m.state==="home",v=m.attributes.friendly_name??x,b=g(v.split(" ")[0]);return`<span class="rpc-presence-dot">
-        <span class="rpc-dot ${y?"rpc-dot-amber":"rpc-dot-green"}" aria-hidden="true"></span>
-        ${b}
-        <span class="rpc-presence-label">${y?"home":"away"}</span>
-      </span>`}).join("");h&&(T=`<div class="rpc-presence-row">${h}</div>`)}let C="";if(d){let h=parseInt(i.state,10),x=parseInt(c.state,10);if(!isNaN(h)&&!isNaN(x)){let m=`${h} opportunit${h!==1?"ies":"y"} this week`,y=`${x}% utilised`;C=`
+      `)}let m="",k=a.presence_entities??[];if(k.length>0){let $=k.map(v=>{let h=e.states[v];if(!h)return"";let b=h.state==="home",w=h.attributes.friendly_name??v,_=x(w.split(" ")[0]);return`<span class="rpc-presence-dot">
+        <span class="rpc-dot ${b?"rpc-dot-amber":"rpc-dot-green"}" aria-hidden="true"></span>
+        ${_}
+        <span class="rpc-presence-label">${b?"home":"away"}</span>
+      </span>`}).join("");$&&(m=`<div class="rpc-presence-row">${$}</div>`)}let T="";if(d){let $=parseInt(i.state,10),v=parseInt(c.state,10);if(!isNaN($)&&!isNaN(v)){let h=`${$} opportunit${$!==1?"ies":"y"} this week`,b=`${v}% utilised`;T=`
         <div class="rpc-presence-analytics" aria-label="Presence cleaning analytics">
-          ${m} \xB7 ${y}
+          ${h} \xB7 ${b}
         </div>
       `}}return`
     <div class="rpc-zone rpc-zone4">
       <div class="rpc-zone-header">SCHEDULE &amp; PRESENCE</div>
       <div class="rpc-schedule-row">
         <div class="rpc-schedule-times">
-          ${a?`
+          ${o?`
             <div class="rpc-next-clean">
               <span class="rpc-schedule-label">Next scheduled</span>
-              <span class="rpc-schedule-time">${He(a.state)}</span>
+              <span class="rpc-schedule-time">${Be(o.state,e.language)}</span>
             </div>`:""}
-          ${$}
+          ${f}
         </div>
-        ${f}
+        ${y}
       </div>
+      ${m}
       ${T}
-      ${C}
     </div>
-  `}function ve(t,r,e,o){if(r.show_alerts===!1)return"";let n=o,s=[],a=t.states[`sensor.${n}_last_error_code`];if(a&&a.state!=="0"&&a.state!==""&&a.state!=="unavailable"){let p=g(a.attributes.description??"Robot error"),d=g(a.attributes.action??"");s.push({priority:1,text:`Error: ${p}`,subtext:d||void 0})}let l=t.states[`binary_sensor.${n}_maintenance_due`];if(l&&l.state==="on"){let p=t.states[`sensor.${n}_readiness`]?.state??"",d="Maintenance due";p==="bin_full"||p==="Bin Full"?d="Bin full \u2014 empty to continue":p&&p!=="Ready"&&p!=="unknown"&&p!=="unavailable"&&(d="Robot not ready \u2014 check the app"),s.push({priority:2,text:d})}if(e.hasWearRate){let p=t.states[`sensor.${n}_filter_wear_rate`],d=t.states[`sensor.${n}_filter_remaining_hours`];if(p&&p.state!=="unknown"&&p.state!=="unavailable"&&d){let $=d.attributes.threshold_hours,T=parseFloat(p.state)/($/90);T>1.5&&s.push({priority:3,text:`Filter wearing ${T.toFixed(1)}\xD7 faster than normal`,subtext:"Check for dust or debris buildup."})}let u=t.states[`sensor.${n}_brush_wear_rate`],f=t.states[`sensor.${n}_brush_remaining_hours`];if(u&&u.state!=="unknown"&&u.state!=="unavailable"&&f){let $=f.attributes.threshold_hours,T=parseFloat(u.state)/($/90);T>1.5&&s.push({priority:4,text:`Brush wearing ${T.toFixed(1)}\xD7 faster than normal`,subtext:"Check for hair tangles."})}}let i=t.states[`sensor.${n}_nav_quality`];if(i&&i.state!=="unknown"&&i.state!=="unavailable"){let p=parseInt(i.state,10);!isNaN(p)&&p<60&&s.push({priority:5,text:`Navigation quality low (${p}/100)`,subtext:"Check lighting or move obstacles in the cleaning area."})}if(s.length===0)return"";let c=s.sort((p,d)=>p.priority-d.priority)[0];return`
+  `}var xe={completed:"#2d9c4f",stuck:"#d97706",error:"#dc2626",cancelled:"#9ca3af",none:"#e5e7eb"};function Fe(e,a){return e.toLocaleDateString(a,{month:"short",day:"numeric"})}function $e(e){return`${e.getFullYear()}-${String(e.getMonth()+1).padStart(2,"0")}-${String(e.getDate()).padStart(2,"0")}`}function we(e,a,t,n="en-US"){let c=new Map;for(let v of e)c.set(v.date,v);let p=new Date,d=[],u=new Date(p);u.setDate(p.getDate()-(a-1));let y=(u.getDay()+6)%7;u.setDate(u.getDate()-y);let f=Math.ceil((a+y)/7);for(let v=0;v<f;v++)for(let h=0;h<7;h++){let b=new Date(u);if(b.setDate(u.getDate()+v*7+h),b>p)continue;let w=$e(b);d.push({date:b,summary:c.get(w)??null,col:h,row:v})}let m=7*23-3,k=18+f*23-3+4,T=["Mo","Tu","We","Th","Fr","Sa","Su"],$=`<svg viewBox="0 0 ${m} ${k}" xmlns="http://www.w3.org/2000/svg" role="grid" aria-label="Cleaning history heatmap">`;for(let v=0;v<7;v++){let h=v*23+10;$+=`<text x="${h}" y="12" text-anchor="middle" font-size="9" fill="var(--rpc-text-secondary, #9ca3af)" font-family="inherit">${T[v]}</text>`}for(let v of d){let h=v.col*23,b=18+v.row*23,w=v.summary,_=w?.result??"none",C=xe[_]??xe.none,E=w?.total??0,g=Fe(v.date,n);if(E===0?g+=": no missions":E===1?g+=`: 1 mission, ${_}`:g+=`: ${E} missions, ${_}`,$+=`<g role="gridcell" aria-label="${g}" data-date="${$e(v.date)}" data-result="${_}" data-total="${E}" style="cursor:pointer">`,$+=`<rect x="${h-2}" y="${b-2}" width="24" height="24" fill="transparent" rx="3"/>`,$+=`<rect x="${h}" y="${b}" width="20" height="20" fill="${C}" rx="3"/>`,E>1){let R=Math.min(E,3);for(let D=0;D<R;D++){let I=h+20-4-D*5,B=b+20-3;$+=`<circle cx="${I}" cy="${B}" r="1.5" fill="rgba(255,255,255,0.8)"/>`}}$+="</g>"}return $+="</svg>",$}function Se(e){return!e||e.length===0?[]:e.every(t=>t<=4)?e.map(t=>t*25):e}function ke(e){return e<=4?e*25:e}function Ce(e,a){if(!e||e.length===0)return"";let t=7,n=e.length<=t?[...e]:Array.from({length:t},(u,y)=>e[Math.round(y/(t-1)*(e.length-1))]),r=Math.max(...n,1),s=n.length,o=6,l=2,i=s*o+(s-1)*l,c=16,p=a>=60?"var(--rpc-green)":a>=40?"var(--rpc-amber)":"var(--rpc-red)",d="";for(let u=0;u<s;u++){let y=u*(o+l),f=Math.max(2,Math.round(n[u]/r*c)),m=c-f;d+=`<rect x="${y}" y="${m}" width="${o}" height="${f}" fill="${p}" rx="1"/>`}return`<svg width="${i}" height="${c}" viewBox="0 0 ${i} ${c}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:inline-block;vertical-align:middle;flex-shrink:0">${d}</svg>`}function Te(e=4){let o=18+e*23-3+4,l=["Mo","Tu","We","Th","Fr","Sa","Su"],i=`<svg viewBox="0 0 158 ${o}" xmlns="http://www.w3.org/2000/svg">`;i+="<style>@keyframes rpc-pulse{0%,100%{opacity:.4}50%{opacity:.8}}.rpc-skel{animation:rpc-pulse 1.5s ease-in-out infinite}</style>";for(let c=0;c<7;c++){let p=c*23+10;i+=`<text x="${p}" y="12" text-anchor="middle" font-size="9" fill="var(--rpc-text-secondary,#9ca3af)" font-family="inherit">${l[c]}</text>`}for(let c=0;c<e;c++)for(let p=0;p<7;p++){let d=p*23,u=18+c*23;i+=`<rect x="${d}" y="${u}" width="20" height="20" fill="#e5e7eb" rx="3" class="rpc-skel" style="animation-delay:${(c*7+p)*30}ms"/>`}return i+="</svg>",i}function Re(e,a,t,n){if(a.show_alerts===!1)return"";let r=n,s=[],o=e.states[`sensor.${r}_last_error_code`];if(o&&o.state!=="0"&&o.state!==""&&o.state!=="unavailable"){let p=x(o.attributes.description??"Robot error"),d=x(o.attributes.action??"");s.push({priority:1,text:`Error: ${p}`,subtext:d||void 0})}let l=e.states[`binary_sensor.${r}_maintenance_due`];if(l&&l.state==="on"){let p=e.states[`sensor.${r}_readiness`]?.state??"",d="Maintenance due";p==="bin_full"||p==="Bin Full"?d="Bin full \u2014 empty to continue":p&&p!=="Ready"&&p!=="unknown"&&p!=="unavailable"&&(d="Robot not ready \u2014 check the app"),s.push({priority:2,text:d})}if(t.hasWearRate){let p=e.states[`sensor.${r}_filter_wear_rate`],d=e.states[`sensor.${r}_filter_remaining_hours`];if(p&&p.state!=="unknown"&&p.state!=="unavailable"&&d){let f=d.attributes.threshold_hours,m=parseFloat(p.state)/(f/90);m>1.5&&s.push({priority:3,text:`Filter wearing ${m.toFixed(1)}\xD7 faster than normal`,subtext:"Check for dust or debris buildup."})}let u=e.states[`sensor.${r}_brush_wear_rate`],y=e.states[`sensor.${r}_brush_remaining_hours`];if(u&&u.state!=="unknown"&&u.state!=="unavailable"&&y){let f=y.attributes.threshold_hours,m=parseFloat(u.state)/(f/90);m>1.5&&s.push({priority:4,text:`Brush wearing ${m.toFixed(1)}\xD7 faster than normal`,subtext:"Check for hair tangles."})}}let i=e.states[`sensor.${r}_nav_quality`];if(i&&i.state!=="unknown"&&i.state!=="unavailable"){let p=parseInt(i.state,10);!isNaN(p)&&p<60&&s.push({priority:5,text:`Navigation quality low (${p}/100)`,subtext:"Check lighting or move obstacles in the cleaning area."})}if(t.hasConsecutiveSkips){let p=e.states[`binary_sensor.${r}_consecutive_clean_skips`];if(p&&p.state==="on"){let d=p.attributes.skip_count??null,u=d!==null?`Robot blocked from cleaning ${d} consecutive time${d!==1?"s":""}`:"Robot blocked from cleaning repeatedly";s.push({priority:6,text:u,subtext:"Check blocking sensors or robot placement."})}}if(t.hasWifiFloor){let p=e.states[`sensor.${r}_recent_wifi_floor`];if(p&&p.state!=="unknown"&&p.state!=="unavailable"){let d=parseInt(p.state,10),u=isNaN(d)?NaN:ke(d);!isNaN(u)&&u<50&&s.push({priority:7,text:`Wi-Fi signal dropped to ${u}% during last mission`,subtext:"Consider moving the router or adding a Wi-Fi extender."})}}if(s.length===0)return"";let c=s.sort((p,d)=>p.priority-d.priority)[0];return`
     <div class="rpc-zone rpc-zone5">
       <div class="rpc-alert-box" role="alert">
         <span class="rpc-alert-icon" aria-hidden="true">\u26A0\uFE0F</span>
@@ -211,52 +257,53 @@ function J(t,r){let e=l=>!!t.states[`sensor.${r}_${l}`],o=l=>!!t.states[`select.
         </div>
       </div>
     </div>
-  `}var be={completed:"#2d9c4f",stuck:"#d97706",error:"#dc2626",cancelled:"#9ca3af",none:"#e5e7eb"};function Le(t){return t.toLocaleDateString("en-US",{month:"short",day:"numeric"})}function _e(t){return`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`}function xe(t,r,e){let i=new Map;for(let h of t)i.set(h.date,h);let c=new Date,p=[],d=new Date(c);d.setDate(c.getDate()-(r-1));let u=(d.getDay()+6)%7;d.setDate(d.getDate()-u);let f=Math.ceil((r+u)/7);for(let h=0;h<f;h++)for(let x=0;x<7;x++){let m=new Date(d);if(m.setDate(d.getDate()+h*7+x),m>c)continue;let y=_e(m);p.push({date:m,summary:i.get(y)??null,col:x,row:h})}let $=7*23-3,T=18+f*23-3+4,A=["Mo","Tu","We","Th","Fr","Sa","Su"],C=`<svg viewBox="0 0 ${$} ${T}" xmlns="http://www.w3.org/2000/svg" role="grid" aria-label="Cleaning history heatmap">`;for(let h=0;h<7;h++){let x=h*23+10;C+=`<text x="${x}" y="12" text-anchor="middle" font-size="9" fill="var(--rpc-text-secondary, #9ca3af)" font-family="inherit">${A[h]}</text>`}for(let h of p){let x=h.col*23,m=18+h.row*23,y=h.summary,v=y?.result??"none",b=be[v]??be.none,w=y?.total??0,E=Le(h.date);if(w===0?E+=": no missions":w===1?E+=`: 1 mission, ${v}`:E+=`: ${w} missions, ${v}`,C+=`<g role="gridcell" aria-label="${E}" data-date="${_e(h.date)}" data-result="${v}" data-total="${w}" style="cursor:pointer">`,C+=`<rect x="${x-2}" y="${m-2}" width="24" height="24" fill="transparent" rx="3"/>`,C+=`<rect x="${x}" y="${m}" width="20" height="20" fill="${b}" rx="3"/>`,w>1){let S=Math.min(w,3);for(let L=0;L<S;L++){let O=x+20-4-L*5,B=m+20-3;C+=`<circle cx="${O}" cy="${B}" r="1.5" fill="rgba(255,255,255,0.8)"/>`}}C+="</g>"}return C+="</svg>",C}function $e(t=4){let a=18+t*23-3+4,l=["Mo","Tu","We","Th","Fr","Sa","Su"],i=`<svg viewBox="0 0 158 ${a}" xmlns="http://www.w3.org/2000/svg">`;i+="<style>@keyframes rpc-pulse{0%,100%{opacity:.4}50%{opacity:.8}}.rpc-skel{animation:rpc-pulse 1.5s ease-in-out infinite}</style>";for(let c=0;c<7;c++){let p=c*23+10;i+=`<text x="${p}" y="12" text-anchor="middle" font-size="9" fill="var(--rpc-text-secondary,#9ca3af)" font-family="inherit">${l[c]}</text>`}for(let c=0;c<t;c++)for(let p=0;p<7;p++){let d=p*23,u=18+c*23;i+=`<rect x="${d}" y="${u}" width="20" height="20" fill="#e5e7eb" rx="3" class="rpc-skel" style="animation-delay:${(c*7+p)*30}ms"/>`}return i+="</svg>",i}function X(t,r){return r?`${Math.round(t*.0929)} m\xB2`:`${t} ft\xB2`}function we(t,r,e,o,n,s){if(r.show_history===!1)return"";let a=o,l=r.history_days??28,i=r.area_unit??"auto",c=i==="m2"||i==="auto"&&s,p=t.states[`sensor.${a}_clean_streak`],d=t.states[`sensor.${a}_completion_rate_30d`],u=p?parseInt(p.state,10):0,f=d?parseInt(d.state,10):NaN,$="",T=[];u>0&&T.push(`\u{1F525} ${u}-day streak`),isNaN(f)||T.push(`${f}% completion rate`),T.length&&($=`<div class="rpc-history-summary">${T.join(" \xB7 ")}</div>`);let A="";n.loading&&!n.data?A=$e(Math.ceil(l/7)):n.error?A=`<div class="rpc-history-error">${g(n.error)}</div>`:n.data&&(A=xe(n.data,l,i),n.data.length<l&&(A+=`<div class="rpc-history-partial">Showing ${n.data.length} of ${l} days \u2014 full history builds over time</div>`));let C="";if(e.hasProblemZone){let m=t.states[`sensor.${a}_problem_zone`],y=t.states[`sensor.${a}_stuck_count_30d`];if(m&&m.state!=="unknown"&&m.state!=="unavailable"){let v=y?parseInt(y.state,10):0;v>0&&(C=`<div class="rpc-problem-zone">\u26A0 ${g(m.state)} \u2014 stuck ${v}\xD7 in 30 days</div>`)}}let h="";if(n.openDay){let y=new Date(n.openDay+"T00:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"}),v=n.dayMissions,b=n.openDaySummary,w="";if(v===null)w="";else if(b&&b.total===0)w='<div class="rpc-day-empty">No missions this day</div>';else if(v.length>0)w=v.map(S=>{let L=S.result==="completed"?"\u2713":"\u2717",O=S.result==="completed"?"rpc-day-ok":"rpc-day-err",B=new Date(S.started_at).toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:!1}),z=S.area_sqft!==null?X(S.area_sqft,c):"\u2014",k=S.zones?.map(Z=>g(Z)).join(" \xB7 ")??"",P=r.show_dirt_events&&S.dirt_events!=null&&S.dirt_events>0?`${S.dirt_events} dirt event${S.dirt_events!==1?"s":""}`:"",M=[k,P].filter(Boolean).join(" \xB7 ");return`
+  `}function se(e,a){return a?`${Math.round(e*.0929)} m\xB2`:`${e} ft\xB2`}function Ee(e,a,t,n,r,s){if(a.show_history===!1)return"";let o=n,l=a.history_days??28,i=a.area_unit??"auto",c=i==="m2"||i==="auto"&&s,p=e.states[`sensor.${o}_clean_streak`],d=e.states[`sensor.${o}_completion_rate_30d`],u=p?parseInt(p.state,10):0,y=d?parseInt(d.state,10):NaN,f="",m=[];if(u>0&&m.push(`\u{1F525} ${u}-day streak`),isNaN(y)||m.push(`${y}% completion rate`),t.hasCleaningSpeedTrend){let b=e.states[`sensor.${o}_cleaning_speed_trend`]?.state;b==="declining"?m.push('<span class="rpc-trend-declining">\u2193 Speed declining</span>'):b==="improving"&&m.push('<span class="rpc-trend-improving">\u2191 Speed improving</span>')}m.length&&(f=`<div class="rpc-history-summary">${m.map((h,b)=>b===0?h:`<span class="rpc-summary-sep">\xB7</span>${h}`).join("")}</div>`);let k="";r.loading&&!r.data?k=Te(Math.ceil(l/7)):r.error?k=`<div class="rpc-history-error">${x(r.error)}</div>`:r.data&&(k=we(r.data,l,i,e.language),r.data.length<l&&(k+=`<div class="rpc-history-partial">Showing ${r.data.length} of ${l} days \u2014 full history builds over time</div>`));let T="";if(t.hasProblemZone){let h=e.states[`sensor.${o}_problem_zone`],b=e.states[`sensor.${o}_stuck_count_30d`];if(h&&h.state!=="unknown"&&h.state!=="unavailable"){let w=b?parseInt(b.state,10):0;w>0&&(T=`<div class="rpc-problem-zone">\u26A0 ${x(h.state)} \u2014 stuck ${w}\xD7 in 30 days</div>`)}}let $="";if(r.openDay){let b=new Date(r.openDay+"T00:00:00").toLocaleDateString(e.language,{weekday:"long",month:"long",day:"numeric",year:"numeric"}),w=r.dayMissions,_=r.openDaySummary,C="";if(w===null)C="";else if(_&&_.total===0)C='<div class="rpc-day-empty">No missions this day</div>';else if(w.length>0)C=w.map(g=>{let R=g.result==="completed"?"\u2713":"\u2717",D=g.result==="completed"?"rpc-day-ok":"rpc-day-err",I=new Date(g.started_at).toLocaleTimeString(e.language,{hour:"2-digit",minute:"2-digit",hour12:!1}),B=g.area_sqft!==null?se(g.area_sqft,c):"\u2014",ae=g.zones?.map(L=>x(L)).join(" \xB7 ")??"",U=a.show_dirt_events&&g.dirt_events!=null&&g.dirt_events>0?`${g.dirt_events} dirt event${g.dirt_events!==1?"s":""}`:"",j=[ae,U].filter(Boolean).join(" \xB7 "),N="";if(g.wifi_signal&&g.wifi_signal.length>0){let L=Se(g.wifi_signal),Z=Math.min(...L),Y=Ce(L,Z);N=`<div class="rpc-day-wifi" aria-label="Wi-Fi signal: minimum ${Z}% during mission"><span aria-hidden="true">\u{1F4F6}</span>${Y}<span>${Z}% min</span></div>`}return`
           <div class="rpc-day-mission">
-            <span class="rpc-day-icon ${O}">${L}</span>
-            <span class="rpc-day-time">${B}</span>
-            <span class="rpc-day-dur">${S.duration_min} min</span>
-            <span class="rpc-day-area">${z}</span>
-            ${M?`<div class="rpc-day-zones">${M}</div>`:""}
-          </div>`}).join("");else if(b&&b.total>0){let S=b.area_sqft!==null?X(b.area_sqft,c):null;w=`
+            <span class="rpc-day-icon ${D}">${R}</span>
+            <span class="rpc-day-time">${I}</span>
+            <span class="rpc-day-dur">${g.duration_min} min</span>
+            <span class="rpc-day-area">${B}</span>
+            ${j?`<div class="rpc-day-zones">${j}</div>`:""}
+            ${N}
+          </div>`}).join("");else if(_&&_.total>0){let g=_.area_sqft!==null?se(_.area_sqft,c):null;C=`
         <div class="rpc-day-aggregate">
-          <div>${b.total} mission${b.total>1?"s":""} \xB7 ${g(b.result)}
-            ${S?` \xB7 ${S} total`:""}</div>
+          <div>${_.total} mission${_.total>1?"s":""} \xB7 ${x(_.result)}
+            ${g?` \xB7 ${g} total`:""}</div>
           <div class="rpc-day-no-detail">Per-mission detail not available</div>
-        </div>`}let E=b?.total??0;h=`
+        </div>`}let E=_?.total??0;$=`
       <div class="rpc-popover rpc-day-popover">
         <div class="rpc-popover-header">
-          <span>${g(y)}</span>
+          <span>${x(b)}</span>
           <button class="rpc-popover-close" data-close-day="true" aria-label="Close">\xD7</button>
         </div>
         <div class="rpc-popover-divider"></div>
-        ${E>0&&v&&v.length>0?`<div class="rpc-day-count">${E} mission${E>1?"s":""}</div>`:""}
-        ${w}
+        ${E>0&&w&&w.length>0?`<div class="rpc-day-count">${E} mission${E>1?"s":""}</div>`:""}
+        ${C}
       </div>
-    `}let x="";if(r.show_lifetime!==!1){let m=t.states[`sensor.${a}_lifetime_missions`],y=t.states[`sensor.${a}_lifetime_area`],v=t.states[`sensor.${a}_lifetime_time`];if(m&&y&&v){let b=parseInt(m.state,10),w=parseInt(v.state,10),E=parseFloat(y.state),S=isNaN(E)?null:X(E,c),L=n.lifetimeExpanded?`
+    `}let v="";if(a.show_lifetime!==!1){let h=e.states[`sensor.${o}_lifetime_missions`],b=e.states[`sensor.${o}_lifetime_area`],w=e.states[`sensor.${o}_lifetime_time`];if(h&&b&&w){let _=parseInt(h.state,10),C=parseInt(w.state,10),E=parseFloat(b.state),g=isNaN(E)?null:se(E,c),R=r.lifetimeExpanded?`
         <div class="rpc-lifetime-stats">
           <span class="rpc-lifetime-arrow">\u2192</span>
-          ${isNaN(b)?"":`<span>${b.toLocaleString()} missions</span>`}
-          ${S?`<span>${S}</span>`:""}
-          ${isNaN(w)?"":`<span>${w.toLocaleString()} h</span>`}
-        </div>`:"";x=`
+          ${isNaN(_)?"":`<span>${_.toLocaleString()} missions</span>`}
+          ${g?`<span>${g}</span>`:""}
+          ${isNaN(C)?"":`<span>${C.toLocaleString()} h</span>`}
+        </div>`:"";v=`
         <div class="rpc-lifetime-divider"></div>
-        <button class="rpc-lifetime-toggle" data-lifetime-toggle aria-expanded="${n.lifetimeExpanded}">
-          Lifetime ${n.lifetimeExpanded?"\u25B2":"\u25BC"}
+        <button class="rpc-lifetime-toggle" data-lifetime-toggle aria-expanded="${r.lifetimeExpanded}">
+          Lifetime ${r.lifetimeExpanded?"\u25B2":"\u25BC"}
         </button>
-        ${L}
+        ${R}
       `}}return`
     <div class="rpc-zone rpc-zone6">
       <div class="rpc-zone-header">LAST ${l} DAYS</div>
-      ${$}
+      ${f}
       <div class="rpc-heatmap-wrap" data-heatmap>
-        ${A}
+        ${k}
       </div>
-      ${C}
-      ${h}
-      ${x}
+      ${T}
+      ${$}
+      ${v}
     </div>
-  `}var Se=`
+  `}var ze=`
   :host {
     display: block;
     font-family: inherit;
@@ -431,6 +478,31 @@ function J(t,r){let e=l=>!!t.states[`sensor.${r}_${l}`],o=l=>!!t.states[`select.
   .rpc-health-divider { height: 1px; background: var(--divider-color, rgba(0,0,0,.08)); margin: 6px 0; }
   .rpc-mop-config { font-size: 0.82rem; color: var(--secondary-text-color); padding: 4px 2px; }
 
+  /* F3b \u2014 compact divider + CONTROLS label when settings relocate to Status zone */
+  .rpc-settings-divider--compact { margin: 8px 0 4px; }
+  .rpc-controls-label { margin-top: 4px; margin-bottom: 4px; }
+
+  /* v1.3 \u2014 static bar rows (no popover / click interaction) */
+  .rpc-bar-row--static { cursor: default; }
+  .rpc-bar-row--static:hover { background: transparent; }
+
+  /* v1.3 \u2014 coverage "Building history\u2026" skeleton text */
+  .rpc-coverage-building {
+    flex: 1; font-size: 0.8rem; color: var(--secondary-text-color);
+    font-style: italic;
+  }
+
+  /* v1.3 \u2014 battery health group separator */
+  .rpc-health-battery-sep { height: 1px; background: var(--divider-color, rgba(0,0,0,.06)); margin: 4px 0; }
+
+  /* v1.3 \u2014 retention popover body + sub-line */
+  .rpc-popover-body { padding: 4px 0; font-size: 0.85rem; display: flex; flex-direction: column; gap: 6px; }
+  .rpc-popover-sub  { font-size: 0.78rem; color: var(--secondary-text-color); }
+
+  /* v1.3 \u2014 battery EOL lines inside retention popover */
+  .rpc-retention-eol      { font-size: 0.82rem; color: var(--secondary-text-color); }
+  .rpc-retention-eol--warn { color: var(--rpc-red); font-weight: 500; }
+
   /* \u2500\u2500\u2500 Popovers \u2500\u2500\u2500 */
   .rpc-popover {
     background: var(--secondary-background-color, #f9fafb);
@@ -468,6 +540,11 @@ function J(t,r){let e=l=>!!t.states[`sensor.${r}_${l}`],o=l=>!!t.states[`select.
   .rpc-day-zones { width: 100%; padding-left: 20px; color: var(--secondary-text-color); font-size: 0.78rem; }
   .rpc-day-aggregate { font-size: 0.82rem; }
   .rpc-day-no-detail { font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 4px; }
+  /* v1.3 \u2014 WiFi sparkline row in day popover */
+  .rpc-day-wifi {
+    width: 100%; padding-left: 20px; display: flex; align-items: center; gap: 6px;
+    font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px;
+  }
 
   /* \u2500\u2500\u2500 Zone 4 \u2014 Schedule \u2500\u2500\u2500 */
   .rpc-schedule-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
@@ -568,21 +645,28 @@ function J(t,r){let e=l=>!!t.states[`sensor.${r}_${l}`],o=l=>!!t.states[`select.
   }
   .rpc-lifetime-arrow { color: var(--secondary-text-color); }
   .rpc-lifetime-stats span { white-space: nowrap; }
-  .rpc-history-summary { font-size: 0.82rem; color: var(--secondary-text-color); margin-bottom: 8px; }
+  .rpc-history-summary {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0;
+    font-size: 0.82rem; color: var(--secondary-text-color); margin-bottom: 8px;
+  }
+  .rpc-summary-sep { margin: 0 5px; opacity: 0.5; }
+  /* v1.3 \u2014 speed trend colour tokens in history summary bar */
+  .rpc-trend-declining { color: var(--rpc-amber); font-weight: 500; }
+  .rpc-trend-improving { color: var(--rpc-green); font-weight: 500; }
   .rpc-heatmap-wrap { overflow: hidden; }
   .rpc-heatmap-wrap svg { width: 100%; height: auto; display: block; }
   .rpc-history-error   { font-size: 0.82rem; color: var(--secondary-text-color); padding: 8px 0; }
   .rpc-history-partial { font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 6px; }
   .rpc-problem-zone    { font-size: 0.8rem; color: var(--rpc-amber); margin-top: 8px; }
-`,ee=class extends HTMLElement{constructor(){super();this.robotName="";this.activeRobot="";this.selectedRooms=new Set;this.passes="Auto";this.passSettingInFlight=!1;this.isSendingClean=!1;this.sendError=null;this.settingsPanelOpen=!1;this.loadingAction=null;this.locateTimer=null;this.actionResetTimer=null;this.cleanTimeoutTimer=null;this.openPopover=null;this.resetting=null;this.resetError=null;this.legendShown=!1;this.holdTooltipVisible=!1;this.holdToggling=!1;this.holdTooltipTimer=null;this.alertsVisible=!1;this.lastAlertHtml="";this.alertCollapseTimer=null;this.missionData=null;this.historyLoading=!1;this.historyError=null;this.openDay=null;this.dayMissions=null;this.openDaySummary=null;this.lifetimeExpanded=!1;this.apiClient=null;this.prevVacuumState="";this.prevMissionActive="";this.handleOutsideClick=e=>{if(!e.composedPath().includes(this)){let n=!1;this.openPopover!==null&&(this.openPopover=null,n=!0),this.openDay!==null&&(this.openDay=null,this.dayMissions=null,this.openDaySummary=null,n=!0),n&&this.render()}};this.root=this.attachShadow({mode:"open"})}connectedCallback(){document.addEventListener("click",this.handleOutsideClick)}disconnectedCallback(){document.removeEventListener("click",this.handleOutsideClick),[this.locateTimer,this.actionResetTimer,this.cleanTimeoutTimer,this.holdTooltipTimer,this.alertCollapseTimer].forEach(e=>{e!==null&&clearTimeout(e)})}setConfig(e){let o=e.entities&&e.entities.length>0?e.entities:[e.entity];if(!o[0])throw new Error("roomba-plus-card: entity is required");let n=this.activeRobot,s=o.includes(n)?n:o[0],a=s!==n;this.config=e,this.activeRobot=s,this.robotName=s.replace("vacuum.",""),a&&this.resetRobotState(),this.root.innerHTML=`<style>${Se}</style><div class="rpc-card" style="padding:16px;color:var(--secondary-text-color,#9ca3af);font-size:.85rem">Loading\u2026</div>`}set hass(e){let o=this.relevantEntityIds(),n=!this._hass||o.some(c=>e.states[c]?.state!==this._hass.states[c]?.state||e.states[c]?.last_changed!==this._hass.states[c]?.last_changed),s=this._hass;this._hass=e;let a=e.states[`select.${this.robotName}_cleaning_passes`];a&&!this.isSendingClean&&!this.passSettingInFlight&&(this.passes=de[a.state]??"Auto");let l=`binary_sensor.${this.robotName}_mission_active`,i=e.states[l]?.state??"";if(i)this.prevMissionActive==="on"&&i==="off"&&this.loadHistory(),this.prevMissionActive=i;else{let c=e.states[this.config.entity]?.state??"";this.prevVacuumState==="cleaning"&&c==="docked"&&this.loadHistory(),this.prevVacuumState=c}this.apiClient===null?this.config.show_history!==!1&&(this.apiClient=new j(e,this.config,this.activeRobot),this.loadHistory()):this.apiClient.updateHass(e),(!s||n)&&this.render()}relevantEntityIds(){let e=this.robotName;return[this.config.entity,`sensor.${e}_last_error_code`,`sensor.${e}_mission_phase`,`binary_sensor.${e}_mission_active`,`binary_sensor.${e}_maintenance_due`,`binary_sensor.${e}_schedule_hold_active`,`sensor.${e}_next_clean`,`sensor.${e}_filter_remaining_hours`,`sensor.${e}_brush_remaining_hours`,`sensor.${e}_mop_tank_level`,`sensor.${e}_clean_base_status`,`sensor.${e}_nav_quality`,`sensor.${e}_next_likely_clean_window`,`sensor.${e}_presence_clean_opportunities_7d`,`sensor.${e}_presence_clean_utilisation_7d`,`sensor.${e}_cleaning_passes`,`select.${e}_cleaning_passes`,`select.${e}_smart_zone_select`,`select.${e}_zone_select`,`sensor.${e}_clean_streak`,`sensor.${e}_completion_rate_30d`,`sensor.${e}_lifetime_missions`,`sensor.${e}_lifetime_area`,`sensor.${e}_lifetime_time`]}entityList(){return this.config.entities&&this.config.entities.length>0?this.config.entities:[this.config.entity]}resetRobotState(){this.apiClient=null,this.missionData=null,this.historyLoading=!1,this.historyError=null,this.selectedRooms=new Set,this.passes="Auto",this.passSettingInFlight=!1,this.openPopover=null,this.legendShown=!1,this.openDay=null,this.dayMissions=null,this.openDaySummary=null,this.settingsPanelOpen=!1,this.lifetimeExpanded=!1,this.prevVacuumState="",this.prevMissionActive="",this.alertsVisible=!1,this.lastAlertHtml="",[this.locateTimer,this.actionResetTimer,this.cleanTimeoutTimer,this.holdTooltipTimer,this.alertCollapseTimer].forEach(e=>{e!==null&&clearTimeout(e)})}switchRobot(e){e!==this.activeRobot&&(this.activeRobot=e,this.robotName=e.replace("vacuum.",""),this.resetRobotState(),this.config.show_history!==!1&&this._hass&&(this.apiClient=new j(this._hass,this.config,e),this.loadHistory()),this.render())}async loadHistory(){if(!(!this.apiClient||this.historyLoading)){this.historyLoading=!0,this.historyError=null,this.render();try{let e=this.config.history_days??28,o=await this.apiClient.fetchSummary(e),n=await this.apiClient.fetchRecords(e);if(n.length>0){let s=new Map;for(let a of n){let l=a.started_at.slice(0,10);s.has(l)||s.set(l,[]),s.get(l).push(a)}for(let a of o){let l=s.get(a.date);l&&(a.missions=l.sort((i,c)=>i.started_at.localeCompare(c.started_at)))}}this.missionData=o}catch(e){let o=e.message;this.historyError=o==="404"?"History requires Roomba+ v1.8 or later":"History temporarily unavailable"}finally{this.historyLoading=!1,this.render()}}}render(){if(!this.config||!this._hass)return;let e=J(this._hass,this.robotName),o=this._hass.config?.unit_system?.length==="m",n=new Date,s=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`,l=(this.missionData?.find(d=>d.date===s)??null)?.total??null,i=ve(this._hass,this.config,e,this.robotName),c=i;i?(this.alertCollapseTimer!==null&&(clearTimeout(this.alertCollapseTimer),this.alertCollapseTimer=null),this.alertsVisible=!0,this.lastAlertHtml=i):this.alertsVisible&&(this.alertCollapseTimer===null&&(this.alertCollapseTimer=setTimeout(()=>{this.alertsVisible=!1,this.alertCollapseTimer=null,this.render()},100)),c=this.lastAlertHtml);let p=`
-      <style>${Se}</style>
+`,re=class extends HTMLElement{constructor(){super();this.robotName="";this.activeRobot="";this.selectedRooms=new Set;this.passes="Auto";this.passSettingInFlight=!1;this.isSendingClean=!1;this.sendError=null;this.settingsPanelOpen=!1;this.loadingAction=null;this.locateTimer=null;this.actionResetTimer=null;this.cleanTimeoutTimer=null;this.openPopover=null;this.resetting=null;this.resetError=null;this.legendShown=!1;this.holdTooltipVisible=!1;this.holdToggling=!1;this.holdTooltipTimer=null;this.alertsVisible=!1;this.lastAlertHtml="";this.alertCollapseTimer=null;this.missionData=null;this.firstRecord=null;this.firstSummary=null;this.historyLoading=!1;this.historyError=null;this.openDay=null;this.dayMissions=null;this.openDaySummary=null;this.lifetimeExpanded=!1;this.apiClient=null;this.prevVacuumState="";this.prevMissionActive="";this.handleOutsideClick=t=>{if(!t.composedPath().includes(this)){let r=!1;this.openPopover!==null&&(this.openPopover=null,r=!0),this.openDay!==null&&(this.openDay=null,this.dayMissions=null,this.openDaySummary=null,r=!0),r&&this.render()}};this.root=this.attachShadow({mode:"open"})}connectedCallback(){document.addEventListener("click",this.handleOutsideClick)}disconnectedCallback(){document.removeEventListener("click",this.handleOutsideClick),[this.locateTimer,this.actionResetTimer,this.cleanTimeoutTimer,this.holdTooltipTimer,this.alertCollapseTimer].forEach(t=>{t!==null&&clearTimeout(t)})}setConfig(t){let n=t.entities&&t.entities.length>0?t.entities:[t.entity];if(!n[0])throw new Error("roomba-plus-card: entity is required");let r=this.activeRobot,s=n.includes(r)?r:n[0],o=s!==r;this.config=t,this.activeRobot=s,this.robotName=s.replace("vacuum.",""),o&&this.resetRobotState(),this.root.innerHTML=`<style>${ze}</style><div class="rpc-card" style="padding:16px;color:var(--secondary-text-color,#9ca3af);font-size:.85rem">Loading\u2026</div>`}set hass(t){let n=this.relevantEntityIds(),r=!this._hass||n.some(c=>t.states[c]?.state!==this._hass.states[c]?.state||t.states[c]?.last_changed!==this._hass.states[c]?.last_changed),s=this._hass;this._hass=t;let o=t.states[`select.${this.robotName}_cleaning_passes`];o&&!this.isSendingClean&&!this.passSettingInFlight&&(this.passes=ue[o.state]??"Auto");let l=`binary_sensor.${this.robotName}_mission_active`,i=t.states[l]?.state??"";if(i)this.prevMissionActive==="on"&&i==="off"&&this.loadHistory(),this.prevMissionActive=i;else{let c=t.states[this.config.entity]?.state??"";this.prevVacuumState==="cleaning"&&c==="docked"&&this.loadHistory(),this.prevVacuumState=c}this.apiClient===null?this.config.show_history!==!1&&(this.apiClient=new G(t,this.config,this.activeRobot),this.loadHistory()):this.apiClient.updateHass(t),(!s||r)&&this.render()}relevantEntityIds(){let t=this.robotName;return[this.config.entity,`sensor.${t}_last_error_code`,`sensor.${t}_mission_phase`,`binary_sensor.${t}_mission_active`,`binary_sensor.${t}_maintenance_due`,`binary_sensor.${t}_schedule_hold_active`,`sensor.${t}_next_clean`,`sensor.${t}_filter_remaining_hours`,`sensor.${t}_brush_remaining_hours`,`sensor.${t}_mop_tank_level`,`sensor.${t}_clean_base_status`,`sensor.${t}_nav_quality`,`sensor.${t}_next_likely_clean_window`,`sensor.${t}_presence_clean_opportunities_7d`,`sensor.${t}_presence_clean_utilisation_7d`,`sensor.${t}_cleaning_passes`,`select.${t}_cleaning_passes`,`select.${t}_smart_zone_select`,`select.${t}_zone_select`,`sensor.${t}_clean_streak`,`sensor.${t}_completion_rate_30d`,`sensor.${t}_lifetime_missions`,`sensor.${t}_lifetime_area`,`sensor.${t}_lifetime_time`,`sensor.${t}_battery_capacity_retention`,`sensor.${t}_recent_wifi_floor`,`sensor.${t}_recent_coverage_pct`,`sensor.${t}_estimated_battery_eol`,`sensor.${t}_cleaning_speed_trend`,`binary_sensor.${t}_consecutive_clean_skips`,`sensor.${t}_missions_last_30d`,...this.config.robot_selector_helper?[this.config.robot_selector_helper]:[]]}entityList(){return this.config.entities&&this.config.entities.length>0?this.config.entities:[this.config.entity]}resetRobotState(){this.apiClient=null,this.missionData=null,this.firstRecord=null,this.firstSummary=null,this.historyLoading=!1,this.historyError=null,this.selectedRooms=new Set,this.passes="Auto",this.passSettingInFlight=!1,this.openPopover=null,this.legendShown=!1,this.openDay=null,this.dayMissions=null,this.openDaySummary=null,this.settingsPanelOpen=!1,this.lifetimeExpanded=!1,this.prevVacuumState="",this.prevMissionActive="",this.alertsVisible=!1,this.lastAlertHtml="",[this.locateTimer,this.actionResetTimer,this.cleanTimeoutTimer,this.holdTooltipTimer,this.alertCollapseTimer].forEach(t=>{t!==null&&clearTimeout(t)})}async switchRobot(t){if(t===this.activeRobot)return;this.activeRobot=t,this.robotName=t.replace("vacuum.",""),this.resetRobotState(),this.config.show_history!==!1&&this._hass&&(this.apiClient=new G(this._hass,this.config,t),this.loadHistory()),this.render();let n=this.config.robot_selector_helper;if(n&&this._hass.states[n]){let r=n.split(".")[0],s=r==="input_select"?"select_option":"set_value",o=r==="input_select"?{entity_id:n,option:t}:{entity_id:n,value:t};try{await this._hass.callService(r,s,o)}catch(l){console.warn("roomba-plus-card: robot_selector_helper write failed",l)}}}async loadHistory(){if(!this.apiClient||this.historyLoading)return;let t=this.activeRobot;this.historyLoading=!0,this.historyError=null,this.render();try{let n=this.config.history_days??28,r=await this.apiClient.fetchSummary(n),s=await this.apiClient.fetchRecords(n);if(s.length>0){let o=new Map;for(let l of s){let i=l.started_at.slice(0,10);o.has(i)||o.set(i,[]),o.get(i).push(l)}for(let l of r){let i=o.get(l.date);i&&(l.missions=i.sort((c,p)=>c.started_at.localeCompare(p.started_at)))}}this.missionData=r,this.firstRecord=s.length>0?s[s.length-1]:null,this.firstSummary=r.length>0?r[r.length-1]:null}catch(n){let r=n.message;this.historyError=r==="404"?"History requires Roomba+ v1.8 or later":"History temporarily unavailable"}finally{if(this.activeRobot!==t)return;this.historyLoading=!1,this.render()}}render(){if(!this.config||!this._hass)return;let t=X(this._hass,this.robotName,this.config,this.firstRecord,this.firstSummary),n=this._hass.config?.unit_system?.length==="m",r=new Date,s=`${r.getFullYear()}-${String(r.getMonth()+1).padStart(2,"0")}-${String(r.getDate()).padStart(2,"0")}`,l=(this.missionData?.find(d=>d.date===s)??null)?.total??null,i=Re(this._hass,this.config,t,this.robotName),c=i;i?(this.alertCollapseTimer!==null&&(clearTimeout(this.alertCollapseTimer),this.alertCollapseTimer=null),this.alertsVisible=!0,this.lastAlertHtml=i):this.alertsVisible&&(this.alertCollapseTimer===null&&(this.alertCollapseTimer=setTimeout(()=>{this.alertsVisible=!1,this.alertCollapseTimer=null,this.render()},100)),c=this.lastAlertHtml);let p=`
+      <style>${ze}</style>
       <div class="rpc-card">
         ${this.renderRobotSelectorBar()}
-        ${le({hass:this._hass,config:this.config,caps:e,robotName:this.robotName,loadingAction:this.loadingAction,todayMissionCount:l,missionData:this.missionData})}
-        ${ue({hass:this._hass,config:this.config,caps:e,robotName:this.robotName,selectedRooms:this.selectedRooms,passes:this.passes,isSending:this.isSendingClean,sendError:this.sendError,settingsPanelOpen:this.settingsPanelOpen})}
-        ${fe(this._hass,this.config,e,this.robotName,{openPopover:this.openPopover,resetting:this.resetting,resetError:this.resetError,legendShown:this.legendShown})}
-        ${ye(this._hass,this.config,e,this.robotName,{holdTooltipVisible:this.holdTooltipVisible,holdToggling:this.holdToggling})}
+        ${ge({hass:this._hass,config:this.config,caps:t,robotName:this.robotName,loadingAction:this.loadingAction,todayMissionCount:l,missionData:this.missionData,settingsPanelOpen:this.settingsPanelOpen})}
+        ${me({hass:this._hass,config:this.config,caps:t,robotName:this.robotName,selectedRooms:this.selectedRooms,passes:this.passes,isSending:this.isSendingClean,sendError:this.sendError,settingsPanelOpen:this.settingsPanelOpen})}
+        ${ye(this._hass,this.config,t,this.robotName,{openPopover:this.openPopover,resetting:this.resetting,resetError:this.resetError,legendShown:this.legendShown})}
+        ${_e(this._hass,this.config,t,this.robotName,{holdTooltipVisible:this.holdTooltipVisible,holdToggling:this.holdToggling})}
         ${c}
-        ${we(this._hass,this.config,e,this.robotName,{data:this.missionData,loading:this.historyLoading,error:this.historyError,openDay:this.openDay,dayMissions:this.dayMissions,openDaySummary:this.openDaySummary,lifetimeExpanded:this.lifetimeExpanded},o)}
+        ${Ee(this._hass,this.config,t,this.robotName,{data:this.missionData,loading:this.historyLoading,error:this.historyError,openDay:this.openDay,dayMissions:this.dayMissions,openDaySummary:this.openDaySummary,lifetimeExpanded:this.lifetimeExpanded},n)}
       </div>
-    `;this.root.innerHTML=p,this.attachEventListeners()}renderRobotSelectorBar(){let e=this.entityList();return e.length<2?"":`<div class="rpc-robot-selector"><select class="rpc-robot-select" data-robot-select>${e.map(n=>{let s=this._hass.states[n]?.attributes?.friendly_name??n,a=n===this.activeRobot?" selected":"";return`<option value="${n}"${a}>${s}</option>`}).join("")}</select></div>`}attachEventListeners(){let e=this.root.querySelector(".rpc-card"),o=e.querySelector("[data-robot-select]");o&&o.addEventListener("change",s=>{s.stopPropagation(),this.switchRobot(s.target.value)}),e.querySelectorAll("[data-action]").forEach(s=>{s.addEventListener("click",a=>{a.stopPropagation(),this.handleAction(s.dataset.action)})}),e.querySelectorAll("[data-room]").forEach(s=>{s.addEventListener("click",a=>{a.stopPropagation();let l=s.dataset.room;this.selectedRooms.has(l)?this.selectedRooms.delete(l):this.selectedRooms.add(l),this.render()})}),e.querySelectorAll("[data-pass]").forEach(s=>{s.addEventListener("click",async a=>{a.stopPropagation();let l=s.dataset.pass,i=s.dataset.passOption;this.passes=l,this.render();let c=`select.${this.robotName}_cleaning_passes`;if(this._hass.states[c]){this.passSettingInFlight=!0;try{await this._hass.callService("select","select_option",{entity_id:c,option:i})}catch{}finally{this.passSettingInFlight=!1}}})}),e.querySelectorAll("[data-bar]").forEach(s=>{s.addEventListener("click",a=>{a.stopPropagation();let l=s.dataset.bar;this.openPopover=this.openPopover===l?null:l,this.resetError=null,this.render(),!this.legendShown&&this.root.querySelector("[data-wear-legend]")&&(this.legendShown=!0)})}),e.querySelectorAll("[data-close]").forEach(s=>{s.addEventListener("click",a=>{a.stopPropagation(),this.openPopover=null,this.render()})}),e.querySelectorAll("[data-reset]").forEach(s=>{s.addEventListener("click",async a=>{a.stopPropagation();let l=s.dataset.reset,i=s.dataset.service;this.resetting=l,this.resetError=null,this.render();try{await this._hass.callService("roomba_plus",i,{entity_id:this.config.entity}),await new Promise(c=>setTimeout(c,800)),this.openPopover=null}catch{this.resetError=l}finally{this.resetting=null,this.render()}})}),e.querySelectorAll("[data-hold-action]").forEach(s=>{s.addEventListener("click",async a=>{if(a.stopPropagation(),s.dataset.holdAction==="tooltip")this.holdTooltipVisible=!0,this.render(),this.holdTooltipTimer!==null&&clearTimeout(this.holdTooltipTimer),this.holdTooltipTimer=setTimeout(()=>{this.holdTooltipVisible=!1,this.holdTooltipTimer=null,this.render()},3e3);else{let l=`switch.${this.robotName}_schedule_hold`,i=this._hass.states[l]?.state==="on";this.holdToggling=!0,this.render();try{await this._hass.callService("switch",i?"turn_off":"turn_on",{entity_id:l})}finally{this.holdToggling=!1,this.render()}}})});let n=e.querySelector("[data-heatmap]");n&&n.addEventListener("click",s=>{s.stopPropagation();let a=s.target.closest("[data-date]");if(!a)return;let l=a.getAttribute("data-date");this.openDay===l?(this.openDay=null,this.dayMissions=null,this.openDaySummary=null):(this.openDay=l,this.openDaySummary=this.missionData?.find(i=>i.date===l)??null,this.dayMissions=this.buildDayMissions(l)),this.render()}),e.querySelectorAll("[data-close-day]").forEach(s=>{s.addEventListener("click",a=>{a.stopPropagation(),this.openDay=null,this.dayMissions=null,this.openDaySummary=null,this.render()})}),e.querySelectorAll("[data-settings-toggle]").forEach(s=>{s.addEventListener("click",a=>{a.stopPropagation(),this.settingsPanelOpen=!this.settingsPanelOpen,this.render()})}),e.querySelectorAll("[data-switch-entity]").forEach(s=>{s.addEventListener("click",async a=>{a.stopPropagation();let l=s.dataset.switchEntity,i=this._hass.states[l]?.state==="on";try{await this._hass.callService("switch",i?"turn_off":"turn_on",{entity_id:l})}catch{}})}),e.querySelectorAll("[data-cycle-entity]").forEach(s=>{s.addEventListener("click",async a=>{a.stopPropagation();let l=s.dataset.cycleEntity,i=JSON.parse(s.dataset.cycleOptions??"[]"),c=s.dataset.cycleCurrent??"",p=i.indexOf(c),d=i.length>0?i[(p+1)%i.length]:null;if(d)try{await this._hass.callService("select","select_option",{entity_id:l,option:d})}catch{}})}),e.querySelectorAll("[data-lifetime-toggle]").forEach(s=>{s.addEventListener("click",a=>{a.stopPropagation(),this.lifetimeExpanded=!this.lifetimeExpanded,this.render()})})}buildDayMissions(e){let o=this.missionData?.find(n=>n.date===e);return!o||o.total===0?[]:o.missions&&o.missions.length>0?o.missions:[]}async handleAction(e){let{entity:o}=this.config,n=this.robotName;if(e==="clean-selected"){this.isSendingClean=!0,this.sendError=null,this.render();let c=Array.from(this.selectedRooms);this.cleanTimeoutTimer=setTimeout(()=>{this.isSendingClean=!1,this.sendError="Start command may not have been received \u2014 check the iRobot app",this.cleanTimeoutTimer=null,this.render()},8e3);try{let p=`select.${n}_cleaning_passes`;this.passes!=="Auto"&&this._hass.states[p]&&await this._hass.callService("select","select_option",{entity_id:p,option:Q[this.passes]??this.passes}),await this._hass.callService("roomba_plus","clean_room",{entity_id:o,room_name:c,ordered:!1}),clearTimeout(this.cleanTimeoutTimer),this.cleanTimeoutTimer=null,this.selectedRooms.clear(),this.isSendingClean=!1}catch{this.cleanTimeoutTimer!==null&&(clearTimeout(this.cleanTimeoutTimer),this.cleanTimeoutTimer=null),this.isSendingClean=!1,this.sendError="Start command may not have been received \u2014 check the iRobot app"}this.render();return}if(e==="repeat-last"){try{await this._hass.callService("button","press",{entity_id:`button.${n}_repeat_mission`})}catch{}return}let a={start:["vacuum","start"],pause:["vacuum","pause"],resume:["vacuum","start"],return_home:["vacuum","return_to_base"],locate:["vacuum","locate"]}[e];if(!a)return;let[l,i]=a;if(this.loadingAction=e,this.render(),e==="locate"){this.locateTimer=setTimeout(()=>{this.loadingAction=null,this.locateTimer=null,this.render()},2e3);try{await this._hass.callService(l,i,{entity_id:o})}catch{}return}this.actionResetTimer=setTimeout(()=>{this.loadingAction=null,this.actionResetTimer=null,this.render()},5e3);try{await this._hass.callService(l,i,{entity_id:o})}finally{this.actionResetTimer!==null&&(clearTimeout(this.actionResetTimer),this.actionResetTimer=null),this.loadingAction=null,this.render()}}getCardSize(){if(!this.config||!this._hass)return 10;let e=J(this._hass,this.robotName),o=4;return e.hasZones&&this.config.show_rooms!==!1&&(o+=3),this.config.show_health!==!1&&(o+=2),this.config.show_schedule!==!1&&(o+=2),this.config.show_history!==!1&&(o+=4),o}static getConfigForm(){return{schema:[{name:"entity",required:!0,selector:{entity:{domain:"vacuum"}}},{name:"entities",selector:{entity:{domain:"vacuum",multiple:!0}}},{name:"area_unit",selector:{select:{options:["auto","sqft","m2"],mode:"dropdown"}}},{name:"history_days",selector:{select:{options:[{value:7,label:"7 days"},{value:14,label:"14 days"},{value:28,label:"28 days"}],mode:"dropdown"}}},{name:"presence_entities",selector:{entity:{domain:"person",multiple:!0}}},{name:"show_rooms",selector:{boolean:{}}},{name:"show_health",selector:{boolean:{}}},{name:"show_schedule",selector:{boolean:{}}},{name:"show_alerts",selector:{boolean:{}}},{name:"show_history",selector:{boolean:{}}},{name:"show_lifetime",selector:{boolean:{}}},{name:"show_dirt_events",selector:{boolean:{}}}]}}static getStubConfig(){return{entity:"vacuum.roomba"}}};typeof customElements<"u"&&customElements.define("roomba-plus-card",ee);typeof window<"u"&&(window.customCards??(window.customCards=[]),window.customCards.push({type:"roomba-plus-card",name:"Roomba+ Card",description:"Full-featured card for the roomba_plus integration",preview:!0,documentationURL:"https://github.com/johnnyh1975/ha_roomba_plus_card"}));
+    `;this.root.innerHTML=p,this.attachEventListeners()}renderRobotSelectorBar(){let t=this.entityList();return t.length<2?"":`<div class="rpc-robot-selector"><select class="rpc-robot-select" data-robot-select>${t.map(r=>{let s=this._hass.states[r]?.attributes?.friendly_name??r,o=r===this.activeRobot?" selected":"";return`<option value="${r}"${o}>${s}</option>`}).join("")}</select></div>`}attachEventListeners(){let t=this.root.querySelector(".rpc-card"),n=t.querySelector("[data-robot-select]");n&&n.addEventListener("change",s=>{s.stopPropagation(),this.switchRobot(s.target.value)}),t.querySelectorAll("[data-action]").forEach(s=>{s.addEventListener("click",o=>{o.stopPropagation(),this.handleAction(s.dataset.action)})}),t.querySelectorAll("[data-room]").forEach(s=>{s.addEventListener("click",o=>{o.stopPropagation();let l=s.dataset.room;this.selectedRooms.has(l)?this.selectedRooms.delete(l):this.selectedRooms.add(l),this.render()})}),t.querySelectorAll("[data-pass]").forEach(s=>{s.addEventListener("click",async o=>{o.stopPropagation();let l=s.dataset.pass,i=s.dataset.passOption;this.passes=l,this.render();let c=`select.${this.robotName}_cleaning_passes`;if(this._hass.states[c]){this.passSettingInFlight=!0;try{await this._hass.callService("select","select_option",{entity_id:c,option:i})}catch{}finally{this.passSettingInFlight=!1}}})}),t.querySelectorAll("[data-bar]").forEach(s=>{let o=l=>{l.stopPropagation();let i=s.dataset.bar;this.openPopover=this.openPopover===i?null:i,this.resetError=null,this.render(),!this.legendShown&&this.root.querySelector("[data-wear-legend]")&&(this.legendShown=!0)};s.addEventListener("click",o),s.addEventListener("keydown",l=>{(l.key==="Enter"||l.key===" ")&&(l.preventDefault(),o(l))})}),t.querySelectorAll("[data-close]").forEach(s=>{s.addEventListener("click",o=>{o.stopPropagation(),this.openPopover=null,this.render()})}),t.querySelectorAll("[data-reset]").forEach(s=>{s.addEventListener("click",async o=>{o.stopPropagation();let l=s.dataset.reset,i=s.dataset.service;this.resetting=l,this.resetError=null,this.render();try{await this._hass.callService("roomba_plus",i,{entity_id:this.config.entity}),await new Promise(c=>setTimeout(c,800)),this.openPopover=null}catch{this.resetError=l}finally{this.resetting=null,this.render()}})}),t.querySelectorAll("[data-hold-action]").forEach(s=>{s.addEventListener("click",async o=>{if(o.stopPropagation(),s.dataset.holdAction==="tooltip")this.holdTooltipVisible=!0,this.render(),this.holdTooltipTimer!==null&&clearTimeout(this.holdTooltipTimer),this.holdTooltipTimer=setTimeout(()=>{this.holdTooltipVisible=!1,this.holdTooltipTimer=null,this.render()},3e3);else{let l=`switch.${this.robotName}_schedule_hold`,i=this._hass.states[l]?.state==="on";this.holdToggling=!0,this.render();try{await this._hass.callService("switch",i?"turn_off":"turn_on",{entity_id:l})}finally{this.holdToggling=!1,this.render()}}})});let r=t.querySelector("[data-heatmap]");r&&r.addEventListener("click",s=>{s.stopPropagation();let o=s.target.closest("[data-date]");if(!o)return;let l=o.getAttribute("data-date");this.openDay===l?(this.openDay=null,this.dayMissions=null,this.openDaySummary=null):(this.openDay=l,this.openDaySummary=this.missionData?.find(i=>i.date===l)??null,this.dayMissions=this.buildDayMissions(l)),this.render()}),t.querySelectorAll("[data-close-day]").forEach(s=>{s.addEventListener("click",o=>{o.stopPropagation(),this.openDay=null,this.dayMissions=null,this.openDaySummary=null,this.render()})}),t.querySelectorAll("[data-settings-toggle]").forEach(s=>{s.addEventListener("click",o=>{o.stopPropagation(),this.settingsPanelOpen=!this.settingsPanelOpen,this.render()})}),t.querySelectorAll("[data-switch-entity]").forEach(s=>{s.addEventListener("click",async o=>{o.stopPropagation();let l=s.dataset.switchEntity,i=this._hass.states[l]?.state==="on";try{await this._hass.callService("switch",i?"turn_off":"turn_on",{entity_id:l})}catch{}})}),t.querySelectorAll("[data-cycle-entity]").forEach(s=>{s.addEventListener("click",async o=>{o.stopPropagation();let l=s.dataset.cycleEntity,i=JSON.parse(s.dataset.cycleOptions??"[]"),c=s.dataset.cycleCurrent??"",p=i.indexOf(c),d=i.length>0?i[(p+1)%i.length]:null;if(d)try{await this._hass.callService("select","select_option",{entity_id:l,option:d})}catch{}})}),t.querySelectorAll("[data-lifetime-toggle]").forEach(s=>{s.addEventListener("click",o=>{o.stopPropagation(),this.lifetimeExpanded=!this.lifetimeExpanded,this.render()})})}buildDayMissions(t){let n=this.missionData?.find(r=>r.date===t);return!n||n.total===0?[]:n.missions&&n.missions.length>0?n.missions:[]}async handleAction(t){let{entity:n}=this.config,r=this.robotName;if(t==="clean-selected"){this.isSendingClean=!0,this.sendError=null,this.render();let c=Array.from(this.selectedRooms);this.cleanTimeoutTimer=setTimeout(()=>{this.isSendingClean=!1,this.sendError="Start command may not have been received \u2014 check the iRobot app",this.cleanTimeoutTimer=null,this.render()},8e3);try{let p=`select.${r}_cleaning_passes`;this.passes!=="Auto"&&this._hass.states[p]&&await this._hass.callService("select","select_option",{entity_id:p,option:ee[this.passes]??this.passes}),await this._hass.callService("roomba_plus","clean_room",{entity_id:n,room_name:c,ordered:!1}),clearTimeout(this.cleanTimeoutTimer),this.cleanTimeoutTimer=null,this.selectedRooms.clear(),this.isSendingClean=!1}catch{this.cleanTimeoutTimer!==null&&(clearTimeout(this.cleanTimeoutTimer),this.cleanTimeoutTimer=null),this.isSendingClean=!1,this.sendError="Start command may not have been received \u2014 check the iRobot app"}this.render();return}if(t==="repeat-last"){try{await this._hass.callService("button","press",{entity_id:`button.${r}_repeat_mission`})}catch{}return}let o={start:["vacuum","start"],pause:["vacuum","pause"],resume:["vacuum","start"],return_home:["vacuum","return_to_base"],locate:["vacuum","locate"]}[t];if(!o)return;let[l,i]=o;if(this.loadingAction=t,this.render(),t==="locate"){this.locateTimer=setTimeout(()=>{this.loadingAction=null,this.locateTimer=null,this.render()},2e3);try{await this._hass.callService(l,i,{entity_id:n})}catch{}return}this.actionResetTimer=setTimeout(()=>{this.loadingAction=null,this.actionResetTimer=null,this.render()},5e3);try{await this._hass.callService(l,i,{entity_id:n})}finally{this.actionResetTimer!==null&&(clearTimeout(this.actionResetTimer),this.actionResetTimer=null),this.loadingAction=null,this.render()}}getCardSize(){if(!this.config||!this._hass)return 10;let t=X(this._hass,this.robotName,this.config,this.firstRecord,this.firstSummary),n=4;return t.hasZones&&this.config.show_rooms!==!1&&(n+=3),this.config.show_health!==!1&&(n+=2),this.config.show_schedule!==!1&&(n+=2),this.config.show_history!==!1&&(n+=4),n}static getConfigForm(){return{schema:[{name:"entity",label:"Robot vacuum",required:!0,selector:{entity:{domain:"vacuum"}}},{name:"entities",label:"Multiple robots (overrides single robot above)",selector:{entity:{domain:"vacuum",multiple:!0}}},{name:"area_unit",label:"Area unit",selector:{select:{options:["auto","sqft","m2"],mode:"dropdown"}}},{name:"history_days",label:"History window",selector:{select:{options:[{value:7,label:"7 days"},{value:14,label:"14 days"},{value:28,label:"28 days"}],mode:"dropdown"}}},{name:"presence_entities",label:"Presence sensors (person.* entities)",selector:{entity:{domain:"person",multiple:!0}}},{name:"show_rooms",label:"Show room selector zone",selector:{boolean:{}}},{name:"show_settings",label:"Show settings panel",selector:{boolean:{}}},{name:"show_health",label:"Show health zone",selector:{boolean:{}}},{name:"show_schedule",label:"Show schedule & presence zone",selector:{boolean:{}}},{name:"show_alerts",label:"Show alerts zone",selector:{boolean:{}}},{name:"show_history",label:"Show history zone",selector:{boolean:{}}},{name:"show_lifetime",label:"Show lifetime stats",selector:{boolean:{}}},{name:"show_dirt_events",label:"Show dirt events in day detail",selector:{boolean:{}}},{name:"robot_selector_helper",label:"Robot selector helper (input_text or input_select \u2014 for xiaomi card sync)",selector:{entity:{domain:["input_text","input_select"]}}}]}}static getStubConfig(){return{entity:"vacuum.roomba"}}};typeof customElements<"u"&&customElements.define("roomba-plus-card",re);typeof window<"u"&&(window.customCards??(window.customCards=[]),window.customCards.push({type:"roomba-plus-card",name:"Roomba+ Card",description:"Full-featured card for the roomba_plus integration",preview:!0,documentationURL:"https://github.com/johnnyh1975/ha_roomba_plus_card"}));
