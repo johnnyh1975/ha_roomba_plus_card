@@ -1,7 +1,16 @@
 {
-  "name": "Roomba+ Card",
-  "description": "Full-featured Lovelace card for the roomba_plus integration. Status, room selector, health bars, schedule, alerts, and 28-day history heatmap.",
+  "name": "Roomba+",
+  "content_in_root": false,
   "render_readme": true,
-  "filename": "roomba-plus-card.js",
-  "content_in_root": false
+  "country": [
+    "DE",
+    "AT",
+    "CH",
+    "US",
+    "GB",
+    "CA",
+    "AU"
+  ],
+  "homeassistant": "2024.11.0",
+  "iot_class": "local_push"
 }
