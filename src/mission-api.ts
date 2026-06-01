@@ -9,7 +9,7 @@ export class MissionApiClient {
    * @param entityId  Explicit vacuum entity ID to resolve entry_id for.
    *                  Defaults to config.entity for single-robot backward compat.
    */
-  constructor(private hass: HomeAssistant, config: CardConfig, entityId?: string) {
+  constructor(private hass: HomeAssistant, private config: CardConfig, entityId?: string) {
     this.entityId = entityId ?? config.entity;
   }
 

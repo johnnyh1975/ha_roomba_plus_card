@@ -1,5 +1,4 @@
 import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
-import { normalisedWifiFloor } from '../heatmap.js';
 import { esc } from '../utils.js';
 
 interface Alert {
@@ -83,38 +82,6 @@ export function renderAlertZone(
         text:    `Navigation quality low (${navQuality}/100)`,
         subtext: 'Check lighting or move obstacles in the cleaning area.',
       });
-    }
-  }
-
-  // Priority 6 — consecutive clean skips (F6a, v2.1+)
-  if (caps.hasConsecutiveSkips) {
-    const skipsEntity = hass.states[`binary_sensor.${n}_consecutive_clean_skips`];
-    if (skipsEntity && skipsEntity.state === 'on') {
-      const count = (skipsEntity.attributes.skip_count as number | undefined) ?? null;
-      const text = count !== null
-        ? `Robot blocked from cleaning ${count} consecutive time${count !== 1 ? 's' : ''}`
-        : 'Robot blocked from cleaning repeatedly';
-      alerts.push({
-        priority: 6,
-        text,
-        subtext: 'Check blocking sensors or robot placement.',
-      });
-    }
-  }
-
-  // Priority 7 — WiFi floor alert (F6a, v2.1+)
-  if (caps.hasWifiFloor) {
-    const wifiEntity = hass.states[`sensor.${n}_recent_wifi_floor`];
-    if (wifiEntity && wifiEntity.state !== 'unknown' && wifiEntity.state !== 'unavailable') {
-      const rawVal  = parseInt(wifiEntity.state, 10);
-      const wifiPct = !isNaN(rawVal) ? normalisedWifiFloor(rawVal) : NaN;
-      if (!isNaN(wifiPct) && wifiPct < 50) {
-        alerts.push({
-          priority: 7,
-          text:    `Wi-Fi signal dropped to ${wifiPct}% during last mission`,
-          subtext: 'Consider moving the router or adding a Wi-Fi extender.',
-        });
-      }
     }
   }
 

@@ -3,7 +3,7 @@
  * Spec: roomba_plus_card_spec.md + roomba_plus_card_wave_features.md (Wave A)
  */
 
-import { CardConfig, HomeAssistant, DaySummary, MissionRecord } from './types.js';
+import { CardConfig, HomeAssistant, RobotCapabilities, DaySummary, MissionRecord } from './types.js';
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
 import { renderStatusZone }       from './zones/status-zone.js';
@@ -193,31 +193,6 @@ const STYLES = `
   .rpc-health-divider { height: 1px; background: var(--divider-color, rgba(0,0,0,.08)); margin: 6px 0; }
   .rpc-mop-config { font-size: 0.82rem; color: var(--secondary-text-color); padding: 4px 2px; }
 
-  /* F3b — compact divider + CONTROLS label when settings relocate to Status zone */
-  .rpc-settings-divider--compact { margin: 8px 0 4px; }
-  .rpc-controls-label { margin-top: 4px; margin-bottom: 4px; }
-
-  /* v1.3 — static bar rows (no popover / click interaction) */
-  .rpc-bar-row--static { cursor: default; }
-  .rpc-bar-row--static:hover { background: transparent; }
-
-  /* v1.3 — coverage "Building history…" skeleton text */
-  .rpc-coverage-building {
-    flex: 1; font-size: 0.8rem; color: var(--secondary-text-color);
-    font-style: italic;
-  }
-
-  /* v1.3 — battery health group separator */
-  .rpc-health-battery-sep { height: 1px; background: var(--divider-color, rgba(0,0,0,.06)); margin: 4px 0; }
-
-  /* v1.3 — retention popover body + sub-line */
-  .rpc-popover-body { padding: 4px 0; font-size: 0.85rem; display: flex; flex-direction: column; gap: 6px; }
-  .rpc-popover-sub  { font-size: 0.78rem; color: var(--secondary-text-color); }
-
-  /* v1.3 — battery EOL lines inside retention popover */
-  .rpc-retention-eol      { font-size: 0.82rem; color: var(--secondary-text-color); }
-  .rpc-retention-eol--warn { color: var(--rpc-red); font-weight: 500; }
-
   /* ─── Popovers ─── */
   .rpc-popover {
     background: var(--secondary-background-color, #f9fafb);
@@ -255,11 +230,6 @@ const STYLES = `
   .rpc-day-zones { width: 100%; padding-left: 20px; color: var(--secondary-text-color); font-size: 0.78rem; }
   .rpc-day-aggregate { font-size: 0.82rem; }
   .rpc-day-no-detail { font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 4px; }
-  /* v1.3 — WiFi sparkline row in day popover */
-  .rpc-day-wifi {
-    width: 100%; padding-left: 20px; display: flex; align-items: center; gap: 6px;
-    font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px;
-  }
 
   /* ─── Zone 4 — Schedule ─── */
   .rpc-schedule-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
@@ -360,14 +330,7 @@ const STYLES = `
   }
   .rpc-lifetime-arrow { color: var(--secondary-text-color); }
   .rpc-lifetime-stats span { white-space: nowrap; }
-  .rpc-history-summary {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0;
-    font-size: 0.82rem; color: var(--secondary-text-color); margin-bottom: 8px;
-  }
-  .rpc-summary-sep { margin: 0 5px; opacity: 0.5; }
-  /* v1.3 — speed trend colour tokens in history summary bar */
-  .rpc-trend-declining { color: var(--rpc-amber); font-weight: 500; }
-  .rpc-trend-improving { color: var(--rpc-green); font-weight: 500; }
+  .rpc-history-summary { font-size: 0.82rem; color: var(--secondary-text-color); margin-bottom: 8px; }
   .rpc-heatmap-wrap { overflow: hidden; }
   .rpc-heatmap-wrap svg { width: 100%; height: auto; display: block; }
   .rpc-history-error   { font-size: 0.82rem; color: var(--secondary-text-color); padding: 8px 0; }
@@ -419,10 +382,6 @@ class RoombaPlusCard extends HTMLElement {
 
   // Zone 6 history
   private missionData: DaySummary[] | null = null;
-  /** Tier 2 cap detection: first record from format=records after loadHistory */
-  private firstRecord: import('./types.js').MissionRecord | null = null;
-  /** Tier 2 cap detection: first summary from format=summary after loadHistory */
-  private firstSummary: import('./types.js').DaySummary | null = null;
   private historyLoading = false;
   private historyError: string | null = null;
   private openDay: string | null = null;
@@ -565,16 +524,6 @@ class RoombaPlusCard extends HTMLElement {
       `sensor.${n}_lifetime_missions`,
       `sensor.${n}_lifetime_area`,
       `sensor.${n}_lifetime_time`,
-      // v1.3 — performance & health sensors
-      `sensor.${n}_battery_capacity_retention`,
-      `sensor.${n}_recent_wifi_floor`,
-      `sensor.${n}_recent_coverage_pct`,
-      `sensor.${n}_estimated_battery_eol`,
-      `sensor.${n}_cleaning_speed_trend`,
-      `binary_sensor.${n}_consecutive_clean_skips`,
-      `sensor.${n}_missions_last_30d`,
-      // F3b — robot selector helper (when configured)
-      ...(this.config.robot_selector_helper ? [this.config.robot_selector_helper] : []),
     ];
   }
 
@@ -589,8 +538,6 @@ class RoombaPlusCard extends HTMLElement {
   private resetRobotState(): void {
     this.apiClient         = null;
     this.missionData       = null;
-    this.firstRecord       = null;
-    this.firstSummary      = null;
     this.historyLoading    = false;
     this.historyError      = null;
     this.selectedRooms     = new Set();
@@ -611,8 +558,8 @@ class RoombaPlusCard extends HTMLElement {
      this.holdTooltipTimer, this.alertCollapseTimer].forEach(t => { if (t !== null) clearTimeout(t); });
   }
 
-  /** F3: Switch active robot, reset state, trigger history reload, write helper. */
-  private async switchRobot(entityId: string): Promise<void> {
+  /** F3: Switch active robot, reset state, and trigger history reload. */
+  private switchRobot(entityId: string): void {
     if (entityId === this.activeRobot) return;
     this.activeRobot = entityId;
     this.robotName   = entityId.replace('vacuum.', '');
@@ -622,29 +569,10 @@ class RoombaPlusCard extends HTMLElement {
       this.loadHistory();
     }
     this.render();
-
-    // F3b: write robot_selector_helper so conditional xiaomi cards can follow
-    const helper = this.config.robot_selector_helper;
-    if (helper && this._hass.states[helper]) {
-      const domain  = helper.split('.')[0];
-      const service = domain === 'input_select' ? 'select_option' : 'set_value';
-      const data    = domain === 'input_select'
-        ? { entity_id: helper, option: entityId }
-        : { entity_id: helper, value: entityId };
-      try {
-        await this._hass.callService(domain, service, data);
-      } catch (err) {
-        // Non-fatal — helper write failure must never break robot switching.
-        // Log so developers can diagnose mismatched helper type or permissions.
-        console.warn('roomba-plus-card: robot_selector_helper write failed', err);
-      }
-    }
   }
 
   private async loadHistory() {
     if (!this.apiClient || this.historyLoading) return;  // guard concurrent calls
-    // Capture the robot this load is for — bail in finally if the user switched away
-    const targetRobot = this.activeRobot;
     this.historyLoading = true;
     this.historyError   = null;
     this.render();
@@ -670,20 +598,13 @@ class RoombaPlusCard extends HTMLElement {
         }
       }
 
-      this.missionData  = summary;
-      // Tier 2 cap detection: use the MOST RECENT record/summary — oldest may be
-      // local-only (no wifi_signal, no room_coverage) even when recent ones are cloud.
-      this.firstRecord  = records.length > 0 ? records[records.length - 1] : null;
-      this.firstSummary = summary.length > 0 ? summary[summary.length - 1] : null;
+      this.missionData = summary;
     } catch (e: unknown) {
       const status = (e as Error).message;
       this.historyError = status === '404'
         ? 'History requires Roomba+ v1.8 or later'
         : 'History temporarily unavailable';
     } finally {
-      // If the user switched robots while this fetch was in flight, discard the results
-      // entirely — writing to this.missionData would corrupt the newly active robot's state.
-      if (this.activeRobot !== targetRobot) return;
       this.historyLoading = false;
       this.render();
     }
@@ -692,7 +613,7 @@ class RoombaPlusCard extends HTMLElement {
   private render() {
     if (!this.config || !this._hass) return;
 
-    const caps     = detectCapabilities(this._hass, this.robotName, this.config, this.firstRecord, this.firstSummary);
+    const caps     = detectCapabilities(this._hass, this.robotName);
     const isMetric = this._hass.config?.unit_system?.length === 'm';
 
     // Wave A3 — today's mission count for status line context (local date, not UTC)
@@ -728,7 +649,6 @@ class RoombaPlusCard extends HTMLElement {
           robotName: this.robotName, loadingAction: this.loadingAction,
           todayMissionCount,
           missionData: this.missionData,
-          settingsPanelOpen: this.settingsPanelOpen,
         })}
         ${renderRoomSelectorZone({
           hass: this._hass, config: this.config, caps,
@@ -819,19 +739,16 @@ class RoombaPlusCard extends HTMLElement {
 
     // Health bar rows — toggle popover; mark wear legend seen on first open
     card.querySelectorAll<HTMLElement>('[data-bar]').forEach(row => {
-      const toggle = (e: Event) => {
+      row.addEventListener('click', (e) => {
         e.stopPropagation();
         const key = row.dataset.bar!;
         this.openPopover = this.openPopover === key ? null : key;
         this.resetError  = null;
         this.render();
+        // If this popover contains a wear legend, mark it as seen
         if (!this.legendShown && this.root.querySelector('[data-wear-legend]')) {
           this.legendShown = true;
         }
-      };
-      row.addEventListener('click', toggle);
-      row.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); }
       });
     });
 
@@ -1083,7 +1000,7 @@ class RoombaPlusCard extends HTMLElement {
 
   getCardSize(): number {
     if (!this.config || !this._hass) return 10;
-    const caps = detectCapabilities(this._hass, this.robotName, this.config, this.firstRecord, this.firstSummary);
+    const caps = detectCapabilities(this._hass, this.robotName);
     let size = 4;
     if (caps.hasZones && this.config.show_rooms  !== false) size += 3;
     if (this.config.show_health   !== false) size += 2;
@@ -1101,23 +1018,20 @@ class RoombaPlusCard extends HTMLElement {
       schema: [
         {
           name: 'entity',
-          label: 'Robot vacuum',
           required: true,
           selector: { entity: { domain: 'vacuum' } },
         },
         {
           name: 'entities',
-          label: 'Multiple robots (overrides single robot above)',
           selector: { entity: { domain: 'vacuum', multiple: true } },
         },
         {
           name: 'area_unit',
-          label: 'Area unit',
           selector: { select: { options: ['auto', 'sqft', 'm2'], mode: 'dropdown' } },
         },
         {
           name: 'history_days',
-          label: 'History window',
+          // options must be numbers to match CardConfig type (7 | 14 | 28)
           selector: {
             select: {
               options: [
@@ -1131,22 +1045,15 @@ class RoombaPlusCard extends HTMLElement {
         },
         {
           name: 'presence_entities',
-          label: 'Presence sensors (person.* entities)',
           selector: { entity: { domain: 'person', multiple: true } },
         },
-        { name: 'show_rooms',       label: 'Show room selector zone',         selector: { boolean: {} } },
-        { name: 'show_settings',    label: 'Show settings panel',             selector: { boolean: {} } },
-        { name: 'show_health',      label: 'Show health zone',                selector: { boolean: {} } },
-        { name: 'show_schedule',    label: 'Show schedule & presence zone',   selector: { boolean: {} } },
-        { name: 'show_alerts',      label: 'Show alerts zone',                selector: { boolean: {} } },
-        { name: 'show_history',     label: 'Show history zone',               selector: { boolean: {} } },
-        { name: 'show_lifetime',    label: 'Show lifetime stats',             selector: { boolean: {} } },
-        { name: 'show_dirt_events', label: 'Show dirt events in day detail',  selector: { boolean: {} } },
-        {
-          name: 'robot_selector_helper',
-          label: 'Robot selector helper (input_text or input_select — for xiaomi card sync)',
-          selector: { entity: { domain: ['input_text', 'input_select'] } },
-        },
+        { name: 'show_rooms',       selector: { boolean: {} } },
+        { name: 'show_health',      selector: { boolean: {} } },
+        { name: 'show_schedule',    selector: { boolean: {} } },
+        { name: 'show_alerts',      selector: { boolean: {} } },
+        { name: 'show_history',     selector: { boolean: {} } },
+        { name: 'show_lifetime',    selector: { boolean: {} } },
+        { name: 'show_dirt_events', selector: { boolean: {} } },
       ],
     };
   }

@@ -6,25 +6,25 @@ export interface ScheduleZoneState {
   holdToggling: boolean;
 }
 
-function formatNextClean(stateStr: string, locale: string): string {
+function formatNextClean(stateStr: string): string {
   if (!stateStr || stateStr === 'unavailable' || stateStr === 'unknown') return 'No schedule set';
   try {
     const d = new Date(stateStr);
-    return d.toLocaleDateString(locale, { weekday: 'short' }) + ' '
-         + d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+    return d.toLocaleDateString('en-US', { weekday: 'short' }) + ' '
+         + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
   } catch {
     return esc(stateStr);
   }
 }
 
 /** B2 — format a likely clean window timestamp as "Wed ~11:00" */
-function formatLikelyWindow(stateStr: string, locale: string): string {
+function formatLikelyWindow(stateStr: string): string {
   if (!stateStr || stateStr === 'unavailable' || stateStr === 'unknown') return '';
   try {
     const d = new Date(stateStr);
     if (isNaN(d.getTime())) return '';   // Invalid Date — don't render "Invalid Date ~Invalid Date"
-    const day  = d.toLocaleDateString(locale, { weekday: 'short' });
-    const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+    const day  = d.toLocaleDateString('en-US', { weekday: 'short' });
+    const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
     return `${day} ~${time}`;
   } catch {
     return '';
@@ -92,7 +92,7 @@ export function renderScheduleZone(
   // ── B2: Next likely clean window ──
   let likelyWindowHtml = '';
   if (hasLikelyWindow) {
-    const formatted = formatLikelyWindow(likelyWindowEntity!.state, hass.language);
+    const formatted = formatLikelyWindow(likelyWindowEntity!.state);
     if (formatted) {
       likelyWindowHtml = `
         <div class="rpc-next-clean rpc-next-clean--likely">
@@ -147,7 +147,7 @@ export function renderScheduleZone(
           ${nextCleanEntity ? `
             <div class="rpc-next-clean">
               <span class="rpc-schedule-label">Next scheduled</span>
-              <span class="rpc-schedule-time">${formatNextClean(nextCleanEntity.state, hass.language)}</span>
+              <span class="rpc-schedule-time">${formatNextClean(nextCleanEntity.state)}</span>
             </div>` : ''}
           ${likelyWindowHtml}
         </div>

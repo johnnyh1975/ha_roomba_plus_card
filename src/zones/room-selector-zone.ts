@@ -31,88 +31,6 @@ const OPTION_TO_CHIP: Record<string, string> = {
 
 export { CHIP_TO_OPTION, OPTION_TO_CHIP };
 
-/**
- * F3b: Render the settings panel (edge clean, always finish, carpet boost).
- * Exported so status-zone can render it when show_rooms:false + show_settings:true.
- * Returns '' when no settings entities exist or show_settings is explicitly false.
- */
-export function renderSettingsPanel(
-  hass: HomeAssistant,
-  config: CardConfig,
-  robotName: string,
-  settingsPanelOpen: boolean,
-  /** When true, renders inside Status zone: adds "CONTROLS" label, compact divider */
-  inStatusZone = false,
-): string {
-  if (config.show_settings === false) return '';
-
-  const n = robotName;
-  const edgeCleanEntity   = hass.states[`switch.${n}_edge_clean`];
-  const alwaysFinishEntity = hass.states[`switch.${n}_always_finish`];
-  const carpetBoostEntity  = hass.states[`select.${n}_carpet_boost_mode`];
-  if (!edgeCleanEntity && !alwaysFinishEntity && !carpetBoostEntity) return '';
-
-  let panelHtml = '';
-  if (settingsPanelOpen) {
-    const edgeOn   = edgeCleanEntity?.state === 'on';
-    const finishOn = alwaysFinishEntity?.state === 'on';
-    const carpetOptions: string[] = carpetBoostEntity
-      ? (carpetBoostEntity.attributes.options as string[] ?? [])
-      : [];
-
-    panelHtml = `
-      <div class="rpc-settings-panel">
-        ${edgeCleanEntity ? `
-          <div class="rpc-setting-item">
-            <span class="rpc-setting-label">Edge clean</span>
-            <button class="rpc-setting-toggle${edgeOn ? ' rpc-setting-on' : ''}"
-                    data-switch-entity="switch.${n}_edge_clean"
-                    aria-pressed="${edgeOn}">
-              ${edgeOn ? '●' : '○'}
-            </button>
-          </div>` : ''}
-        ${alwaysFinishEntity ? `
-          <div class="rpc-setting-item">
-            <span class="rpc-setting-label">Always finish</span>
-            <button class="rpc-setting-toggle${finishOn ? ' rpc-setting-on' : ''}"
-                    data-switch-entity="switch.${n}_always_finish"
-                    aria-pressed="${finishOn}">
-              ${finishOn ? '●' : '○'}
-            </button>
-          </div>` : ''}
-        ${carpetBoostEntity ? `
-          <div class="rpc-setting-item">
-            <span class="rpc-setting-label">Carpet boost</span>
-            <button class="rpc-setting-cycle"
-                    data-cycle-entity="select.${n}_carpet_boost_mode"
-                    data-cycle-options="${esc(JSON.stringify(carpetOptions))}"
-                    data-cycle-current="${esc(carpetBoostEntity.state)}">
-              ${esc(carpetBoostEntity.state)} ▼
-            </button>
-          </div>` : ''}
-      </div>
-    `;
-  }
-
-  const divider = inStatusZone
-    ? '<div class="rpc-settings-divider rpc-settings-divider--compact"></div>'
-    : '<div class="rpc-settings-divider"></div>';
-  const contextLabel = inStatusZone
-    ? '<div class="rpc-zone-header rpc-controls-label">CONTROLS</div>'
-    : '';
-
-  return `
-    ${divider}
-    ${contextLabel}
-    <button class="rpc-settings-row" data-settings-toggle aria-expanded="${settingsPanelOpen}">
-      <span class="rpc-settings-icon">⚙</span>
-      <span class="rpc-settings-label">Settings</span>
-      <span class="rpc-settings-arrow">${settingsPanelOpen ? '▲' : '▼'}</span>
-    </button>
-    ${panelHtml}
-  `;
-}
-
 export function renderRoomSelectorZone(props: RoomSelectorProps): string {
   const { hass, config, caps, robotName, selectedRooms, passes,
           isSending, sendError, settingsPanelOpen } = props;
@@ -132,6 +50,12 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
   const repeatEntity = hass.states[`button.${n}_repeat_mission`];
   const canRepeat    = !!repeatEntity && repeatEntity.state !== 'unavailable';
   const passesEntity = hass.states[`select.${n}_cleaning_passes`];
+
+  // B3 — settings panel entities
+  const edgeCleanEntity   = hass.states[`switch.${n}_edge_clean`];
+  const alwaysFinishEntity= hass.states[`switch.${n}_always_finish`];
+  const carpetBoostEntity = hass.states[`select.${n}_carpet_boost_mode`];
+  const hasSettings       = !!(edgeCleanEntity || alwaysFinishEntity || carpetBoostEntity);
 
   const isMop      = caps.isMop;
   const cleanLabel = isMop ? '▶ Mop selected rooms' : '▶ Clean selected rooms';
@@ -173,10 +97,61 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
     `;
   }
 
-  // ── B3: Settings panel — delegate to shared helper ──
-  // Repeat-last moves to Status zone when show_rooms:false, so only render it here
-  // when the rooms zone is visible.
-  const settingsHtml = renderSettingsPanel(hass, config, robotName, settingsPanelOpen);
+  // ── B3: Settings panel ──
+  let settingsHtml = '';
+  if (hasSettings) {
+    let panelHtml = '';
+    if (settingsPanelOpen) {
+      const edgeOn   = edgeCleanEntity?.state === 'on';
+      const finishOn = alwaysFinishEntity?.state === 'on';
+      const carpetOptions: string[] = carpetBoostEntity
+        ? (carpetBoostEntity.attributes.options as string[] ?? [])
+        : [];
+
+      panelHtml = `
+        <div class="rpc-settings-panel">
+          ${edgeCleanEntity ? `
+            <div class="rpc-setting-item">
+              <span class="rpc-setting-label">Edge clean</span>
+              <button class="rpc-setting-toggle${edgeOn ? ' rpc-setting-on' : ''}"
+                      data-switch-entity="switch.${n}_edge_clean"
+                      aria-pressed="${edgeOn}">
+                ${edgeOn ? '●' : '○'}
+              </button>
+            </div>` : ''}
+          ${alwaysFinishEntity ? `
+            <div class="rpc-setting-item">
+              <span class="rpc-setting-label">Always finish</span>
+              <button class="rpc-setting-toggle${finishOn ? ' rpc-setting-on' : ''}"
+                      data-switch-entity="switch.${n}_always_finish"
+                      aria-pressed="${finishOn}">
+                ${finishOn ? '●' : '○'}
+              </button>
+            </div>` : ''}
+          ${carpetBoostEntity ? `
+            <div class="rpc-setting-item">
+              <span class="rpc-setting-label">Carpet boost</span>
+              <button class="rpc-setting-cycle"
+                      data-cycle-entity="select.${n}_carpet_boost_mode"
+                      data-cycle-options="${esc(JSON.stringify(carpetOptions))}"
+                      data-cycle-current="${esc(carpetBoostEntity.state)}">
+                ${esc(carpetBoostEntity.state)} ▼
+              </button>
+            </div>` : ''}
+        </div>
+      `;
+    }
+
+    settingsHtml = `
+      <div class="rpc-settings-divider"></div>
+      <button class="rpc-settings-row" data-settings-toggle aria-expanded="${settingsPanelOpen}">
+        <span class="rpc-settings-icon">⚙</span>
+        <span class="rpc-settings-label">Settings</span>
+        <span class="rpc-settings-arrow">${settingsPanelOpen ? '▲' : '▼'}</span>
+      </button>
+      ${panelHtml}
+    `;
+  }
 
   return `
     <div class="rpc-zone rpc-zone2">

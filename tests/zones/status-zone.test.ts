@@ -17,7 +17,6 @@ function props(
     loadingAction: null,
     todayMissionCount: null,
     missionData: null,
-    settingsPanelOpen: false,
     ...extra,
   };
 }
@@ -291,56 +290,5 @@ describe('renderStatusZone() — F1 demand-blocked indicator', () => {
       { [`binary_sensor.${n}_demand_clean_blocked`]: st('on') },
     ));
     expect(html).not.toContain('rpc-demand-blocked');
-  });
-});
-
-// ── F3b: settings relocation + repeat-last when show_rooms:false ──────────────
-describe('renderStatusZone() — F3b settings relocation', () => {
-  it('renders settings panel with CONTROLS label in Status zone when show_rooms:false + show_settings:true', () => {
-    const html = renderStatusZone(props('docked', {
-      config: { ...baseConfig, show_rooms: false },
-      hass: makeHass({
-        'vacuum.roomba': st('docked', { friendly_name: 'Roomba' }),
-        'switch.roomba_edge_clean': st('on'),
-      }),
-      settingsPanelOpen: false,
-    }));
-    expect(html).toContain('data-settings-toggle');
-    expect(html).toContain('CONTROLS');
-  });
-
-  it('does not render settings in Status zone when show_rooms:true (default)', () => {
-    const html = renderStatusZone(props('docked', {
-      hass: makeHass({
-        'vacuum.roomba': st('docked', { friendly_name: 'Roomba' }),
-        'switch.roomba_edge_clean': st('on'),
-      }),
-    }));
-    expect(html).not.toContain('data-settings-toggle');
-  });
-
-  it('does not render settings in Status zone when show_settings:false', () => {
-    const html = renderStatusZone(props('docked', {
-      config: { ...baseConfig, show_rooms: false, show_settings: false },
-      hass: makeHass({
-        'vacuum.roomba': st('docked', { friendly_name: 'Roomba' }),
-        'switch.roomba_edge_clean': st('on'),
-      }),
-    }));
-    expect(html).not.toContain('data-settings-toggle');
-  });
-
-  it('renders repeat-last inside action buttons row in Status zone when show_rooms:false', () => {
-    const html = renderStatusZone(props('docked', {
-      config: { ...baseConfig, show_rooms: false },
-      hass: makeHass({
-        'vacuum.roomba': st('docked', { friendly_name: 'Roomba' }),
-        'button.roomba_repeat_mission': st('idle'),
-      }),
-    }));
-    expect(html).toContain('repeat-last');
-    // Verify repeat-last is inside the rpc-actions div, not floating outside it
-    const actionsBlock = html.match(/<div class="rpc-actions">([\s\S]*?)<\/div>/)?.[1] ?? '';
-    expect(actionsBlock).toContain('repeat-last');
   });
 });
