@@ -8,8 +8,8 @@ const COLOURS: Record<string, string> = {
   none:      '#e5e7eb',
 };
 
-function formatDate(date: Date): string {
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function formatDate(date: Date, locale: string): string {
+  return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
 }
 
 /** Local-time ISO date (YYYY-MM-DD). Never use toISOString() — that's UTC and breaks for UTC+ users. */
@@ -17,7 +17,7 @@ function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function renderHeatmap(summaries: DaySummary[], days: number, areaUnit: 'auto' | 'sqft' | 'm2'): string {
+export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 'auto' | 'sqft' | 'm2', locale = 'en-US'): string {
   const cellSize = 20;
   const cellGap = 3;
   const cellTouch = 24;
@@ -77,7 +77,7 @@ export function renderHeatmap(summaries: DaySummary[], days: number, areaUnit: '
     const colour = COLOURS[result] ?? COLOURS.none;
     const total = summary?.total ?? 0;
 
-    let label = formatDate(cell.date);
+    let label = formatDate(cell.date, locale);
     if (total === 0) label += ': no missions';
     else if (total === 1) label += `: 1 mission, ${result}`;
     else label += `: ${total} missions, ${result}`;
@@ -103,6 +103,70 @@ export function renderHeatmap(summaries: DaySummary[], days: number, areaUnit: '
 
   svg += `</svg>`;
   return svg;
+}
+
+/**
+ * F6b — Render a 7-bar WiFi signal sparkline as inline SVG.
+ * @param readings  Array of wlBars values (0–4 scale from robot, or raw % values).
+ *                  Renders up to 7 bars; if >7 values supplied, samples evenly.
+ * @param minVal    Minimum value across the reading set (pre-computed for colour).
+ * @returns         Inline SVG string, 56×16px, colour-coded by floor signal.
+ */
+/**
+ * Normalise a wlBars reading array to percentage scale (0–100).
+ *
+ * The iRobot cloud API returns wifi signal as wlBars: a 0–4 integer (like phone
+ * signal bars). The integration stores this raw in wifi_signal and in the
+ * recent_wifi_floor sensor (declared as PERCENTAGE but returning 0–4 — integration
+ * bug). We detect the scale by checking whether any value exceeds 4; if not, we
+ * multiply by 25 (0→0%, 1→25%, 2→50%, 3→75%, 4→100%).
+ *
+ * When the integration bug is eventually fixed and the values are already
+ * percentages (any value > 4), we pass them through unchanged.
+ */
+export function normalisedWifiPct(values: number[]): number[] {
+  if (!values || values.length === 0) return [];
+  const needsScale = values.every(v => v <= 4);
+  return needsScale ? values.map(v => v * 25) : values;
+}
+
+/**
+ * Normalise a single wlBars sensor state value to percentage.
+ * Same heuristic: ≤ 4 → multiply by 25; already % → pass through.
+ */
+export function normalisedWifiFloor(raw: number): number {
+  return raw <= 4 ? raw * 25 : raw;
+}
+
+export function renderSparkline(readings: number[], minVal: number): string {
+  if (!readings || readings.length === 0) return '';
+
+  // Sample down to at most 7 bars; never pad with zeros (would look like bad readings)
+  const N = 7;
+  const bars: number[] = readings.length <= N
+    ? [...readings]
+    : Array.from({ length: N }, (_, i) =>
+        readings[Math.round((i / (N - 1)) * (readings.length - 1))]);
+
+  const maxVal = Math.max(...bars, 1);
+  const count  = bars.length;
+  const barW   = 6;
+  const gap    = 2;
+  const W      = count * barW + (count - 1) * gap;
+  const H      = 16;
+
+  // Colour by minimum signal: green ≥ 60, amber 40–59, red < 40
+  const colour = minVal >= 60 ? 'var(--rpc-green)' : minVal >= 40 ? 'var(--rpc-amber)' : 'var(--rpc-red)';
+
+  let rects = '';
+  for (let i = 0; i < count; i++) {
+    const x    = i * (barW + gap);
+    const barH = Math.max(2, Math.round((bars[i] / maxVal) * H));
+    const y    = H - barH;
+    rects += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" fill="${colour}" rx="1"/>`;
+  }
+
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:inline-block;vertical-align:middle;flex-shrink:0">${rects}</svg>`;
 }
 
 export function renderSkeletonHeatmap(numWeeks = 4): string {
