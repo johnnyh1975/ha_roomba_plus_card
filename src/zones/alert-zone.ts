@@ -24,14 +24,19 @@ export function renderAlertZone(
   const alerts: Alert[] = [];
 
   // Priority 1 — error
+  // Guard 'unknown' (no error since boot — attributes are absent, the ?? fallback
+  // would fire and produce "Robot error") and 'unavailable' (MQTT not connected).
   const errorSensor = hass.states[`sensor.${n}_last_error_code`];
   if (errorSensor
       && errorSensor.state !== '0'
       && errorSensor.state !== ''
+      && errorSensor.state !== 'unknown'
       && errorSensor.state !== 'unavailable') {
-    const desc   = esc((errorSensor.attributes.description as string) ?? 'Robot error');
-    const action = esc((errorSensor.attributes.action as string) ?? '');
-    alerts.push({ priority: 1, text: `Error: ${desc}`, subtext: action || undefined });
+    const label  = esc((errorSensor.attributes.label       as string) ?? `Error ${errorSensor.state}`);
+    const desc   = esc((errorSensor.attributes.description as string) ?? '');
+    const action = esc((errorSensor.attributes.action      as string) ?? '');
+    const subtext = [desc, action].filter(Boolean).join(' ') || undefined;
+    alerts.push({ priority: 1, text: `Error: ${label}`, subtext });
   }
 
   // Priority 2 — maintenance due (Wave A A5: readiness-specific text)

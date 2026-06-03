@@ -177,18 +177,22 @@ export function renderHistoryZone(
     const lifetimeArea     = hass.states[`sensor.${n}_lifetime_area`];
     const lifetimeTime     = hass.states[`sensor.${n}_lifetime_time`];
 
-    if (lifetimeMissions && lifetimeArea && lifetimeTime) {
-      const missions = parseInt(lifetimeMissions.state, 10);
-      const hours    = parseInt(lifetimeTime.state, 10);
-      const areaSqft = parseFloat(lifetimeArea.state);
-      const areaStr  = !isNaN(areaSqft) ? formatArea(areaSqft, useMetric) : null;
+    // Guard: require all three sensors to have actual numeric states.
+    // An 'unknown' or 'unavailable' state passes the truthiness check on the
+    // state object but parseInt/parseFloat returns NaN, leaving the expanded
+    // div empty while the toggle button still renders. Parse first, guard second.
+    const missions = lifetimeMissions ? parseInt(lifetimeMissions.state, 10) : NaN;
+    const hours    = lifetimeTime     ? parseInt(lifetimeTime.state, 10)     : NaN;
+    const areaSqft = lifetimeArea     ? parseFloat(lifetimeArea.state)       : NaN;
+    if (!isNaN(missions) && !isNaN(hours) && !isNaN(areaSqft)) {
+      const areaStr  = formatArea(areaSqft, useMetric);
 
       const expandedContent = state.lifetimeExpanded ? `
         <div class="rpc-lifetime-stats">
           <span class="rpc-lifetime-arrow">→</span>
-          ${!isNaN(missions) ? `<span>${missions.toLocaleString()} missions</span>` : ''}
-          ${areaStr ? `<span>${areaStr}</span>` : ''}
-          ${!isNaN(hours) ? `<span>${hours.toLocaleString()} h</span>` : ''}
+          <span>${missions.toLocaleString()} missions</span>
+          <span>${areaStr}</span>
+          <span>${hours.toLocaleString()} h</span>
         </div>` : '';
 
       lifetimeHtml = `

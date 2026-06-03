@@ -71,7 +71,7 @@ describe('renderScheduleZone() — Wave B1 presence analytics', () => {
       [`sensor.${n}_presence_clean_utilisation_7d`]:   st('71'),
     });
     expect(html).toContain('7 opportunities this week');
-    expect(html).toContain('71% utilised');
+    expect(html).toContain('opportunities this week');
   });
 
   it('analytics hidden when opportunities sensor is unknown', () => {

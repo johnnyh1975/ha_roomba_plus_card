@@ -20,8 +20,8 @@ describe('renderAlertZone()', () => {
 
   // ── Priority 1 — error ──────────────────────────
   it('renders alert when error sensor state is non-zero', () => {
-    const html = render({ [`sensor.${n}_last_error_code`]: st('2', { description: 'Brush stuck', action: 'Clear hair' }) });
-    expect(html).toContain('Brush stuck');
+    const html = render({ [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck', description: 'The brush roll is jammed.', action: 'Clear hair' }) });
+    expect(html).toContain('Error: Brush stuck');
     expect(html).toContain('Clear hair');
   });
 
@@ -31,8 +31,8 @@ describe('renderAlertZone()', () => {
   it('no alert when error sensor state is empty string', () =>
     expect(render({ [`sensor.${n}_last_error_code`]: st('') })).toBe(''));
 
-  it('escapes XSS in error description', () => {
-    const html = render({ [`sensor.${n}_last_error_code`]: st('1', { description: '<img onerror=x>' }) });
+  it('escapes XSS in error label', () => {
+    const html = render({ [`sensor.${n}_last_error_code`]: st('1', { label: '<img onerror=x>' }) });
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
   });
@@ -232,5 +232,36 @@ describe('renderAlertZone() — F6a skips alert grammar edge cases', () => {
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasConsecutiveSkips: true }, n);
     expect(html).toContain('1 consecutive time');
     expect(html).not.toContain('1 consecutive times');
+  });
+});
+
+// ── B5: unknown state guard ───────────────────────────────────────────────────
+describe('renderAlertZone() — error sensor unknown state (B5)', () => {
+  it('shows no alert when last_error_code state is "unknown"', () => {
+    const html = render({ [`sensor.${n}_last_error_code`]: st('unknown') });
+    expect(html).toBe('');
+  });
+
+  it('shows no alert when last_error_code state is "unavailable"', () => {
+    const html = render({ [`sensor.${n}_last_error_code`]: st('unavailable') });
+    expect(html).toBe('');
+  });
+
+  it('shows label as alert title when state is a real error code', () => {
+    const html = render({ [`sensor.${n}_last_error_code`]: st('17', { label: 'Path blocked', description: 'An obstacle is blocking the path.', action: 'Clear the path.' }) });
+    expect(html).toContain('Error: Path blocked');
+    expect(html).toContain('An obstacle is blocking the path.');
+    expect(html).toContain('Clear the path.');
+  });
+
+  it('falls back to "Error N" when label attribute absent', () => {
+    const html = render({ [`sensor.${n}_last_error_code`]: st('99', {}) });
+    expect(html).toContain('Error: Error 99');
+    expect(html).not.toContain('Robot error');
+  });
+
+  it('never shows "Robot error" fallback', () => {
+    const html = render({ [`sensor.${n}_last_error_code`]: st('17', {}) });
+    expect(html).not.toContain('Robot error');
   });
 });

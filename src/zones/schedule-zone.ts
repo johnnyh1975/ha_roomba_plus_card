@@ -129,11 +129,16 @@ export function renderScheduleZone(
     const opps = parseInt(opportunitiesEntity!.state, 10);
     const util = parseInt(utilisationEntity!.state, 10);
     if (!isNaN(opps) && !isNaN(util)) {
-      const oppsStr = `${opps} opportunit${opps !== 1 ? 'ies' : 'y'} this week`;
-      const utilStr = `${util}% utilised`;
+      // Show cleans vs opportunities rather than a percentage that can exceed 100%.
+      // "3 cleans · 2 opportunities" is unambiguous; >100% utilisation
+      // (cleaning more often than there were away windows) just shows naturally.
+      const cleans = utilisationEntity!.attributes.cleans_7d as number | undefined;
+      const cleanCount = cleans != null ? cleans : Math.round(opps * util / 100);
+      const oppsStr  = `${opps} opportunit${opps !== 1 ? 'ies' : 'y'} this week`;
+      const cleansStr = `${cleanCount} clean${cleanCount !== 1 ? 's' : ''}`;
       analyticsHtml = `
         <div class="rpc-presence-analytics" aria-label="Presence cleaning analytics">
-          ${oppsStr} · ${utilStr}
+          ${cleansStr} · ${oppsStr}
         </div>
       `;
     }
