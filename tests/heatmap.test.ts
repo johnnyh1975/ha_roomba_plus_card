@@ -142,3 +142,37 @@ describe('normalisedWifiFloor()', () => {
     expect(normalisedWifiFloor(75)).toBe(75);
   });
 });
+
+// ── Fixed-size SVG regression (B4 fix) ───────────────────────────────────────
+describe('renderHeatmap() — fixed-size SVG (no CSS scaling)', () => {
+  it('SVG has explicit width and height attributes, not just viewBox', () => {
+    const html = renderHeatmap([], 28, 'auto');
+    // Must have width="NNN" height="NNN" attributes for natural-size rendering
+    expect(html).toMatch(/width="\d+"/);
+    expect(html).toMatch(/height="\d+"/);
+  });
+
+  it('SVG width is ≤ 160px — compact enough to not dominate the card', () => {
+    const html = renderHeatmap([], 28, 'auto');
+    const match = html.match(/width="(\d+)"/);
+    expect(match).not.toBeNull();
+    const w = parseInt(match![1], 10);
+    expect(w).toBeLessThanOrEqual(160);
+  });
+
+  it('day labels use font-size ≤ 9 — not oversized on mobile', () => {
+    const html = renderHeatmap([], 28, 'auto');
+    const match = html.match(/font-size="(\d+)"/);
+    expect(match).not.toBeNull();
+    const fs = parseInt(match![1], 10);
+    expect(fs).toBeLessThanOrEqual(9);
+  });
+});
+
+describe('renderSkeletonHeatmap() — fixed-size SVG', () => {
+  it('SVG has explicit width and height attributes', () => {
+    const html = renderSkeletonHeatmap(4);
+    expect(html).toMatch(/width="\d+"/);
+    expect(html).toMatch(/height="\d+"/);
+  });
+});

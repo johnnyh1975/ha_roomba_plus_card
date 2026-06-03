@@ -117,6 +117,10 @@ export function renderHistoryZone(
           ? `${m.dirt_events} dirt event${m.dirt_events !== 1 ? 's' : ''}`
           : '';
         const meta = [zones, dirtPart].filter(Boolean).join(' · ');
+        // F1 spec — demand initiator badge: robot cleaned because floor was dirty
+        const demandBadge = m.initiator === 'demand'
+          ? `<span class="rpc-initiator-badge">demand</span>`
+          : '';
 
         // F6b — WiFi sparkline (v2.1+ cloud records with wifi_signal array).
         // Normalise wlBars (0–4 int) → percentage before rendering.
@@ -134,6 +138,7 @@ export function renderHistoryZone(
             <span class="rpc-day-time">${start}</span>
             <span class="rpc-day-dur">${m.duration_min} min</span>
             <span class="rpc-day-area">${area}</span>
+            ${demandBadge}
             ${meta ? `<div class="rpc-day-zones">${meta}</div>` : ''}
             ${wifiHtml}
           </div>`;

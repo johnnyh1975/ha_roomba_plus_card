@@ -383,3 +383,61 @@ describe('renderHistoryZone() — summary bar token rendering', () => {
     expect(html).not.toContain('rpc-summary-sep');
   });
 });
+
+// ── E1: Demand initiator badge (F1 spec) ─────────────────────────────────────
+describe('renderHistoryZone() — demand initiator badge (E1)', () => {
+  const baseRecord: MissionRecord = {
+    id: 'm1', started_at: '2025-05-14T07:14:00Z', ended_at: '2025-05-14T07:51:00Z',
+    duration_min: 37, run_min: null, area_sqft: 412,
+    result: 'completed', initiator: 'schedule', zones: ['Kitchen'],
+    error_code: null, recharges: null, evacuations: null,
+    dirt_events: null, wifi_signal: null, source: 'cloud',
+  };
+
+  it('shows [demand] badge when initiator === "demand"', () => {
+    const record: MissionRecord = { ...baseRecord, initiator: 'demand' };
+    const day: DaySummary = {
+      date: '2025-05-14', total: 1, completed: 1, stuck: 0,
+      area_sqft: 412, result: 'completed', missions: [record],
+    };
+    const html = render({}, { data: [day], openDay: '2025-05-14', dayMissions: [record], openDaySummary: day });
+    expect(html).toContain('rpc-initiator-badge');
+    expect(html).toContain('demand');
+  });
+
+  it('does not show badge when initiator === "schedule"', () => {
+    const record: MissionRecord = { ...baseRecord, initiator: 'schedule' };
+    const day: DaySummary = {
+      date: '2025-05-14', total: 1, completed: 1, stuck: 0,
+      area_sqft: 412, result: 'completed', missions: [record],
+    };
+    const html = render({}, { data: [day], openDay: '2025-05-14', dayMissions: [record], openDaySummary: day });
+    expect(html).not.toContain('rpc-initiator-badge');
+  });
+
+  it('does not show badge when initiator === "manual"', () => {
+    const record: MissionRecord = { ...baseRecord, initiator: 'manual' };
+    const day: DaySummary = {
+      date: '2025-05-14', total: 1, completed: 1, stuck: 0,
+      area_sqft: 412, result: 'completed', missions: [record],
+    };
+    const html = render({}, { data: [day], openDay: '2025-05-14', dayMissions: [record], openDaySummary: day });
+    expect(html).not.toContain('rpc-initiator-badge');
+  });
+
+  it('badge coexists with zones and wifi sparkline on same row', () => {
+    const record: MissionRecord = {
+      ...baseRecord, initiator: 'demand',
+      zones: ['Living Room'],
+      wifi_signal: [3, 3, 2, 3, 4],
+    };
+    const day: DaySummary = {
+      date: '2025-05-14', total: 1, completed: 1, stuck: 0,
+      area_sqft: 412, result: 'completed', missions: [record],
+    };
+    const html = render({}, { data: [day], openDay: '2025-05-14', dayMissions: [record], openDaySummary: day });
+    expect(html).toContain('rpc-initiator-badge');
+    expect(html).toContain('Living Room');
+    expect(html).toContain('rpc-day-wifi');
+  });
+});

@@ -22,12 +22,18 @@ const STYLES = `
   :host {
     display: block;
     font-family: inherit;
-    --rpc-green:          #2d9c4f;
-    --rpc-amber:          #d97706;
-    --rpc-red:            #dc2626;
-    --rpc-blue:           #2563eb;
-    --rpc-grey-light:     #e5e7eb;
-    --rpc-grey-mid:       #9ca3af;
+    /* Semantic colours — cascade from HA theme when available, fall back to
+       accessible defaults that match the standard HA colour palette.
+       --state-active-color / --warning-color / --error-color are defined by
+       every HA theme including Bubble Card themes and the default theme.      */
+    --rpc-green:      var(--state-active-color,   #2d9c4f);
+    --rpc-amber:      var(--warning-color,         #d97706);
+    --rpc-red:        var(--error-color,           #db4437);
+    --rpc-blue:       var(--primary-color,         #2563eb);
+    --rpc-grey-light: var(--divider-color,         #e5e7eb);
+    --rpc-grey-mid:   var(--disabled-text-color,   #9ca3af);
+    /* Heatmap empty-cell colour follows the card's secondary surface */
+    --rpc-cell-empty: var(--secondary-background-color, #e5e7eb);
     --rpc-card-padding:   16px;
     --rpc-bar-height:     6px;
     --rpc-bar-row-height: 44px;
@@ -43,7 +49,7 @@ const STYLES = `
     border-radius: var(--ha-card-border-radius, 12px);
     padding: var(--rpc-card-padding);
     color: var(--primary-text-color);
-    box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0,0,0,.1));
+    box-shadow: var(--ha-card-box-shadow, none);
   }
 
   /* ─── Zones ─── */
@@ -255,6 +261,14 @@ const STYLES = `
   .rpc-day-zones { width: 100%; padding-left: 20px; color: var(--secondary-text-color); font-size: 0.78rem; }
   .rpc-day-aggregate { font-size: 0.82rem; }
   .rpc-day-no-detail { font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 4px; }
+  /* F1: demand initiator badge — robot cleaned because floor was dirty */
+  .rpc-initiator-badge {
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--rpc-blue); background: color-mix(in srgb, var(--rpc-blue) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--rpc-blue) 25%, transparent);
+    border-radius: 4px; padding: 1px 5px; vertical-align: middle; white-space: nowrap;
+    flex-shrink: 0;
+  }
   /* v1.3 — WiFi sparkline row in day popover */
   .rpc-day-wifi {
     width: 100%; padding-left: 20px; display: flex; align-items: center; gap: 6px;
@@ -369,7 +383,8 @@ const STYLES = `
   .rpc-trend-declining { color: var(--rpc-amber); font-weight: 500; }
   .rpc-trend-improving { color: var(--rpc-green); font-weight: 500; }
   .rpc-heatmap-wrap { overflow: hidden; }
-  .rpc-heatmap-wrap svg { width: 100%; height: auto; display: block; }
+  /* SVG has explicit width/height attrs — display:block prevents inline gap */
+  .rpc-heatmap-wrap svg { display: block; }
   .rpc-history-error   { font-size: 0.82rem; color: var(--secondary-text-color); padding: 8px 0; }
   .rpc-history-partial { font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 6px; }
   .rpc-problem-zone    { font-size: 0.8rem; color: var(--rpc-amber); margin-top: 8px; }
@@ -537,20 +552,29 @@ class RoombaPlusCard extends HTMLElement {
     }
   }
 
-  /** Entity IDs that drive card rendering. Changes outside this set are ignored. */
+  /** Entity IDs that drive card rendering. Changes outside this set are ignored.
+   * B1 fix: uses this.activeRobot (not this.config.entity) so multi-robot mode
+   * correctly watches the currently displayed robot's entities.
+   */
   private relevantEntityIds(): string[] {
     const n = this.robotName;
+    // Use activeRobot as the vacuum entity — in multi-robot mode this differs
+    // from config.entity (which is always the first/default robot).
     return [
-      this.config.entity,
+      this.activeRobot,
       `sensor.${n}_last_error_code`,
+      `sensor.${n}_last_error_zone`,          // B2: needed for error zone display
       `sensor.${n}_mission_phase`,
       `binary_sensor.${n}_mission_active`,
       `binary_sensor.${n}_maintenance_due`,
+      `sensor.${n}_readiness`,                // B2: needed for A5 alert text
       `binary_sensor.${n}_schedule_hold_active`,
       `sensor.${n}_next_clean`,
       `sensor.${n}_filter_remaining_hours`,
       `sensor.${n}_brush_remaining_hours`,
-      `sensor.${n}_mop_tank_level`,
+      `sensor.${n}_mop_pad`,                  // B2: Braava pad consumable
+      `sensor.${n}_mop_tank_level`,           // B2: Braava tank level
+      `sensor.${n}_mop_behavior`,             // B2: Braava mop behavior
       `sensor.${n}_clean_base_status`,
       `sensor.${n}_nav_quality`,
       `sensor.${n}_next_likely_clean_window`,
@@ -567,12 +591,20 @@ class RoombaPlusCard extends HTMLElement {
       `sensor.${n}_lifetime_time`,
       // v1.3 — performance & health sensors
       `sensor.${n}_battery_capacity_retention`,
+      `sensor.${n}_estimated_battery_eol`,     // B2: EOL shown in popover
       `sensor.${n}_recent_wifi_floor`,
       `sensor.${n}_recent_coverage_pct`,
-      `sensor.${n}_estimated_battery_eol`,
+      `sensor.${n}_missions_last_30d`,          // B2: gates coverage bar skeleton
       `sensor.${n}_cleaning_speed_trend`,
       `binary_sensor.${n}_consecutive_clean_skips`,
-      `sensor.${n}_missions_last_30d`,
+      // Status zone live metrics
+      `sensor.${n}_area_cleaned_today`,         // B2: Wave A3 area-today line
+      `sensor.${n}_mission_expire_time`,        // B2: recharge ETA countdown
+      `sensor.${n}_average_area_30d`,           // B2: vs-usual delta metric
+      `sensor.${n}_mission_count_30d`,          // B2: gates vs-usual delta
+      `binary_sensor.${n}_demand_clean_blocked`,// B2: demand blocked indicator
+      // v2.2+
+      `image.${n}_coverage_map`,               // B2: hasCoverageImage detection
       // F3b — robot selector helper (when configured)
       ...(this.config.robot_selector_helper ? [this.config.robot_selector_helper] : []),
     ];

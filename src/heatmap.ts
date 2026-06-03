@@ -1,12 +1,28 @@
 import { DaySummary } from './types.js';
 
+// ── Heatmap cell colours (semantic — intentionally not theme-variable mapped)
+// These are data-meaning colours, not brand colours. They must be consistent
+// regardless of the active HA theme so users can parse the calendar at a glance.
 const COLOURS: Record<string, string> = {
   completed: '#2d9c4f',
   stuck:     '#d97706',
   error:     '#dc2626',
   cancelled: '#9ca3af',
-  none:      '#e5e7eb',
+  none:      'var(--rpc-cell-empty, var(--rpc-grey-light, #e5e7eb))',
 };
+
+// ── Compact cell constants — fixed pixel geometry, no CSS scaling ────────────
+// The SVG has explicit width/height attributes so it renders at exactly this
+// size and never stretches to fill the card width. Width at 7 cols:
+//   label_col + 7 × cellSize + 6 × cellGap = 18 + 7×16 + 6×2 = 18+112+12 = 142px
+const CELL      = 16;   // px — visible cell square
+const CELL_GAP  = 2;    // px — gap between cells
+const LABEL_COL = 18;   // px — left column reserved for day labels
+const HEADER_H  = 16;   // px — height of the day-header row
+const STEP      = CELL + CELL_GAP;
+
+function svgW(cols = 7): number { return LABEL_COL + cols * STEP - CELL_GAP; }
+function svgH(numWeeks: number): number { return HEADER_H + numWeeks * STEP - CELL_GAP + 4; }
 
 function formatDate(date: Date, locale: string): string {
   return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
@@ -18,21 +34,12 @@ function isoDate(d: Date): string {
 }
 
 export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 'auto' | 'sqft' | 'm2', locale = 'en-US'): string {
-  const cellSize = 20;
-  const cellGap = 3;
-  const cellTouch = 24;
-  const headerH = 18;
-  const cellStep = cellSize + cellGap;
-
   // Build date map
   const byDate = new Map<string, DaySummary>();
   for (const s of summaries) byDate.set(s.date, s);
 
-  // Build 4-week grid, oldest top-left, today bottom-right
+  // Build grid: oldest top-left, today bottom-right, Mon-aligned
   const today = new Date();
-  const cells: { date: Date; summary: DaySummary | null; col: number; row: number }[] = [];
-
-  // Find start: go back `days` days, then back to Monday of that week
   const startDate = new Date(today);
   startDate.setDate(today.getDate() - (days - 1));
   const dow = (startDate.getDay() + 6) % 7; // Mon=0
@@ -40,42 +47,36 @@ export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 
 
   const numWeeks = Math.ceil((days + dow) / 7);
 
+  const cells: { date: Date; summary: DaySummary | null; col: number; row: number }[] = [];
   for (let week = 0; week < numWeeks; week++) {
     for (let d = 0; d < 7; d++) {
       const date = new Date(startDate);
       date.setDate(startDate.getDate() + week * 7 + d);
       if (date > today) continue;
-      const iso = isoDate(date);
-      cells.push({
-        date,
-        summary: byDate.get(iso) ?? null,
-        col: d,
-        row: week,
-      });
+      cells.push({ date, summary: byDate.get(isoDate(date)) ?? null, col: d, row: week });
     }
   }
 
-  const W = 7 * cellStep - cellGap;
-  const H = headerH + numWeeks * cellStep - cellGap + 4;
-
+  const W = svgW();
+  const H = svgH(numWeeks);
   const dayLabels = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
-  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="grid" aria-label="Cleaning history heatmap">`;
+  // SVG has explicit width/height — renders at natural size, no CSS stretching
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="grid" aria-label="Cleaning history heatmap">`;
 
-  // Day headers
+  // Day column headers — compact, right-aligned into each column
   for (let d = 0; d < 7; d++) {
-    const x = d * cellStep + cellSize / 2;
-    svg += `<text x="${x}" y="12" text-anchor="middle" font-size="9" fill="var(--rpc-text-secondary, #9ca3af)" font-family="inherit">${dayLabels[d]}</text>`;
+    const x = LABEL_COL + d * STEP + CELL / 2;
+    svg += `<text x="${x}" y="11" text-anchor="middle" font-size="8" fill="var(--secondary-text-color, #9ca3af)" font-family="inherit">${dayLabels[d]}</text>`;
   }
 
   // Cells
   for (const cell of cells) {
-    const x = cell.col * cellStep;
-    const y = headerH + cell.row * cellStep;
-    const summary = cell.summary;
-    const result = summary?.result ?? 'none';
+    const x = LABEL_COL + cell.col * STEP;
+    const y = HEADER_H + cell.row * STEP;
+    const result = cell.summary?.result ?? 'none';
     const colour = COLOURS[result] ?? COLOURS.none;
-    const total = summary?.total ?? 0;
+    const total  = cell.summary?.total ?? 0;
 
     let label = formatDate(cell.date, locale);
     if (total === 0) label += ': no missions';
@@ -83,21 +84,19 @@ export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 
     else label += `: ${total} missions, ${result}`;
 
     svg += `<g role="gridcell" aria-label="${label}" data-date="${isoDate(cell.date)}" data-result="${result}" data-total="${total}" style="cursor:pointer">`;
-    // Invisible touch target
-    svg += `<rect x="${x - 2}" y="${y - 2}" width="${cellTouch}" height="${cellTouch}" fill="transparent" rx="3"/>`;
+    // Invisible touch target (slightly larger than cell)
+    svg += `<rect x="${x - 1}" y="${y - 1}" width="${CELL + 2}" height="${CELL + 2}" fill="transparent" rx="3"/>`;
     // Visible cell
-    svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="${colour}" rx="3"/>`;
-
-    // Multi-mission dot indicators (up to 3 dots bottom-right)
+    svg += `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" fill="${colour}" rx="3"/>`;
+    // Multi-mission dot indicators (up to 3 dots, bottom edge)
     if (total > 1) {
       const dots = Math.min(total, 3);
       for (let i = 0; i < dots; i++) {
-        const dx = x + cellSize - 4 - i * 5;
-        const dy = y + cellSize - 3;
-        svg += `<circle cx="${dx}" cy="${dy}" r="1.5" fill="rgba(255,255,255,0.8)"/>`;
+        const dx = x + CELL - 3 - i * 4;
+        const dy = y + CELL - 2.5;
+        svg += `<circle cx="${dx}" cy="${dy}" r="1.5" fill="rgba(255,255,255,0.75)"/>`;
       }
     }
-
     svg += `</g>`;
   }
 
@@ -110,7 +109,7 @@ export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 
  * @param readings  Array of wlBars values (0–4 scale from robot, or raw % values).
  *                  Renders up to 7 bars; if >7 values supplied, samples evenly.
  * @param minVal    Minimum value across the reading set (pre-computed for colour).
- * @returns         Inline SVG string, 56×16px, colour-coded by floor signal.
+ * @returns         Inline SVG string, colour-coded by floor signal.
  */
 /**
  * Normalise a wlBars reading array to percentage scale (0–100).
@@ -170,27 +169,23 @@ export function renderSparkline(readings: number[], minVal: number): string {
 }
 
 export function renderSkeletonHeatmap(numWeeks = 4): string {
-  const cellSize = 20;
-  const cellGap = 3;
-  const headerH = 18;
-  const cellStep = cellSize + cellGap;
-  const W = 7 * cellStep - cellGap;
-  const H = headerH + numWeeks * cellStep - cellGap + 4;
+  const W = svgW();
+  const H = svgH(numWeeks);
   const dayLabels = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
-  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
-  svg += `<style>@keyframes rpc-pulse{0%,100%{opacity:.4}50%{opacity:.8}}.rpc-skel{animation:rpc-pulse 1.5s ease-in-out infinite}</style>`;
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  svg += `<style>@keyframes rpc-pulse{0%,100%{opacity:.35}50%{opacity:.7}}.rpc-skel{animation:rpc-pulse 1.5s ease-in-out infinite}</style>`;
 
   for (let d = 0; d < 7; d++) {
-    const x = d * cellStep + cellSize / 2;
-    svg += `<text x="${x}" y="12" text-anchor="middle" font-size="9" fill="var(--rpc-text-secondary,#9ca3af)" font-family="inherit">${dayLabels[d]}</text>`;
+    const x = LABEL_COL + d * STEP + CELL / 2;
+    svg += `<text x="${x}" y="11" text-anchor="middle" font-size="8" fill="var(--secondary-text-color,#9ca3af)" font-family="inherit">${dayLabels[d]}</text>`;
   }
 
   for (let row = 0; row < numWeeks; row++) {
     for (let col = 0; col < 7; col++) {
-      const x = col * cellStep;
-      const y = headerH + row * cellStep;
-      svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="#e5e7eb" rx="3" class="rpc-skel" style="animation-delay:${(row * 7 + col) * 30}ms"/>`;
+      const x = LABEL_COL + col * STEP;
+      const y = HEADER_H + row * STEP;
+      svg += `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" fill="var(--rpc-grey-light, #e5e7eb)" rx="3" class="rpc-skel" style="animation-delay:${(row * 7 + col) * 30}ms"/>`;
     }
   }
 

@@ -1,7 +1,7 @@
 # Roomba+ Card
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![HACS installs](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johnnyh1975&repository=ha_roomba_plus_card&category=lovelace)
+[![HACS installs](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johnnyh1975&repository=ha_roomba_plus_card&category=dashboard)
 [![Version](https://img.shields.io/badge/version-1.3-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
 
 A full-featured Lovelace card for the [`roomba_plus`](https://github.com/johnnyh1975/roomba_plus) Home Assistant integration.
@@ -30,7 +30,7 @@ Automatically adapts to your robot — 600-series, 900/980, i/s/j-series, and Br
 ### Via HACS (recommended)
 
 1. Open HACS → Frontend → **⋮** → Custom repositories
-2. Add `https://github.com/johnnyh1975/ha_roomba_plus_card` · Category: **Lovelace**
+2. Add `https://github.com/johnnyh1975/ha_roomba_plus_card` · Category: **Dashboard**
 3. Click **Download**
 4. Reload the browser
 
