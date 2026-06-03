@@ -160,7 +160,7 @@ describe('renderHistoryZone() — Wave C1 lifetime stats', () => {
   it('expanded content shown when lifetimeExpanded=true', () => {
     const html = render(lifetimeStates, { lifetimeExpanded: true });
     expect(html).toContain('847');
-    expect(html).toContain('1,247 h');
+    expect(html).toContain('1,247 h (30 d)');
   });
 
   it('expanded content hidden when lifetimeExpanded=false', () => {

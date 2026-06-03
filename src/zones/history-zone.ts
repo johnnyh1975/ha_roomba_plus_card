@@ -182,22 +182,24 @@ export function renderHistoryZone(
     const lifetimeArea     = hass.states[`sensor.${n}_recent_area_30d`];
     const lifetimeTime     = hass.states[`sensor.${n}_recent_time_30d`];
 
-    // Guard: require all three sensors to have actual numeric states.
-    // An 'unknown' or 'unavailable' state passes the truthiness check on the
-    // state object but parseInt/parseFloat returns NaN, leaving the expanded
-    // div empty while the toggle button still renders. Parse first, guard second.
-    const missions = lifetimeMissions ? parseInt(lifetimeMissions.state, 10) : NaN;
-    const hours    = lifetimeTime     ? parseInt(lifetimeTime.state, 10)     : NaN;
-    const areaSqft = lifetimeArea     ? parseFloat(lifetimeArea.state)       : NaN;
-    if (!isNaN(missions) && !isNaN(hours) && !isNaN(areaSqft)) {
-      const areaStr  = formatArea(areaSqft, useMetric);
+    // Parse values individually — show the section if at least one is available.
+    // Each span is only rendered when its value is a real number, so a missing
+    // sensor (unknown/unavailable) just omits that one line rather than hiding
+    // the entire Stats section.
+    const missions = lifetimeMissions ? parseInt(lifetimeMissions.state, 10)  : NaN;
+    const hours    = lifetimeTime     ? parseInt(lifetimeTime.state, 10)      : NaN;
+    // recent_area_30d stores m² (cloud API is metric) — pass raw value and
+    // always format as m² regardless of user unit preference.
+    const areaM2   = lifetimeArea     ? parseFloat(lifetimeArea.state)        : NaN;
+    const hasAny   = !isNaN(missions) || !isNaN(hours) || !isNaN(areaM2);
 
+    if (hasAny) {
       const expandedContent = state.lifetimeExpanded ? `
         <div class="rpc-lifetime-stats">
           <span class="rpc-lifetime-arrow">→</span>
-          <span>${missions.toLocaleString()} missions (lifetime)</span>
-          <span>${areaStr}</span>
-          <span>${hours.toLocaleString()} h (30 d)</span>
+          ${!isNaN(missions) ? `<span>${missions.toLocaleString()} missions</span>` : ''}
+          ${!isNaN(areaM2)   ? `<span>${areaM2.toLocaleString()} m²</span>` : ''}
+          ${!isNaN(hours)    ? `<span>${hours.toLocaleString()} h (30 d)</span>` : ''}
         </div>` : '';
 
       lifetimeHtml = `
