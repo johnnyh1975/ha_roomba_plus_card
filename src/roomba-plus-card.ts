@@ -587,8 +587,8 @@ class RoombaPlusCard extends HTMLElement {
       `sensor.${n}_clean_streak`,
       `sensor.${n}_completion_rate_30d`,
       `sensor.${n}_lifetime_missions`,
-      `sensor.${n}_lifetime_area`,
-      `sensor.${n}_lifetime_time`,
+      `sensor.${n}_recent_area_30d`,   // was lifetime_area pre-v2.1.2
+      `sensor.${n}_recent_time_30d`,      // was lifetime_time pre-v2.1.2
       // v1.3 — performance & health sensors
       `sensor.${n}_battery_capacity_retention`,
       `sensor.${n}_estimated_battery_eol`,     // B2: EOL shown in popover

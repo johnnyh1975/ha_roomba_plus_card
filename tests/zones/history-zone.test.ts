@@ -143,14 +143,14 @@ describe('renderHistoryZone() — day detail popover', () => {
 
 describe('renderHistoryZone() — Wave C1 lifetime stats', () => {
   const lifetimeStates = {
-    [`sensor.${n}_lifetime_missions`]: st('847'),
-    [`sensor.${n}_lifetime_area`]:     st('25200'),
-    [`sensor.${n}_lifetime_time`]:     st('1247'),
+    [`sensor.${n}_lifetime_missions`]:  st('847'),
+    [`sensor.${n}_recent_area_30d`]: st('25200'),
+    [`sensor.${n}_recent_time_30d`]:    st('1247'),
   };
 
   it('lifetime toggle button shown when all cloud sensors present', () => {
     const html = render(lifetimeStates);
-    expect(html).toContain('Lifetime');
+    expect(html).toContain('Stats');
     expect(html).toContain('data-lifetime-toggle');
   });
 

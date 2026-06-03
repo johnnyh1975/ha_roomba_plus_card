@@ -173,9 +173,14 @@ export function renderHistoryZone(
   // C1 — Lifetime stats collapsed footer (cloud sensors, requires credentials)
   let lifetimeHtml = '';
   if (config.show_lifetime !== false) {
+    // Entity IDs as of integration v2.1.2:
+    // _lifetime_missions  — unchanged (true lifetime count)
+    // _recent_area_30d — true lifetime area (was _lifetime_area pre-v2.1.2)
+    // _recent_time_30d    — 30-day cleaning time (was _lifetime_time pre-v2.1.2;
+    //                       no true lifetime time sensor exists in the integration)
     const lifetimeMissions = hass.states[`sensor.${n}_lifetime_missions`];
-    const lifetimeArea     = hass.states[`sensor.${n}_lifetime_area`];
-    const lifetimeTime     = hass.states[`sensor.${n}_lifetime_time`];
+    const lifetimeArea     = hass.states[`sensor.${n}_recent_area_30d`];
+    const lifetimeTime     = hass.states[`sensor.${n}_recent_time_30d`];
 
     // Guard: require all three sensors to have actual numeric states.
     // An 'unknown' or 'unavailable' state passes the truthiness check on the
@@ -190,15 +195,15 @@ export function renderHistoryZone(
       const expandedContent = state.lifetimeExpanded ? `
         <div class="rpc-lifetime-stats">
           <span class="rpc-lifetime-arrow">→</span>
-          <span>${missions.toLocaleString()} missions</span>
+          <span>${missions.toLocaleString()} missions (lifetime)</span>
           <span>${areaStr}</span>
-          <span>${hours.toLocaleString()} h</span>
+          <span>${hours.toLocaleString()} h (30 d)</span>
         </div>` : '';
 
       lifetimeHtml = `
         <div class="rpc-lifetime-divider"></div>
         <button class="rpc-lifetime-toggle" data-lifetime-toggle aria-expanded="${state.lifetimeExpanded}">
-          Lifetime ${state.lifetimeExpanded ? '▲' : '▼'}
+          Stats ${state.lifetimeExpanded ? '▲' : '▼'}
         </button>
         ${expandedContent}
       `;
