@@ -93,17 +93,17 @@ export function renderAlertZone(
 
   // Priority 6 — consecutive clean skips (F6a, v2.1+)
   if (caps.hasConsecutiveSkips) {
-    const skipsEntity = hass.states[`binary_sensor.${n}_consecutive_clean_skips`];
-    if (skipsEntity && skipsEntity.state === 'on') {
-      const count = (skipsEntity.attributes.skip_count as number | undefined) ?? null;
-      const text = count !== null
-        ? `Robot blocked from cleaning ${count} consecutive time${count !== 1 ? 's' : ''}`
-        : 'Robot blocked from cleaning repeatedly';
-      alerts.push({
-        priority: 6,
-        text,
-        subtext: 'Check blocking sensors or robot placement.',
-      });
+    const skipsEntity = hass.states[`sensor.${n}_consecutive_clean_skips`];
+    if (skipsEntity && skipsEntity.state !== 'unknown' && skipsEntity.state !== 'unavailable') {
+      const count = parseInt(skipsEntity.state, 10);
+      if (!isNaN(count) && count > 0) {
+        const text = `Robot blocked from cleaning ${count} consecutive time${count !== 1 ? 's' : ''}`;
+        alerts.push({
+          priority: 6,
+          text,
+          subtext: 'Check blocking sensors or robot placement.',
+        });
+      }
     }
   }
 

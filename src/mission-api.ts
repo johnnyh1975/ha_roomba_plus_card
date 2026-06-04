@@ -1,4 +1,4 @@
-import { HomeAssistant, CardConfig, DaySummary, MissionRecord } from './types.js';
+import { HomeAssistant, CardConfig, DaySummary, MissionRecord, HazardRecord } from './types.js';
 
 export class MissionApiClient {
   private entryId: string | null = null;
@@ -47,5 +47,14 @@ export class MissionApiClient {
     }) as { config_entry_id: string };
     this.entryId = result.config_entry_id;
     return this.entryId;
+  }
+
+  /**
+   * Fetch hazard pins for the active robot.
+   * Returns [] on any error, on integration < v2.2, or when no hazard data exists.
+   * Wired to the real endpoint in card v1.5.
+   */
+  async fetchHazards(): Promise<HazardRecord[]> {
+    return [];
   }
 }

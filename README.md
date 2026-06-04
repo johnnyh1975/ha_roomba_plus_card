@@ -2,11 +2,11 @@
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![HACS installs](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johnnyh1975&repository=ha_roomba_plus_card&category=dashboard)
-[![Version](https://img.shields.io/badge/version-1.3-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
+[![Version](https://img.shields.io/badge/version-1.4-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
 
 A full-featured Lovelace card for the [`roomba_plus`](https://github.com/johnnyh1975/roomba_plus) Home Assistant integration.
 
-> **Requires:** `roomba_plus` ≥ 1.9.0 · Home Assistant ≥ 2024.1
+> **Requires:** `roomba_plus` ≥ 2.1.4 · Home Assistant ≥ 2024.1
 
 ---
 
@@ -188,7 +188,8 @@ When you switch robots in the Roomba+ dropdown, the card writes the selected vac
 | Battery health (retention %, EOL), coverage bar | 2.1.0 |
 | Speed trend in history summary | 2.1.0 |
 | WiFi sparkline in day detail, WiFi floor alert | 2.1.0 |
-| Consecutive clean skips alert | 2.1.0 |
+| Consecutive clean skips alert | 2.1.4 |
+| Braava pad consumable bar | 2.1.4 |
 
 ---
 
@@ -197,6 +198,20 @@ When you switch robots in the Roomba+ dropdown, the card writes the selected vac
 The card auto-discovers companion entities by replacing `vacuum.` with `sensor.` / `select.` / `binary_sensor.` / `switch.` / `button.` and appending the expected key. Example: `vacuum.roomba_i7` → `sensor.roomba_i7_filter_remaining_hours`.
 
 If your integration uses custom entity IDs, discovery fails silently and the affected zone degrades gracefully — hidden, not broken.
+
+---
+
+## Known limitations
+
+**Full string translation** — UI labels (state names, zone headers, alert texts, action buttons) remain English-only. Date/time formatting has been locale-aware since v1.3; translating static strings requires a `translations/` framework planned for a future release.
+
+**No visual diff rendering** — The card rebuilds its full DOM on every Home Assistant state update.
+
+**Per-mission detail in day popover** — requires `roomba_plus` ≥ 1.8.0. The card shows "Per-mission detail not available" on older builds.
+
+**Braava pad bar** — requires `roomba_plus` ≥ 2.1.4 (`sensor.*_pad_days_until_due`). On earlier versions the pad bar is hidden; the pad type label in the Health zone footer still displays.
+
+**Mission active sensor / carpet boost select** — `binary_sensor.*_mission_active` and `select.*_carpet_boost_mode` are planned for integration v2.2.0. Until then, mid-mission recharge detection uses the pre-v1.9 fallback and the carpet boost settings row is hidden.
 
 ---
 

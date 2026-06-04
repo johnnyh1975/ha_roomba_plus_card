@@ -1,6 +1,6 @@
 {
   "name": "roomba-plus-card",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "HACS Lovelace card for the roomba_plus Home Assistant integration",
   "keywords": [
     "home-assistant",

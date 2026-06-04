@@ -73,15 +73,13 @@ export function renderStatusZone(props: StatusZoneProps): string {
   const errorSensor        = `sensor.${n}_last_error_code`;
   const errorZoneSensor    = `sensor.${n}_last_error_zone`;
   const rechargeTimeSensor = `sensor.${n}_mission_recharge_time`;  // pre-1.9 fallback only
-  const avgDurationSensor  = `sensor.${n}_missions_last_30d`;
-  const avgAreaSensor      = `sensor.${n}_average_area_30d`;
+  const avgDurationSensor  = `sensor.${n}_average_mission_time`;
   const areaCleanedToday   = `sensor.${n}_area_cleaned_today`;
 
   const elapsedMin     = (attrs.mission_elapsed_min as number | null) ?? null;
   const missionArea    = (attrs.mission_area_sqft as number | null) ?? null;
   const avgDurRaw      = parseFloat(st(hass, avgDurationSensor));
   const estimatedTotal = isNaN(avgDurRaw) || avgDurRaw <= 0 ? 45 : avgDurRaw;
-  const avgArea        = parseFloat(st(hass, avgAreaSensor));
 
   // Robot identity
   const isMop      = caps.isMop;
@@ -90,7 +88,7 @@ export function renderStatusZone(props: StatusZoneProps): string {
 
   // ── Mission phase (v1.9+) ──
   // These give precise state that the vacuum entity alone cannot convey.
-  const missionPhase      = hass.states[`sensor.${n}_mission_phase`]?.state ?? '';
+  const missionPhase      = hass.states[`sensor.${n}_phase`]?.state ?? '';
   const missionActiveRaw  = hass.states[`binary_sensor.${n}_mission_active`]?.state ?? '';
   const isMissionActive   = missionActiveRaw === 'on';
   const hasMissionActive  = caps.hasMissionActive;
@@ -201,14 +199,18 @@ export function renderStatusZone(props: StatusZoneProps): string {
     if (caps.hasArea && missionArea !== null) {
       parts.push(`<div class="rpc-metric"><span class="rpc-metric-val">${formatArea(missionArea, unit, isMetric)}</span><span class="rpc-metric-lbl">Cleaned</span></div>`);
 
+      // A4: compute average from existing sensors — sensor.*_average_area_30d does not exist
+      const recentAreaRaw    = parseFloat(st(hass, `sensor.${n}_recent_area_30d`));
+      const missionCount30   = parseFloat(st(hass, `sensor.${n}_missions_last_30d`));
+      const avgArea = (!isNaN(recentAreaRaw) && !isNaN(missionCount30) && missionCount30 >= 5)
+        ? recentAreaRaw / missionCount30
+        : NaN;
+
       if (!isNaN(avgArea) && avgArea > 0) {
-        const missionCount30 = parseFloat(st(hass, `sensor.${n}_mission_count_30d`));
-        if (!isNaN(missionCount30) && missionCount30 >= 5) {
-          const delta  = Math.round(((missionArea - avgArea) / avgArea) * 100);
-          const sign   = delta >= 0 ? '▲' : '▼';
-          const cls    = delta >= 0 ? 'rpc-delta-up' : 'rpc-delta-down';
-          parts.push(`<div class="rpc-metric"><span class="rpc-metric-val ${cls}">${sign} ${Math.abs(delta)}%</span><span class="rpc-metric-lbl">vs usual</span></div>`);
-        }
+        const delta  = Math.round(((missionArea - avgArea) / avgArea) * 100);
+        const sign   = delta >= 0 ? '▲' : '▼';
+        const cls    = delta >= 0 ? 'rpc-delta-up' : 'rpc-delta-down';
+        parts.push(`<div class="rpc-metric"><span class="rpc-metric-val ${cls}">${sign} ${Math.abs(delta)}%</span><span class="rpc-metric-lbl">vs usual</span></div>`);
       }
     }
 
@@ -225,14 +227,6 @@ export function renderStatusZone(props: StatusZoneProps): string {
     } else {
       const lastChanged = hass.states[entityId]?.last_changed;
       if (lastChanged) dockedHtml = `<div class="rpc-docked-since">Last mission: ${timeSince(lastChanged, hass.language)}</div>`;
-    }
-
-    // F1: Demand-blocked indicator — floor needs cleaning but robot can't run yet
-    if (caps.hasDemandBlocked) {
-      const demandBlockedId = `binary_sensor.${robotName}_demand_clean_blocked`;
-      if (hass.states[demandBlockedId]?.state === 'on') {
-        dockedHtml += `<div class="rpc-demand-blocked">🧹 Floor needs cleaning — waiting for home to be empty</div>`;
-      }
     }
   }
 

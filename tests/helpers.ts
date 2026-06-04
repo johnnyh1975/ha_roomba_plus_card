@@ -25,7 +25,6 @@ export const defaultCaps: RobotCapabilities = {
   hasCleanBase: false, hasZones: false, hasSmartZones: false,
   hasProblemZone: false, hasLifetimeArea: false, hasWearRate: false,
   isMop: false, hasMissionActive: false, hasMissionPhase: false,
-  hasDemandBlocked: false, hasEnergyConsumption: false,
   // v1.3
   hasCleaningSpeedTrend: false, hasBatteryRetention: false, hasWifiFloor: false,
   hasCoveragePct: false, hasBatteryEol: false, hasConsecutiveSkips: false,
@@ -43,7 +42,6 @@ export const fullCaps: RobotCapabilities = {
   hasCleanBase: true, hasZones: true, hasSmartZones: true,
   hasProblemZone: true, hasLifetimeArea: true, hasWearRate: true,
   isMop: false, hasMissionActive: true, hasMissionPhase: true,
-  hasDemandBlocked: true, hasEnergyConsumption: false,
   // v1.3
   hasCleaningSpeedTrend: true, hasBatteryRetention: true, hasWifiFloor: true,
   hasCoveragePct: true, hasBatteryEol: true, hasConsecutiveSkips: true,

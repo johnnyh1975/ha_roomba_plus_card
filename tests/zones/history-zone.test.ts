@@ -441,3 +441,47 @@ describe('renderHistoryZone() — demand initiator badge (E1)', () => {
     expect(html).toContain('rpc-day-wifi');
   });
 });
+
+// ── H3: null-guard for room_coverage and alignment_confidence (v2.2+ fields) ──
+describe('renderHistoryZone() — H3 room_coverage null-guard', () => {
+  const baseRecord: MissionRecord = {
+    id: 'm1', started_at: '2025-05-14T07:14:00Z', ended_at: '2025-05-14T07:51:00Z',
+    duration_min: 37, run_min: null, area_sqft: 412,
+    result: 'completed', initiator: 'schedule', zones: [],
+    error_code: null, recharges: null, evacuations: null,
+    dirt_events: null, wifi_signal: null, source: 'cloud',
+  };
+
+  it('renders without error when record contains room_coverage (v2.2+ field)', () => {
+    const record: MissionRecord = {
+      ...baseRecord,
+      room_coverage: [
+        { region_id: '1', name: 'Kitchen', coverage_fraction: 0.87,
+          estimated_area_mm2: 8000000, umf_area_mm2: 9200000 },
+      ],
+      alignment_confidence: 0.92,
+    };
+    const day: DaySummary = {
+      date: '2025-05-14', total: 1, completed: 1, stuck: 0,
+      area_sqft: 412, result: 'completed', missions: [record],
+    };
+    expect(() =>
+      render({}, { data: [day], openDay: '2025-05-14', dayMissions: [record], openDaySummary: day })
+    ).not.toThrow();
+  });
+
+  it('renders without error when alignment_confidence is 0 (edge case)', () => {
+    const record: MissionRecord = {
+      ...baseRecord,
+      room_coverage: [],
+      alignment_confidence: 0,
+    };
+    const day: DaySummary = {
+      date: '2025-05-14', total: 1, completed: 1, stuck: 0,
+      area_sqft: 412, result: 'completed', missions: [record],
+    };
+    expect(() =>
+      render({}, { data: [day], openDay: '2025-05-14', dayMissions: [record], openDaySummary: day })
+    ).not.toThrow();
+  });
+});

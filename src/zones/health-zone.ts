@@ -10,6 +10,8 @@ interface Bar {
   wearSensorId?: string;
   resetService?: string;
   lastReplacedId?: string;
+  /** Display unit for remaining value in popover. Defaults to 'h'. */
+  unit?: string;
   /** When set, use this percentage directly — bypasses entity lookup */
   rawPct?: number;
 }
@@ -102,12 +104,13 @@ export function renderHealthZone(
   }
 
   // Pad — Braava only
-  if (caps.hasPad && hass.states[`sensor.${n}_mop_pad_remaining_hours`]) {
+  if (caps.hasPad && hass.states[`sensor.${n}_pad_days_until_due`]) {
     bars.push({
       key: 'pad', label: 'Pad',
-      sensorId:     `sensor.${n}_mop_pad_remaining_hours`,
-      thresholdAttr: 'threshold_hours',
+      sensorId:      `sensor.${n}_pad_days_until_due`,
+      thresholdAttr: 'threshold_days',
       type: 'consumable',
+      unit: 'd',
       wearSensorId:  caps.hasWearRate ? `sensor.${n}_pad_wear_rate` : undefined,
       resetService:  'reset_pad',
       lastReplacedId:`sensor.${n}_pad_last_replaced`,
@@ -126,8 +129,7 @@ export function renderHealthZone(
 
   // Battery — dedicated sensor preferred, vacuum attribute fallback
   const batSensorId =
-    hass.states[`sensor.${n}_battery_level`] ? `sensor.${n}_battery_level` :
-    hass.states[`sensor.${n}_battery`]       ? `sensor.${n}_battery`       : null;
+    hass.states[`sensor.${n}_battery`] ? `sensor.${n}_battery` : null;
   const vacBatPct = !batSensorId
     ? (hass.states[`vacuum.${n}`]?.attributes?.battery_level as number | undefined)
     : undefined;
@@ -166,7 +168,7 @@ export function renderHealthZone(
       const retPct = Math.round(parseFloat(retEntity.state));
       if (!isNaN(retPct)) {
         const colour = retPct > 85 ? 'var(--rpc-green)' : retPct > 70 ? 'var(--rpc-amber)' : 'var(--rpc-red)';
-        const cyclesEntity = hass.states[`sensor.${n}_charge_cycles`];
+        const cyclesEntity = hass.states[`sensor.${n}_battery_cycles`];
         const cyclesVal    = cyclesEntity ? parseInt(cyclesEntity.state, 10) : NaN;
         const cycleText    = !isNaN(cyclesVal) ? `${cyclesVal} charge cycle${cyclesVal !== 1 ? 's' : ''}` : '';
 
@@ -416,8 +418,8 @@ function renderConsumablePopover(
       </div>
       <div class="rpc-popover-divider"></div>
       ${lastReplacedHtml}
-      ${threshold ? `<div class="rpc-popover-row"><span>Threshold</span><span>${threshold} h</span></div>` : ''}
-      ${threshold ? `<div class="rpc-popover-row"><span>Remaining</span><span>${Math.round(remaining)} h (${barPct}%)</span></div>` : ''}
+      ${threshold ? `<div class="rpc-popover-row"><span>Threshold</span><span>${threshold} ${bar.unit ?? 'h'}</span></div>` : ''}
+      ${threshold ? `<div class="rpc-popover-row"><span>Remaining</span><span>${Math.round(remaining)} ${bar.unit ?? 'h'} (${barPct}%)</span></div>` : ''}
       <div class="rpc-popover-bar-track">
         <div class="rpc-popover-bar-fill" style="width:${barPct}%;background:${colour}"></div>
       </div>

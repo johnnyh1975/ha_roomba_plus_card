@@ -137,24 +137,31 @@ describe('renderAlertZone()', () => {
   });
 });
 
-// ── v1.3 F6a: New alert types ─────────────────────────────────────────────────
-describe('renderAlertZone() — F6a consecutive skips alert', () => {
-  const n = 'roomba';
-
-  it('shows skips alert when binary sensor is on', () => {
-    const hass = makeHass({
-      [`binary_sensor.${n}_consecutive_clean_skips`]: st('on', { skip_count: 3 }),
-    });
+// ── A3: consecutive skips alert (sensor, not binary_sensor) ───────────────────
+describe('renderAlertZone() — A3 consecutive skips alert', () => {
+  it('shows skips alert when sensor state is "3"', () => {
+    const hass = makeHass({ [`sensor.${n}_consecutive_clean_skips`]: st('3') });
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasConsecutiveSkips: true }, n);
     expect(html).toContain('blocked from cleaning');
     expect(html).toContain('3 consecutive times');
   });
 
-  it('does not show skips alert when sensor is off', () => {
-    const hass = makeHass({
-      [`binary_sensor.${n}_consecutive_clean_skips`]: st('off'),
-    });
+  it('shows "1 consecutive time" (singular) when sensor state is "1"', () => {
+    const hass = makeHass({ [`sensor.${n}_consecutive_clean_skips`]: st('1') });
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasConsecutiveSkips: true }, n);
+    expect(html).toContain('1 consecutive time');
+    expect(html).not.toContain('1 consecutive times');
+  });
+
+  it('no alert when sensor state is "0"', () => {
+    const hass = makeHass({ [`sensor.${n}_consecutive_clean_skips`]: st('0') });
+    const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasConsecutiveSkips: true }, n);
+    expect(html).toBe('');
+  });
+
+  it('no alert when cap is false regardless of sensor state', () => {
+    const hass = makeHass({ [`sensor.${n}_consecutive_clean_skips`]: st('5') });
+    const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasConsecutiveSkips: false }, n);
     expect(html).toBe('');
   });
 });
@@ -209,29 +216,16 @@ describe('renderAlertZone() — F6a wifi floor alert', () => {
   });
 });
 
-// ── T1: skips alert grammar when skip_count attribute absent ──────────────────
-describe('renderAlertZone() — F6a skips alert grammar edge cases', () => {
-  const n = 'roomba';
-
-  it('shows fallback text when skip_count attribute is absent (B3 regression)', () => {
+// ── A3: skips alert priority interaction ──────────────────────────────────────
+describe('renderAlertZone() — A3 skips alert priority', () => {
+  it('nav quality (P5) takes priority over skips (P6)', () => {
     const hass = makeHass({
-      [`binary_sensor.${n}_consecutive_clean_skips`]: st('on'),  // no skip_count attr
+      [`sensor.${n}_nav_quality`]:                st('42'),
+      [`sensor.${n}_consecutive_clean_skips`]:    st('3'),
     });
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasConsecutiveSkips: true }, n);
-    expect(html).toContain('blocked from cleaning repeatedly');
-    expect(html).not.toContain('undefined');
-    expect(html).not.toContain('null');
-    // Must not produce the broken "blocked from cleaning times" form
-    expect(html).not.toMatch(/cleaning\s+times/);
-  });
-
-  it('singular "time" when skip_count is 1', () => {
-    const hass = makeHass({
-      [`binary_sensor.${n}_consecutive_clean_skips`]: st('on', { skip_count: 1 }),
-    });
-    const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasConsecutiveSkips: true }, n);
-    expect(html).toContain('1 consecutive time');
-    expect(html).not.toContain('1 consecutive times');
+    expect(html).toContain('Navigation quality low');
+    expect(html).not.toContain('blocked from cleaning');
   });
 });
 

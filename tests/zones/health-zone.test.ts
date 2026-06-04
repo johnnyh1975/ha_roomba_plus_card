@@ -74,7 +74,7 @@ describe('renderHealthZone() — bar colours', () => {
 
 describe('renderHealthZone() — battery', () => {
   it('battery bar from dedicated sensor', () => {
-    const html = render({ [`sensor.${n}_battery_level`]: st('84') });
+    const html = render({ [`sensor.${n}_battery`]: st('84') });
     expect(html).toContain('Battery');
     expect(html).toContain('84%');
   });
@@ -257,6 +257,58 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
     });
     expect(html).not.toContain('data-bar="retention"');
+  });
+
+  it('A5: shows battery_cycles from sensor.*_battery_cycles (not _charge_cycles)', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_battery_capacity_retention`]: st('88'),
+      [`sensor.${n}_battery_cycles`]: st('247'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('247 charge cycles');
+  });
+
+  it('A5: charge_cycles is absent from popover when only stale _charge_cycles entity present', () => {
+    const hass = makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
+      [`sensor.${n}_battery_capacity_retention`]: st('88'),
+      [`sensor.${n}_charge_cycles`]: st('247'),   // stale key — should not be read
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).not.toContain('247 charge cycles');
+  });
+});
+
+// ── A6: mop pad bar uses pad_days_until_due ───────────────────────────────────
+describe('renderHealthZone() — A6 mop pad bar', () => {
+  const n = 'roomba';
+
+  it('renders pad bar from sensor.*_pad_days_until_due', () => {
+    const hass = makeHass({
+      [`sensor.${n}_pad_days_until_due`]: st('18', { threshold_days: 30 }),
+      [`sensor.${n}_mop_pad`]: st('Wet (reusable)'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasPad: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('Pad');
+    expect(html).toContain('60%');    // 18/30 = 60%
+  });
+
+  it('pad bar absent when only stale _mop_pad_remaining_hours present', () => {
+    const hass = makeHass({
+      [`sensor.${n}_mop_pad_remaining_hours`]: st('18', { threshold_hours: 30 }),
+      [`sensor.${n}_mop_pad`]: st('Wet (reusable)'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasPad: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).not.toContain('data-bar="pad"');
   });
 });
 

@@ -35,12 +35,8 @@ export interface RobotCapabilities {
   isMop: boolean;
   /** binary_sensor.*_mission_active — v1.9.0+ */
   hasMissionActive: boolean;
-  /** sensor.*_mission_phase (run/charge/dock/pause/evac/none) — v1.9.0+ */
+  /** sensor.*_phase (run/charge/dock/pause/evac/none) — v1.9.0+ */
   hasMissionPhase: boolean;
-  /** binary_sensor.*_demand_clean_blocked — v2.3+: floor dirty but robot blocked */
-  hasDemandBlocked: boolean;
-  /** sensor.*_total_energy_consumed — v2.3+ */
-  hasEnergyConsumption: boolean;
   // ── v1.3 / integration v2.1+ ──────────────────────────────────────────────
   /** sensor.*_cleaning_speed_trend — 'improving'|'stable'|'declining' */
   hasCleaningSpeedTrend: boolean;
@@ -53,7 +49,7 @@ export interface RobotCapabilities {
   /** sensor.*_estimated_battery_eol — days remaining; 0 = end of life.
    *  Only rendered inside the battery retention popover; requires hasBatteryRetention. */
   hasBatteryEol: boolean;
-  /** binary_sensor.*_consecutive_clean_skips — on when robot blocked N times */
+  /** sensor.*_consecutive_clean_skips — numeric count; > 0 when robot blocked */
   hasConsecutiveSkips: boolean;
   /** sensor.*_mop_behavior — Braava only */
   hasMopBehavior: boolean;
@@ -105,6 +101,19 @@ export interface RoomCoverage {
   umf_area_mm2: number;
 }
 
+/** Obstacle/hazard pin from GET …/mission_history?format=hazards (integration ≥ v2.2) */
+export interface HazardRecord {
+  gx: number | null;              // GridStore grid cell x; null for robot_learned source
+  gy: number | null;              // GridStore grid cell y; null for robot_learned source
+  x_mm: number;                   // Dock-relative mm (pose space for stuck_events; UMF space for robot_learned until v2.3 F8)
+  y_mm: number;
+  stuck_count: number | null;     // null for robot_learned source
+  room_name: string | null;       // null when UMF alignment absent
+  bearing_deg: number;            // 0–359, compass from dock
+  distance_mm: number;            // Euclidean distance from dock in mm
+  source: 'stuck_events' | 'robot_learned' | 'keepout';
+}
+
 /** Daily summary from GET /api/roomba_plus/{id}/mission_history */
 export interface DaySummary {
   date: string;           // ISO date "2025-05-14"
@@ -114,6 +123,10 @@ export interface DaySummary {
   area_sqft: number | null;
   result: 'completed' | 'stuck' | 'error' | 'cancelled' | 'none';
   missions?: MissionRecord[];  // per-mission detail, present on integrations ≥ 1.8
+  /** v2.4 (F12b): average dirt event density across day's missions. null when no cloud data. */
+  dirt_density?: number | null;
+  /** v2.4 (F12b): ratio to 30-day median dirt density. > 1.5 = notably dirty day. null when no baseline. */
+  relative_to_baseline?: number | null;
 }
 
 export interface HomeAssistant {

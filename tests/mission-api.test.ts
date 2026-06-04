@@ -72,3 +72,11 @@ describe('MissionApiClient — F4: fetchRecords', () => {
     );
   });
 });
+
+describe('MissionApiClient.fetchHazards() — H6 stub', () => {
+  it('returns empty array (stub implementation for v1.5 wiring)', async () => {
+    const client = new MissionApiClient(makeHass(), baseConfig);
+    const result = await client.fetchHazards();
+    expect(result).toEqual([]);
+  });
+});

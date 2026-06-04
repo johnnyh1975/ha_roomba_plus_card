@@ -55,25 +55,14 @@ describe('detectCapabilities()', () => {
   it('hasMissionActive true from binary_sensor', () =>
     expect(detectCapabilities(makeHass({ [`binary_sensor.${n}_mission_active`]: st('on') }), n, baseConfig).hasMissionActive).toBe(true));
 
-  it('hasMissionPhase true from sensor', () =>
-    expect(detectCapabilities(makeHass({ [`sensor.${n}_mission_phase`]: st('run') }), n, baseConfig).hasMissionPhase).toBe(true));
+  it('hasMissionPhase true from sensor.*_phase', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_phase`]: st('run') }), n, baseConfig).hasMissionPhase).toBe(true));
+
+  it('hasMissionPhase false when only stale sensor.*_mission_phase present', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_mission_phase`]: st('run') }), n, baseConfig).hasMissionPhase).toBe(false));
 
   it('hasWearRate true from filter_wear_rate sensor', () =>
     expect(detectCapabilities(makeHass({ [`sensor.${n}_filter_wear_rate`]: st('1.2') }), n, baseConfig).hasWearRate).toBe(true));
-});
-
-describe('detectCapabilities() — F1 new caps', () => {
-  it('hasDemandBlocked true from binary_sensor.*_demand_clean_blocked', () =>
-    expect(detectCapabilities(makeHass({ [`binary_sensor.${n}_demand_clean_blocked`]: st('on') }), n, baseConfig).hasDemandBlocked).toBe(true));
-
-  it('hasDemandBlocked false when entity absent', () =>
-    expect(detectCapabilities(makeHass(), n, baseConfig).hasDemandBlocked).toBe(false));
-
-  it('hasEnergyConsumption true from sensor.*_total_energy_consumed', () =>
-    expect(detectCapabilities(makeHass({ [`sensor.${n}_total_energy_consumed`]: st('42.3') }), n, baseConfig).hasEnergyConsumption).toBe(true));
-
-  it('hasEnergyConsumption false when entity absent', () =>
-    expect(detectCapabilities(makeHass(), n, baseConfig).hasEnergyConsumption).toBe(false));
 });
 
 // ── Two-tier capability detection ─────────────────────────────────────────────

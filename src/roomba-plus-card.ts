@@ -564,7 +564,7 @@ class RoombaPlusCard extends HTMLElement {
       this.activeRobot,
       `sensor.${n}_last_error_code`,
       `sensor.${n}_last_error_zone`,          // B2: needed for error zone display
-      `sensor.${n}_mission_phase`,
+      `sensor.${n}_phase`,
       `binary_sensor.${n}_mission_active`,
       `binary_sensor.${n}_maintenance_due`,
       `sensor.${n}_readiness`,                // B2: needed for A5 alert text
@@ -594,15 +594,14 @@ class RoombaPlusCard extends HTMLElement {
       `sensor.${n}_estimated_battery_eol`,     // B2: EOL shown in popover
       `sensor.${n}_recent_wifi_floor`,
       `sensor.${n}_recent_coverage_pct`,
-      `sensor.${n}_missions_last_30d`,          // B2: gates coverage bar skeleton
+      `sensor.${n}_missions_last_30d`,          // gates coverage bar skeleton
+      `sensor.${n}_average_mission_time`,       // A1: progress bar duration estimate
       `sensor.${n}_cleaning_speed_trend`,
       `binary_sensor.${n}_consecutive_clean_skips`,
       // Status zone live metrics
       `sensor.${n}_area_cleaned_today`,         // B2: Wave A3 area-today line
       `sensor.${n}_mission_expire_time`,        // B2: recharge ETA countdown
-      `sensor.${n}_average_area_30d`,           // B2: vs-usual delta metric
-      `sensor.${n}_mission_count_30d`,          // B2: gates vs-usual delta
-      `binary_sensor.${n}_demand_clean_blocked`,// B2: demand blocked indicator
+      // recent_area_30d and missions_last_30d already tracked above — A4 vs-usual delta uses both
       // v2.2+
       `image.${n}_coverage_map`,               // B2: hasCoverageImage detection
       // F3b — robot selector helper (when configured)

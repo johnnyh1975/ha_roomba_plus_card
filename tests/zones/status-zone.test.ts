@@ -88,11 +88,18 @@ describe('renderStatusZone() — error state', () => {
 });
 
 describe('renderStatusZone() — v1.9 states', () => {
-  it('evac mission_phase → "Emptying bin"', () => {
+  it('A2: evac phase → "Emptying bin" (reads sensor.*_phase)', () => {
+    const p = props('cleaning', { caps: { ...defaultCaps, hasMissionPhase: true } }, {
+      [`sensor.${n}_phase`]: st('evac'),
+    });
+    expect(renderStatusZone(p)).toContain('Emptying bin');
+  });
+
+  it('A2: evac label absent when only stale sensor.*_mission_phase present', () => {
     const p = props('cleaning', { caps: { ...defaultCaps, hasMissionPhase: true } }, {
       [`sensor.${n}_mission_phase`]: st('evac'),
     });
-    expect(renderStatusZone(p)).toContain('Emptying bin');
+    expect(renderStatusZone(p)).not.toContain('Emptying bin');
   });
 
   it('mid-mission recharge with mission_active + expire time → countdown', () => {
@@ -222,6 +229,24 @@ describe('renderStatusZone() — progress bar', () => {
 
   it('no progress bar when not cleaning', () =>
     expect(renderStatusZone(props('docked'))).not.toContain('rpc-progress-fill'));
+
+  it('A1: progress bar uses average_mission_time as estimatedTotal', () => {
+    const p = props('cleaning', {}, {
+      'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_elapsed_min: 25 }),
+      [`sensor.${n}_average_mission_time`]: st('50'),
+    });
+    const html = renderStatusZone(p);
+    expect(html).toContain('~25 min');      // remaining = 50 - 25 = 25
+    expect(html).toContain('width:50%');    // pct = 25/50 * 100 = 50%
+  });
+
+  it('A1: falls back to 45 min when average_mission_time is absent', () => {
+    const p = props('cleaning', {}, {
+      'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_elapsed_min: 10 }),
+    });
+    const html = renderStatusZone(p);
+    expect(html).toContain('~35 min');      // 45 - 10 = 35
+  });
 });
 
 describe('renderStatusZone() — F1 last cleaned display', () => {
@@ -252,45 +277,6 @@ describe('renderStatusZone() — F1 last cleaned display', () => {
     const html = renderStatusZone(props('cleaning', { missionData }));
     expect(html).not.toContain('Last cleaned:');
     expect(html).not.toContain('Last mission:');
-  });
-});
-
-describe('renderStatusZone() — F1 demand-blocked indicator', () => {
-  it('demand-blocked shown when hasDemandBlocked and sensor is on', () => {
-    const html = renderStatusZone(props(
-      'docked',
-      { caps: { ...defaultCaps, hasDemandBlocked: true }, missionData: null },
-      { [`binary_sensor.${n}_demand_clean_blocked`]: st('on') },
-    ));
-    expect(html).toContain('rpc-demand-blocked');
-    expect(html).toContain('waiting for home to be empty');
-  });
-
-  it('demand-blocked hidden when sensor is off', () => {
-    const html = renderStatusZone(props(
-      'docked',
-      { caps: { ...defaultCaps, hasDemandBlocked: true }, missionData: null },
-      { [`binary_sensor.${n}_demand_clean_blocked`]: st('off') },
-    ));
-    expect(html).not.toContain('rpc-demand-blocked');
-  });
-
-  it('demand-blocked hidden when cap is false (entity absent)', () => {
-    const html = renderStatusZone(props(
-      'docked',
-      { caps: { ...defaultCaps, hasDemandBlocked: false }, missionData: null },
-      { [`binary_sensor.${n}_demand_clean_blocked`]: st('on') },
-    ));
-    expect(html).not.toContain('rpc-demand-blocked');
-  });
-
-  it('demand-blocked not shown when cleaning (only when docked)', () => {
-    const html = renderStatusZone(props(
-      'cleaning',
-      { caps: { ...defaultCaps, hasDemandBlocked: true }, missionData: null },
-      { [`binary_sensor.${n}_demand_clean_blocked`]: st('on') },
-    ));
-    expect(html).not.toContain('rpc-demand-blocked');
   });
 });
 
@@ -342,5 +328,41 @@ describe('renderStatusZone() — F3b settings relocation', () => {
     // Verify repeat-last is inside the rpc-actions div, not floating outside it
     const actionsBlock = html.match(/<div class="rpc-actions">([\s\S]*?)<\/div>/)?.[1] ?? '';
     expect(actionsBlock).toContain('repeat-last');
+  });
+});
+
+describe('renderStatusZone() — A4 vs-usual delta', () => {
+  it('shows ▲ delta when mission area exceeds 30d average by 20%', () => {
+    // recent_area_30d = 300, missions_last_30d = 10 → avg = 30 sqft/mission
+    // current mission area = 36 sqft → delta = +20%
+    const p = props('cleaning', { caps: { ...defaultCaps, hasArea: true } }, {
+      'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_area_sqft: 36 }),
+      [`sensor.${n}_recent_area_30d`]:   st('300'),
+      [`sensor.${n}_missions_last_30d`]: st('10'),
+    });
+    const html = renderStatusZone(p);
+    expect(html).toContain('▲ 20%');
+    expect(html).toContain('vs usual');
+  });
+
+  it('shows ▼ delta when mission area is below average', () => {
+    const p = props('cleaning', { caps: { ...defaultCaps, hasArea: true } }, {
+      'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_area_sqft: 24 }),
+      [`sensor.${n}_recent_area_30d`]:   st('300'),
+      [`sensor.${n}_missions_last_30d`]: st('10'),
+    });
+    const html = renderStatusZone(p);
+    expect(html).toContain('▼ 20%');
+    expect(html).toContain('vs usual');
+  });
+
+  it('no delta when mission count < 5 (insufficient baseline)', () => {
+    const p = props('cleaning', { caps: { ...defaultCaps, hasArea: true } }, {
+      'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_area_sqft: 30 }),
+      [`sensor.${n}_recent_area_30d`]:   st('100'),
+      [`sensor.${n}_missions_last_30d`]: st('4'),
+    });
+    const html = renderStatusZone(p);
+    expect(html).not.toContain('vs usual');
   });
 });

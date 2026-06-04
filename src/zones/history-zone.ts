@@ -132,6 +132,12 @@ export function renderHistoryZone(
           wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal: minimum ${minWifi}% during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${minWifi}% min</span></div>`;
         }
 
+        // v2.0 (F8) — room_coverage and alignment_confidence rendered here.
+        // Fields may arrive in format=records from integration v2.2 onward.
+        // Intentionally unused until F8 is implemented in card v2.0.
+        void (m.room_coverage        ?? null);
+        void (m.alignment_confidence ?? null);
+
         return `
           <div class="rpc-day-mission">
             <span class="rpc-day-icon ${cls}">${icon}</span>

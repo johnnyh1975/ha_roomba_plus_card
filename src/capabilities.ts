@@ -38,16 +38,14 @@ export function detectCapabilities(
     hasWearRate:      e('filter_wear_rate'),
     isMop:            hasPad && !hasBrush,
     hasMissionActive: b('mission_active'),
-    hasMissionPhase:  e('mission_phase'),
-    hasDemandBlocked: b('demand_clean_blocked'),
-    hasEnergyConsumption: e('total_energy_consumed'),
+    hasMissionPhase:  e('phase'),
     // v1.3 / integration v2.1+
     hasCleaningSpeedTrend: e('cleaning_speed_trend'),
     hasBatteryRetention:   e('battery_capacity_retention'),
     hasWifiFloor:          e('recent_wifi_floor'),
     hasCoveragePct:        e('recent_coverage_pct'),
     hasBatteryEol:         e('estimated_battery_eol'),
-    hasConsecutiveSkips:   b('consecutive_clean_skips'),
+    hasConsecutiveSkips:   e('consecutive_clean_skips'),
     hasMopBehavior:        e('mop_behavior'),
     // v2.2+
     hasCoverageImage:      img('coverage_map'),
