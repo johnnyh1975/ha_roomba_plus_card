@@ -34,7 +34,7 @@ export function detectCapabilities(
     hasZones:         s('smart_zone_select') || s('zone_select'),
     hasSmartZones:    s('smart_zone_select'),
     hasProblemZone:   e('problem_zone'),
-    hasLifetimeArea:  e('lifetime_area'),
+    hasLifetimeArea:  e('recent_area_30d'),   // A4: renamed in integration v2.1.2; was e('lifetime_area')
     hasWearRate:      e('filter_wear_rate'),
     isMop:            hasPad && !hasBrush,
     hasMissionActive: b('mission_active'),

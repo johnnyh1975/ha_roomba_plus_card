@@ -50,11 +50,16 @@ export class MissionApiClient {
   }
 
   /**
-   * Fetch hazard pins for the active robot.
-   * Returns [] on any error, on integration < v2.2, or when no hazard data exists.
-   * Wired to the real endpoint in card v1.5.
+   * Fetch hazard pins for the active robot (integration ≥ v2.2.0).
+   * Returns [] on any non-200 response — graceful degradation for older
+   * integrations (pre-v2.2 returns 400 for unknown format), network errors,
+   * or robots with no GridStore data yet accumulated.
    */
   async fetchHazards(): Promise<HazardRecord[]> {
-    return [];
+    const entryId = await this.resolveEntryId();
+    const url = `/api/roomba_plus/${entryId}/mission_history?format=hazards`;
+    const resp = await this.hass.fetchWithAuth(url);
+    if (!resp.ok) return [];
+    return resp.json();
   }
 }

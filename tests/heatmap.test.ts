@@ -72,7 +72,7 @@ describe('renderHeatmap()', () => {
 });
 
 // ── v1.3 F6b: renderSparkline ─────────────────────────────────────────────────
-import { renderSparkline, normalisedWifiPct, normalisedWifiFloor } from '../src/heatmap';
+import { renderSparkline, normalisedWifiPct, normalisedWifiFloor, mmToImagePct } from '../src/heatmap';
 
 describe('renderSparkline()', () => {
   it('returns an SVG element with 7 bars for 7 readings', () => {
@@ -116,16 +116,51 @@ describe('renderSparkline()', () => {
 });
 
 describe('normalisedWifiPct()', () => {
-  it('multiplies by 25 when all values <= 4 (wlBars scale)', () => {
-    expect(normalisedWifiPct([0, 1, 2, 3, 4])).toEqual([0, 25, 50, 75, 100]);
+  it('5-element histogram: passes through unchanged (values already bucket percentages)', () => {
+    // Confirmed format from Amendment 8d: [0, 35, 65, 0, 0] = buckets 1+2 occupied
+    // length===5 → histogram path → pass through, never multiply by 25
+    expect(normalisedWifiPct([0, 35, 65, 0, 0])).toEqual([0, 35, 65, 0, 0]);
   });
 
-  it('passes through unchanged when any value > 4 (already percentage)', () => {
+  it('5-element histogram with all-zero input: passes through unchanged', () => {
+    expect(normalisedWifiPct([0, 0, 0, 0, 0])).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it('legacy scalar time-series: multiplies by 25 when length != 5 and all values <= 4', () => {
+    // 7-element reading array — old format, not a histogram
+    expect(normalisedWifiPct([0, 1, 2, 3, 4, 3, 2])).toEqual([0, 25, 50, 75, 100, 75, 50]);
+  });
+
+  it('passes through unchanged when length != 5 and any value > 4 (already percentage)', () => {
     expect(normalisedWifiPct([60, 75, 80])).toEqual([60, 75, 80]);
   });
 
   it('returns empty array for empty input', () => {
     expect(normalisedWifiPct([])).toEqual([]);
+  });
+});
+
+describe('mmToImagePct()', () => {
+  it('maps centre of extent to 50%', () => {
+    const result = mmToImagePct(0, 0, -1000, 1000, -1000, 1000);
+    expect(result.left).toBe('50.0%');
+    expect(result.top).toBe('50.0%');
+  });
+
+  it('maps xMm=xMin to left=0%', () => {
+    const result = mmToImagePct(-1000, 0, -1000, 1000, -1000, 1000);
+    expect(result.left).toBe('0.0%');
+  });
+
+  it('inverts y-axis: yMm=yMax maps to top=0% (top of image)', () => {
+    // y increases upward in pose space but downward in CSS — yMax is top of image
+    const result = mmToImagePct(0, 1000, -1000, 1000, -1000, 1000);
+    expect(result.top).toBe('0.0%');
+  });
+
+  it('inverts y-axis: yMm=yMin maps to top=100% (bottom of image)', () => {
+    const result = mmToImagePct(0, -1000, -1000, 1000, -1000, 1000);
+    expect(result.top).toBe('100.0%');
   });
 });
 
@@ -152,12 +187,13 @@ describe('renderHeatmap() — fixed-size SVG (no CSS scaling)', () => {
     expect(html).toMatch(/height="\d+"/);
   });
 
-  it('SVG width is ≤ 160px — compact enough to not dominate the card', () => {
+  it('SVG width is ≤ 210px — enlarged in v1.5 (200px at 7 cols × 24px cell)', () => {
+    // v1.5.0: CELL 16→24, width 142px→200px. Upper bound guards against regression.
     const html = renderHeatmap([], 28, 'auto');
     const match = html.match(/width="(\d+)"/);
     expect(match).not.toBeNull();
     const w = parseInt(match![1], 10);
-    expect(w).toBeLessThanOrEqual(160);
+    expect(w).toBeLessThanOrEqual(210);
   });
 
   it('day labels use font-size ≤ 9 — not oversized on mobile', () => {
@@ -166,6 +202,13 @@ describe('renderHeatmap() — fixed-size SVG (no CSS scaling)', () => {
     expect(match).not.toBeNull();
     const fs = parseInt(match![1], 10);
     expect(fs).toBeLessThanOrEqual(9);
+  });
+
+  it('week-start date labels rendered in label column for col=0 cells', () => {
+    // A date in any month — first cell of a row (col=0) should have a day-number text label
+    const html = renderHeatmap([], 28, 'auto');
+    // text-anchor="end" appears on week-start labels (right-aligned in LABEL_COL)
+    expect(html).toContain('text-anchor="end"');
   });
 });
 

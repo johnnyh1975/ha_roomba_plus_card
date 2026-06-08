@@ -73,10 +73,41 @@ describe('MissionApiClient — F4: fetchRecords', () => {
   });
 });
 
-describe('MissionApiClient.fetchHazards() — H6 stub', () => {
-  it('returns empty array (stub implementation for v1.5 wiring)', async () => {
-    const client = new MissionApiClient(makeHass(), baseConfig);
+describe('MissionApiClient.fetchHazards()', () => {
+  it('calls format=hazards endpoint with entry_id', async () => {
+    const hass = makeHass();
+    const client = new MissionApiClient(hass, baseConfig);
+    await client.fetchHazards();
+    expect(hass.fetchWithAuth).toHaveBeenCalledWith(
+      expect.stringContaining('format=hazards')
+    );
+    expect(hass.fetchWithAuth).toHaveBeenCalledWith(
+      expect.stringContaining('entry-abc')
+    );
+  });
+
+  it('returns empty array (not throws) on non-ok response', async () => {
+    // Graceful degradation: pre-v2.2 integration returns 400 for unknown format
+    const hass = makeHass({
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: false, status: 400 } as unknown as Response),
+    });
+    const client = new MissionApiClient(hass, baseConfig);
     const result = await client.fetchHazards();
     expect(result).toEqual([]);
+  });
+
+  it('returns hazard records on successful response', async () => {
+    const hazards = [
+      { gx: 3, gy: 5, x_mm: 450, y_mm: 750, stuck_count: 4,
+        room_name: 'Kitchen', bearing_deg: 45, distance_mm: 870, source: 'stuck_events' },
+    ];
+    const hass = makeHass({
+      fetchWithAuth: vi.fn().mockResolvedValue({
+        ok: true, json: async () => hazards,
+      } as unknown as Response),
+    });
+    const client = new MissionApiClient(hass, baseConfig);
+    const result = await client.fetchHazards();
+    expect(result).toEqual(hazards);
   });
 });

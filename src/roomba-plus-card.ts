@@ -3,7 +3,7 @@
  * Spec: roomba_plus_card_spec.md + roomba_plus_card_wave_features.md (Wave A)
  */
 
-import { CardConfig, HomeAssistant, DaySummary, MissionRecord } from './types.js';
+import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord } from './types.js';
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
 import { renderStatusZone }       from './zones/status-zone.js';
@@ -388,6 +388,50 @@ const STYLES = `
   .rpc-history-error   { font-size: 0.82rem; color: var(--secondary-text-color); padding: 8px 0; }
   .rpc-history-partial { font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 6px; }
   .rpc-problem-zone    { font-size: 0.8rem; color: var(--rpc-amber); margin-top: 8px; }
+
+  /* ── v1.5 — History tab toggle (Calendar / Coverage) ─────────────────────── */
+  .rpc-history-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+  .rpc-tab {
+    padding: 3px 12px; border-radius: 12px;
+    border: 1px solid var(--divider-color, rgba(0,0,0,.2));
+    background: transparent; color: var(--secondary-text-color);
+    font-size: 0.78rem; cursor: pointer; font-family: inherit;
+    transition: background 0.12s, color 0.12s;
+  }
+  .rpc-tab.active { background: var(--rpc-blue); color: #fff; border-color: transparent; }
+
+  /* ── v1.5 — Coverage heatmap panel ──────────────────────────────────────── */
+  .rpc-coverage-panel { margin-top: 8px; }
+  .rpc-coverage-image-wrap { position: relative; }
+  .rpc-coverage-img { width: 100%; display: block; border-radius: 8px; }
+  .rpc-hazard-pin {
+    position: absolute; transform: translate(-50%, -100%);
+    cursor: pointer; font-size: 1rem; line-height: 1;
+    touch-action: manipulation;
+  }
+  /* Source-specific opacity: stuck hotspots fullweight, others slightly muted */
+  .rpc-pin-robot_learned { opacity: 0.85; }
+  .rpc-pin-keepout        { opacity: 0.80; }
+  .rpc-coverage-legend {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 6px;
+  }
+  .rpc-coverage-updated { font-size: 0.72rem; color: var(--secondary-text-color); margin-top: 4px; }
+  .rpc-coverage-note    { font-size: 0.72rem; color: var(--secondary-text-color); margin-top: 4px; font-style: italic; }
+
+  /* ── v1.5 — F8 room coverage chips in day popover ───────────────────────── */
+  .rpc-room-coverage {
+    width: 100%; padding-left: 20px;
+    display: flex; flex-wrap: wrap; gap: 5px;
+    font-size: 0.75rem; margin-top: 3px;
+  }
+  .rpc-cov-green { color: var(--rpc-green); }
+  .rpc-cov-amber { color: var(--rpc-amber); }
+  .rpc-cov-red   { color: var(--rpc-red);   }
+  .rpc-alignment-note {
+    width: 100%; padding-left: 20px;
+    font-size: 0.70rem; color: var(--secondary-text-color); margin-top: 2px;
+  }
 `;
 
 // ──────────────────────────────────────────────
@@ -444,6 +488,8 @@ class RoombaPlusCard extends HTMLElement {
   private dayMissions: MissionRecord[] | null = null;
   private openDaySummary: DaySummary | null = null;
   private lifetimeExpanded = false;      // C1: lifetime stats footer expanded
+  private hazards: HazardRecord[] = [];  // F7: coverage map hazard pins (fetched with history)
+  private historyTab: 'calendar' | 'coverage' = 'calendar'; // F7: active tab in history zone
   private apiClient: MissionApiClient | null = null;
   private prevVacuumState  = '';
   private prevMissionActive = '';   // tracks binary_sensor.*_mission_active across updates
@@ -634,6 +680,8 @@ class RoombaPlusCard extends HTMLElement {
     this.openDaySummary    = null;
     this.settingsPanelOpen = false;
     this.lifetimeExpanded  = false;
+    this.hazards           = [];              // F7: clear pins on robot switch
+    this.historyTab        = 'calendar';      // F7: reset to default tab
     this.prevVacuumState   = '';
     this.prevMissionActive = '';
     this.alertsVisible     = false;
@@ -701,11 +749,15 @@ class RoombaPlusCard extends HTMLElement {
         }
       }
 
+      // F7: fetch hazard pins — returns [] gracefully on integration < v2.2 or no data
+      const hazards = await this.apiClient.fetchHazards();
+
       this.missionData  = summary;
       // Tier 2 cap detection: use the MOST RECENT record/summary — oldest may be
       // local-only (no wifi_signal, no room_coverage) even when recent ones are cloud.
       this.firstRecord  = records.length > 0 ? records[records.length - 1] : null;
       this.firstSummary = summary.length > 0 ? summary[summary.length - 1] : null;
+      this.hazards      = hazards;
     } catch (e: unknown) {
       const status = (e as Error).message;
       this.historyError = status === '404'
@@ -776,7 +828,8 @@ class RoombaPlusCard extends HTMLElement {
         ${renderHistoryZone(this._hass, this.config, caps, this.robotName,
           { data: this.missionData, loading: this.historyLoading, error: this.historyError,
             openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
-            lifetimeExpanded: this.lifetimeExpanded },
+            lifetimeExpanded: this.lifetimeExpanded,
+            historyTab: this.historyTab, hazards: this.hazards },
           isMetric)}
       </div>
     `;
@@ -996,6 +1049,19 @@ class RoombaPlusCard extends HTMLElement {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.lifetimeExpanded = !this.lifetimeExpanded;
+        this.render();
+      });
+    });
+
+    // F7 — History zone tab toggle (Calendar / Coverage)
+    card.querySelectorAll<HTMLElement>('[data-history-tab]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.historyTab = (btn as HTMLElement).dataset.historyTab as 'calendar' | 'coverage';
+        // Close day popover on tab switch — tabs and popover are mutually exclusive
+        // (the popover renders below the heatmap wrap; on the coverage tab it would
+        // appear below the image with no visual connection to its source cell)
+        this.openDay = null; this.dayMissions = null; this.openDaySummary = null;
         this.render();
       });
     });

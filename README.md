@@ -2,11 +2,11 @@
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![HACS installs](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johnnyh1975&repository=ha_roomba_plus_card&category=dashboard)
-[![Version](https://img.shields.io/badge/version-1.4-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
+[![Version](https://img.shields.io/badge/version-1.5-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
 
 A full-featured Lovelace card for the [`roomba_plus`](https://github.com/johnnyh1975/roomba_plus) Home Assistant integration.
 
-> **Requires:** `roomba_plus` ≥ 2.1.4 · Home Assistant ≥ 2024.1
+> **Requires:** `roomba_plus` ≥ 2.2.0 · Home Assistant ≥ 2024.1
 
 ---
 
@@ -19,7 +19,7 @@ A full-featured Lovelace card for the [`roomba_plus`](https://github.com/johnnyh
 | **Health** | Consumable bars for Filter, Brush/Pad, Battery, Tank, Clean Base — colour-coded green → amber → red. Tap any bar for detail + "Mark as replaced". Wear trend arrows (↑ → ↓) with one-time legend when L4 installed. |
 | **Schedule & Presence** | Next scheduled clean time, next likely clean window (~estimate). Schedule hold badge (manual / presence-managed). Per-person presence dots. Weekly presence analytics (opportunities / utilisation). |
 | **Alerts** | Collapsed when the robot is healthy. Surfaces errors → bin full → filter wear → brush wear → nav quality — in priority order. 100ms debounce prevents flicker. |
-| **History** | 28-day heatmap calendar. Streak + completion rate summary. Problem zone callout. Tap any day for mission detail. Collapsed lifetime stats footer (cloud credentials required). |
+| **History** | 28-day heatmap calendar (enlarged cells, week-start labels) with tab toggle to coverage heatmap (integration ≥ 2.2, robots with pose data). Streak + completion rate summary. Problem zone callout. Tap any day for mission detail with per-room coverage fractions (cloud + integration ≥ 2.2). Collapsed lifetime stats footer (cloud credentials required). |
 
 Automatically adapts to your robot — 600-series, 900/980, i/s/j-series, and Braava m6 all render correctly from entity presence alone. No manual model configuration needed.
 
@@ -82,7 +82,7 @@ Roomba+ Card and [xiaomi-vacuum-map-card](https://github.com/PiotrMachowski/love
 
 **Prerequisites:**
 - xiaomi-vacuum-map-card ≥ v2.0 installed via HACS
-- Roomba+ integration ≥ v2.2.0 (for `calibration` + `rooms` attributes on the map entity)
+- Roomba+ integration ≥ v2.3.0 (for `calibration` + `rooms` attributes on the map entity)
 
 > ⚠️ **Firmware limitation:** `image.*_cleaning_map` only updates during missions on robots with firmware **< 3.20**. On firmware 3.20+, live path maps are unavailable — the xiaomi card will display the last-known static map image.
 
@@ -95,7 +95,7 @@ cards:
     entity: vacuum.roomba
     map_camera: image.roomba_cleaning_map
     calibration_source:
-      camera: true          # reads calibration from entity attributes (integration ≥ v2.2.0)
+      camera: true          # reads calibration from entity attributes (integration ≥ v2.3.0)
     rooms:
       attribute: rooms      # reads room polygons from entity attributes
 
@@ -171,7 +171,11 @@ When you switch robots in the Roomba+ dropdown, the card writes the selected vac
 | Schedule / presence | ✅ | ✅ | ✅ | ✅ |
 | Presence analytics | L6 required | L6 required | L6 required | L6 required |
 | History heatmap | ✅ | ✅ | ✅ | ✅ |
+| Coverage heatmap tab | ❌ | ❌¹ | ✅ (pose firmware) | ❌ |
+| Per-room coverage | ❌ | ❌ | ✅ (SMART map + cloud) | ❌ |
 | Lifetime stats | Cloud required | Cloud required | Cloud required | Cloud required |
+
+¹ 980-series: pose data absent on firmware ≥ 3.20. Coverage heatmap requires an earlier firmware or a different model.
 
 ---
 
@@ -190,6 +194,9 @@ When you switch robots in the Roomba+ dropdown, the card writes the selected vac
 | WiFi sparkline in day detail, WiFi floor alert | 2.1.0 |
 | Consecutive clean skips alert | 2.1.4 |
 | Braava pad consumable bar | 2.1.4 |
+| Coverage heatmap tab, hazard pins | 2.2.0 |
+| Per-room coverage fractions in day detail | 2.2.0 |
+| Mid-mission recharge via `mission_active`, carpet boost select | 2.2.0 |
 
 ---
 
@@ -211,7 +218,7 @@ If your integration uses custom entity IDs, discovery fails silently and the aff
 
 **Braava pad bar** — requires `roomba_plus` ≥ 2.1.4 (`sensor.*_pad_days_until_due`). On earlier versions the pad bar is hidden; the pad type label in the Health zone footer still displays.
 
-**Mission active sensor / carpet boost select** — `binary_sensor.*_mission_active` and `select.*_carpet_boost_mode` are planned for integration v2.2.0. Until then, mid-mission recharge detection uses the pre-v1.9 fallback and the carpet boost settings row is hidden.
+**Coverage heatmap — keep-out zone polygons (partial)** — Keep-out zone pins (🚫) are shown as centroid markers only. Full polygon outlines require UMF polygon data to be surfaced through the REST API — not in scope for v1.5. Full polygon rendering planned for card v2.0.
 
 ---
 

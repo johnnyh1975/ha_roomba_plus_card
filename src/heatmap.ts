@@ -14,11 +14,14 @@ const COLOURS: Record<string, string> = {
 // ── Compact cell constants — fixed pixel geometry, no CSS scaling ────────────
 // The SVG has explicit width/height attributes so it renders at exactly this
 // size and never stretches to fill the card width. Width at 7 cols:
-//   label_col + 7 × cellSize + 6 × cellGap = 18 + 7×16 + 6×2 = 18+112+12 = 142px
-const CELL      = 16;   // px — visible cell square
+//   label_col + 7 × cellSize + 6 × cellGap = 20 + 7×24 + 6×2 = 20+168+12 = 200px
+// v1.5.0: CELL 16→24, LABEL_COL 18→20, HEADER_H 16→18 for improved readability
+// and touch target size (28×28px vs previous 18×18px). Week-start dates added
+// to label column to justify the 20px reservation.
+const CELL      = 24;   // px — visible cell square (was 16)
 const CELL_GAP  = 2;    // px — gap between cells
-const LABEL_COL = 18;   // px — left column reserved for day labels
-const HEADER_H  = 16;   // px — height of the day-header row
+const LABEL_COL = 20;   // px — left column for week-start day labels (was 18)
+const HEADER_H  = 18;   // px — height of the day-header row (was 16)
 const STEP      = CELL + CELL_GAP;
 
 function svgW(cols = 7): number { return LABEL_COL + cols * STEP - CELL_GAP; }
@@ -64,10 +67,10 @@ export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 
   // SVG has explicit width/height — renders at natural size, no CSS stretching
   let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="grid" aria-label="Cleaning history heatmap">`;
 
-  // Day column headers — compact, right-aligned into each column
+  // Day column headers — compact, centred into each column
   for (let d = 0; d < 7; d++) {
     const x = LABEL_COL + d * STEP + CELL / 2;
-    svg += `<text x="${x}" y="11" text-anchor="middle" font-size="8" fill="var(--secondary-text-color, #9ca3af)" font-family="inherit">${dayLabels[d]}</text>`;
+    svg += `<text x="${x}" y="13" text-anchor="middle" font-size="9" fill="var(--secondary-text-color, #9ca3af)" font-family="inherit">${dayLabels[d]}</text>`;
   }
 
   // Cells
@@ -83,18 +86,24 @@ export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 
     else if (total === 1) label += `: 1 mission, ${result}`;
     else label += `: ${total} missions, ${result}`;
 
+    // Week-start date label in LABEL_COL (day of month, right-aligned)
+    if (cell.col === 0) {
+      const dayNum = cell.date.getDate();
+      svg += `<text x="${LABEL_COL - 3}" y="${y + CELL / 2 + 3}" text-anchor="end" font-size="9" fill="var(--secondary-text-color, #9ca3af)" font-family="inherit">${dayNum}</text>`;
+    }
+
     svg += `<g role="gridcell" aria-label="${label}" data-date="${isoDate(cell.date)}" data-result="${result}" data-total="${total}" style="cursor:pointer">`;
-    // Invisible touch target (slightly larger than cell)
-    svg += `<rect x="${x - 1}" y="${y - 1}" width="${CELL + 2}" height="${CELL + 2}" fill="transparent" rx="3"/>`;
+    // Invisible touch target (2px larger each side than cell — 28×28px touch area)
+    svg += `<rect x="${x - 2}" y="${y - 2}" width="${CELL + 4}" height="${CELL + 4}" fill="transparent" rx="4"/>`;
     // Visible cell
     svg += `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" fill="${colour}" rx="3"/>`;
-    // Multi-mission dot indicators (up to 3 dots, bottom edge)
+    // Multi-mission dot indicators (up to 3 dots, bottom edge; scaled for 24px cell)
     if (total > 1) {
       const dots = Math.min(total, 3);
       for (let i = 0; i < dots; i++) {
-        const dx = x + CELL - 3 - i * 4;
-        const dy = y + CELL - 2.5;
-        svg += `<circle cx="${dx}" cy="${dy}" r="1.5" fill="rgba(255,255,255,0.75)"/>`;
+        const dx = x + CELL - 4 - i * 5;
+        const dy = y + CELL - 3;
+        svg += `<circle cx="${dx}" cy="${dy}" r="2" fill="rgba(255,255,255,0.75)"/>`;
       }
     }
     svg += `</g>`;
@@ -114,19 +123,49 @@ export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 
 /**
  * Normalise a wlBars reading array to percentage scale (0–100).
  *
- * The iRobot cloud API returns wifi signal as wlBars: a 0–4 integer (like phone
- * signal bars). The integration stores this raw in wifi_signal and in the
- * recent_wifi_floor sensor (declared as PERCENTAGE but returning 0–4 — integration
- * bug). We detect the scale by checking whether any value exceeds 4; if not, we
- * multiply by 25 (0→0%, 1→25%, 2→50%, 3→75%, 4→100%).
+ * The iRobot cloud API returns wlBars as a 5-element bucket histogram —
+ * confirmed from Amendment 8d (CR3 debug, June 2026). Each index represents
+ * a signal-strength bucket; values are percentages summing to ~100.
+ * e.g. [0, 35, 65, 0, 0] = all readings in buckets 1 and 2.
  *
- * When the integration bug is eventually fixed and the values are already
- * percentages (any value > 4), we pass them through unchanged.
+ * Format detection:
+ *   length === 5  → histogram (pass through — values already 0–100%)
+ *   length !== 5  → legacy scalar time-series (0–4 bar readings → ×25 to %)
+ *
+ * The legacy path is retained for backward compatibility with any pre-v2.2
+ * integration records that stored raw 0–4 scalar values.
  */
 export function normalisedWifiPct(values: number[]): number[] {
   if (!values || values.length === 0) return [];
+  // 5-element histogram: values are already bucket percentages — pass through unchanged.
+  // Minimum signal = index of first non-zero bucket × 25 (e.g. [0,35,65,0,0] → floor=25%).
+  if (values.length === 5) return values;
+  // Legacy time-series of 0–4 bar scalars: scale to percentage.
   const needsScale = values.every(v => v <= 4);
   return needsScale ? values.map(v => v * 25) : values;
+}
+
+/**
+ * Convert dock-relative mm coordinates to image-relative percentage positions.
+ * Used to place hazard pins on the coverage map image.
+ *
+ * @param xMm   Dock-relative x in mm (pose space)
+ * @param yMm   Dock-relative y in mm (pose space)
+ * @param xMin  Image spatial extent x_min_mm (from image entity attribute)
+ * @param xMax  Image spatial extent x_max_mm
+ * @param yMin  Image spatial extent y_min_mm
+ * @param yMax  Image spatial extent y_max_mm
+ * @returns     { left, top } CSS percentage strings for absolute positioning
+ *
+ * Note: y-axis is inverted — y increases downward in CSS but upward in pose space.
+ */
+export function mmToImagePct(
+  xMm: number, yMm: number,
+  xMin: number, xMax: number, yMin: number, yMax: number,
+): { left: string; top: string } {
+  const left = ((xMm - xMin) / (xMax - xMin) * 100).toFixed(1) + '%';
+  const top  = ((yMax - yMm) / (yMax - yMin) * 100).toFixed(1) + '%'; // y-axis inverted
+  return { left, top };
 }
 
 /**
@@ -178,7 +217,7 @@ export function renderSkeletonHeatmap(numWeeks = 4): string {
 
   for (let d = 0; d < 7; d++) {
     const x = LABEL_COL + d * STEP + CELL / 2;
-    svg += `<text x="${x}" y="11" text-anchor="middle" font-size="8" fill="var(--secondary-text-color,#9ca3af)" font-family="inherit">${dayLabels[d]}</text>`;
+    svg += `<text x="${x}" y="13" text-anchor="middle" font-size="9" fill="var(--secondary-text-color,#9ca3af)" font-family="inherit">${dayLabels[d]}</text>`;
   }
 
   for (let row = 0; row < numWeeks; row++) {

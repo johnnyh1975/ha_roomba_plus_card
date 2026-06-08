@@ -9,6 +9,7 @@ const emptyState: HistoryZoneState = {
   data: null, loading: false, error: null,
   openDay: null, dayMissions: null, openDaySummary: null,
   lifetimeExpanded: false,
+  historyTab: 'calendar', hazards: [],
 };
 
 function render(
@@ -453,12 +454,11 @@ describe('renderHistoryZone() — H3 room_coverage null-guard', () => {
   };
 
   it('renders without error when record contains room_coverage (v2.2+ field)', () => {
+    // room_coverage is Record<string, number> — keyed by display name, value 0.0–1.0
+    // (corrected from speculative array-of-objects shape in card v1.5.0)
     const record: MissionRecord = {
       ...baseRecord,
-      room_coverage: [
-        { region_id: '1', name: 'Kitchen', coverage_fraction: 0.87,
-          estimated_area_mm2: 8000000, umf_area_mm2: 9200000 },
-      ],
+      room_coverage: { 'Kitchen': 0.87, 'Hallway': 0.60 },
       alignment_confidence: 0.92,
     };
     const day: DaySummary = {
@@ -471,9 +471,10 @@ describe('renderHistoryZone() — H3 room_coverage null-guard', () => {
   });
 
   it('renders without error when alignment_confidence is 0 (edge case)', () => {
+    // Empty dict (not empty array) — no rooms cleaned in this mission
     const record: MissionRecord = {
       ...baseRecord,
-      room_coverage: [],
+      room_coverage: {},
       alignment_confidence: 0,
     };
     const day: DaySummary = {
@@ -483,5 +484,194 @@ describe('renderHistoryZone() — H3 room_coverage null-guard', () => {
     expect(() =>
       render({}, { data: [day], openDay: '2025-05-14', dayMissions: [record], openDaySummary: day })
     ).not.toThrow();
+  });
+});
+
+// ── F7: Coverage heatmap tab toggle ──────────────────────────────────────────
+const coverageCaps = { ...fullCaps, hasCoverageImage: true };
+
+function renderWithCoverage(
+  states: Record<string, ReturnType<typeof st>> = {},
+  stateOpts: Partial<HistoryZoneState> = {},
+) {
+  return renderHistoryZone(
+    makeHass(states),
+    baseConfig,
+    coverageCaps,
+    n,
+    { ...emptyState, ...stateOpts },
+    false,
+  );
+}
+
+describe('renderHistoryZone() — F7 tab toggle', () => {
+  it('tab toggle absent when hasCoverageImage false', () => {
+    const html = render();
+    expect(html).not.toContain('rpc-history-tabs');
+    expect(html).not.toContain('data-history-tab');
+  });
+
+  it('tab toggle present when hasCoverageImage true', () => {
+    const html = renderWithCoverage();
+    expect(html).toContain('rpc-history-tabs');
+    expect(html).toContain('data-history-tab="calendar"');
+    expect(html).toContain('data-history-tab="coverage"');
+  });
+
+  it('calendar tab has active class by default', () => {
+    const html = renderWithCoverage();
+    // The calendar button should have 'active'; coverage should not
+    expect(html).toMatch(/data-history-tab="calendar"[^>]*class="rpc-tab active"|class="rpc-tab active"[^>]*data-history-tab="calendar"/);
+  });
+
+  it('coverage tab has active class when historyTab=coverage', () => {
+    const html = renderWithCoverage({}, { historyTab: 'coverage' });
+    expect(html).toMatch(/data-history-tab="coverage"[^>]*class="rpc-tab active"|class="rpc-tab active"[^>]*data-history-tab="coverage"/);
+  });
+});
+
+// ── F7: Coverage panel ────────────────────────────────────────────────────────
+describe('renderHistoryZone() — F7 coverage panel', () => {
+  const imageState = st('idle', { entity_picture: '/api/image/serve/abc/512x512',
+    x_min_mm: -1000, x_max_mm: 1000, y_min_mm: -800, y_max_mm: 800, last_mission_end: new Date(Date.now() - 3_600_000).toISOString() });
+
+  it('coverage panel renders image when tab=coverage and entity present', () => {
+    const html = renderWithCoverage(
+      { [`image.${n}_coverage_map`]: imageState },
+      { historyTab: 'coverage' },
+    );
+    expect(html).toContain('rpc-coverage-img');
+    expect(html).toContain('/api/image/serve/abc/512x512');
+  });
+
+  it('stuck_events pins rendered with 📍 icon when extent attributes present', () => {
+    const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 4,
+      room_name: 'Kitchen', bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const }];
+    const html = renderWithCoverage(
+      { [`image.${n}_coverage_map`]: imageState },
+      { historyTab: 'coverage', hazards },
+    );
+    expect(html).toContain('rpc-hazard-pin');
+    expect(html).toContain('rpc-pin-stuck_events');
+    expect(html).toContain('📍');
+  });
+
+  it('robot_learned pins rendered with 🚧 icon (Q_coord resolved)', () => {
+    const hazards = [{ gx: null, gy: null, x_mm: 400, y_mm: 200, stuck_count: null,
+      room_name: null, bearing_deg: 90, distance_mm: 450, source: 'robot_learned' as const }];
+    const html = renderWithCoverage(
+      { [`image.${n}_coverage_map`]: imageState },
+      { historyTab: 'coverage', hazards },
+    );
+    expect(html).toContain('rpc-pin-robot_learned');
+    expect(html).toContain('🚧');
+  });
+
+  it('keepout pins rendered with 🚫 icon (Q_coord resolved)', () => {
+    const hazards = [{ gx: null, gy: null, x_mm: -300, y_mm: 500, stuck_count: null,
+      room_name: 'Hallway', bearing_deg: 270, distance_mm: 583, source: 'keepout' as const }];
+    const html = renderWithCoverage(
+      { [`image.${n}_coverage_map`]: imageState },
+      { historyTab: 'coverage', hazards },
+    );
+    expect(html).toContain('rpc-pin-keepout');
+    expect(html).toContain('🚫');
+  });
+
+  it('coverage panel renders without pins when hazards=[]', () => {
+    const html = renderWithCoverage(
+      { [`image.${n}_coverage_map`]: imageState },
+      { historyTab: 'coverage', hazards: [] },
+    );
+    expect(html).toContain('rpc-coverage-img');
+    expect(html).not.toContain('rpc-hazard-pin');
+  });
+
+  it('coverage image renders without pins when extent attrs absent (R2 graceful degradation)', () => {
+    const noExtentState = st('idle', { entity_picture: '/api/image/serve/abc/512x512' });
+    const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 2,
+      room_name: null, bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const }];
+    const html = renderWithCoverage(
+      { [`image.${n}_coverage_map`]: noExtentState },
+      { historyTab: 'coverage', hazards },
+    );
+    expect(html).toContain('rpc-coverage-img');
+    expect(html).not.toContain('rpc-hazard-pin');
+  });
+
+  it('grid accumulating note shown when extent absent but image present (R2)', () => {
+    const noExtentState = st('idle', { entity_picture: '/api/image/serve/abc/512x512' });
+    const html = renderWithCoverage(
+      { [`image.${n}_coverage_map`]: noExtentState },
+      { historyTab: 'coverage' },
+    );
+    expect(html).toContain('grid accumulating');
+  });
+
+  it('legend shows entries only for pin sources that are present', () => {
+    const hazards = [
+      { gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 4, room_name: null,
+        bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const },
+    ];
+    const html = renderWithCoverage(
+      { [`image.${n}_coverage_map`]: imageState },
+      { historyTab: 'coverage', hazards },
+    );
+    expect(html).toContain('📍');       // stuck present
+    expect(html).not.toContain('🚧');  // robot_learned absent
+    expect(html).not.toContain('🚫');  // keepout absent
+  });
+});
+
+// ── F8: Room coverage in day detail popover ───────────────────────────────────
+describe('renderHistoryZone() — F8 room coverage chips', () => {
+  const baseRecord: MissionRecord = {
+    id: 'm1', started_at: '2025-05-14T07:14:00Z', ended_at: '2025-05-14T07:51:00Z',
+    duration_min: 37, run_min: null, area_sqft: 412,
+    result: 'completed', initiator: 'schedule', zones: [],
+    error_code: null, recharges: null, evacuations: null,
+    dirt_events: null, wifi_signal: null, source: 'cloud',
+  };
+  const day: DaySummary = {
+    date: '2025-05-14', total: 1, completed: 1, stuck: 0,
+    area_sqft: 412, result: 'completed',
+  };
+
+  it('room_coverage chips rendered with correct colour classes', () => {
+    const record: MissionRecord = { ...baseRecord,
+      room_coverage: { 'Kitchen': 0.82, 'Hallway': 0.65, 'Bathroom': 0.48 } };
+    const html = render({}, { data: [day], openDay: '2025-05-14',
+      dayMissions: [record], openDaySummary: { ...day, missions: [record] } });
+    expect(html).toContain('rpc-cov-green');   // Kitchen 82% ≥ 80
+    expect(html).toContain('rpc-cov-amber');   // Hallway 65%  60–79
+    expect(html).toContain('rpc-cov-red');     // Bathroom 48% < 60
+    expect(html).toContain('Kitchen 82%');
+    expect(html).toContain('Hallway 65%');
+    expect(html).toContain('Bathroom 48%');
+  });
+
+  it('alignment note shown when confidence < 0.85', () => {
+    const record: MissionRecord = { ...baseRecord,
+      room_coverage: { 'Kitchen': 0.75 }, alignment_confidence: 0.72 };
+    const html = render({}, { data: [day], openDay: '2025-05-14',
+      dayMissions: [record], openDaySummary: { ...day, missions: [record] } });
+    expect(html).toContain('alignment confidence: 72%');
+    expect(html).toContain('rpc-alignment-note');
+  });
+
+  it('alignment note absent when confidence ≥ 0.85', () => {
+    const record: MissionRecord = { ...baseRecord,
+      room_coverage: { 'Kitchen': 0.90 }, alignment_confidence: 0.91 };
+    const html = render({}, { data: [day], openDay: '2025-05-14',
+      dayMissions: [record], openDaySummary: { ...day, missions: [record] } });
+    expect(html).not.toContain('alignment confidence');
+    expect(html).not.toContain('rpc-alignment-note');
+  });
+
+  it('room_coverage block absent when field undefined', () => {
+    const record: MissionRecord = { ...baseRecord };
+    const html = render({}, { data: [day], openDay: '2025-05-14',
+      dayMissions: [record], openDaySummary: { ...day, missions: [record] } });
+    expect(html).not.toContain('rpc-room-coverage');
   });
 });

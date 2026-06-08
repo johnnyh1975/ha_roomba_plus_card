@@ -150,3 +150,24 @@ describe('detectCapabilities() — B1 regression: most recent record used', () =
     expect(capsOld.hasWifiSignal).toBe(false);
   });
 });
+
+// ── A4: hasLifetimeArea — sensor.*_recent_area_30d (renamed in integration v2.1.2) ──
+describe('detectCapabilities() — hasLifetimeArea (A4)', () => {
+  it('hasLifetimeArea false when recent_area_30d entity absent', () => {
+    const caps = detectCapabilities(makeHass(), n, baseConfig, null);
+    expect(caps.hasLifetimeArea).toBe(false);
+  });
+
+  it('hasLifetimeArea true when recent_area_30d entity present', () => {
+    const hass = makeHass({ [`sensor.${n}_recent_area_30d`]: '12345' });
+    const caps = detectCapabilities(hass, n, baseConfig, null);
+    expect(caps.hasLifetimeArea).toBe(true);
+  });
+
+  it('hasLifetimeArea false when legacy lifetime_area entity present (regression guard)', () => {
+    // Confirms the old slug no longer triggers the flag — entity was renamed in v2.1.2
+    const hass = makeHass({ [`sensor.${n}_lifetime_area`]: '12345' });
+    const caps = detectCapabilities(hass, n, baseConfig, null);
+    expect(caps.hasLifetimeArea).toBe(false);
+  });
+});

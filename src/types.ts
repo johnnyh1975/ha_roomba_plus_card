@@ -86,20 +86,23 @@ export interface MissionRecord {
   wifi_signal: number[] | null; // cloud only
   source: 'cloud' | 'local';
   // ── v2.2+ fields (integration ≥ 2.2.0) ───────────────────────────────────
-  /** Per-room coverage fractions — present in format=records when GridStore is available */
-  room_coverage?: RoomCoverage[];
-  /** Spatial alignment confidence 0–1; shown as footnote when < 0.85 */
+  /** Per-room coverage fractions — keyed by room display name, value 0.0–1.0.
+   *  Source: timeline.finEvents room.totalArea/area ratio (v2.2) or UmfAligner
+   *  polygon intersection (v2.3+). Present when cloud credentials configured
+   *  and robot has SMART map. null for whole-home missions. */
+  room_coverage?: RoomCoverage;
+  /** Spatial alignment confidence 0–1; shown as footnote when < 0.85.
+   *  Present from integration v2.3+ (UmfAligner). null on v2.2. */
   alignment_confidence?: number;
 }
 
-/** Room-level coverage record within a MissionRecord (v2.2+) */
-export interface RoomCoverage {
-  region_id: string;
-  name: string;
-  coverage_fraction: number;    // 0–1
-  estimated_area_mm2: number;
-  umf_area_mm2: number;
-}
+/** Per-room coverage fractions within a MissionRecord (v2.2+).
+ *  Keys are room display names; values are coverage fraction 0.0–1.0.
+ *  e.g. { "Kitchen": 0.75, "Hallway": 0.60 }
+ *  Matches the format=records REST API shape exactly.
+ *  NOTE: the previous array-of-objects shape was speculative (v2.3 UmfAligner).
+ *  Corrected to dict shape in card v1.5.0. */
+export type RoomCoverage = Record<string, number>;
 
 /** Obstacle/hazard pin from GET …/mission_history?format=hazards (integration ≥ v2.2) */
 export interface HazardRecord {

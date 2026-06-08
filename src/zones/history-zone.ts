@@ -1,6 +1,6 @@
-import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord } from '../types.js';
-import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct } from '../heatmap.js';
-import { esc } from '../utils.js';
+import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord } from '../types.js';
+import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, mmToImagePct } from '../heatmap.js';
+import { esc, timeSince } from '../utils.js';
 
 export interface HistoryZoneState {
   data: DaySummary[] | null;
@@ -13,11 +13,32 @@ export interface HistoryZoneState {
   openDaySummary: DaySummary | null;
   /** C1: whether the lifetime stats footer is expanded */
   lifetimeExpanded: boolean;
+  /** F7: active tab — 'calendar' (default) or 'coverage' (requires hasCoverageImage) */
+  historyTab: 'calendar' | 'coverage';
+  /** F7: hazard pins from format=hazards — all three sources (stuck_events / robot_learned / keepout) */
+  hazards: HazardRecord[];
 }
 
 function formatArea(sqft: number, useMetric: boolean): string {
   if (useMetric) return `${Math.round(sqft * 0.0929)} m²`;
   return `${sqft} ft²`;
+}
+
+/** Return emoji icon for a hazard pin by source type */
+function pinIcon(source: string): string {
+  if (source === 'robot_learned') return '🚧';
+  if (source === 'keepout')       return '🚫';
+  return '📍'; // stuck_events (default)
+}
+
+/** Build a tooltip string for a hazard pin */
+function buildPinTip(h: HazardRecord): string {
+  const room = h.room_name ? ` · ${h.room_name}` : '';
+  if (h.source === 'stuck_events')
+    return `Stuck hotspot${h.stuck_count ? ` (${h.stuck_count}×)` : ''}${room}`;
+  if (h.source === 'robot_learned') return `Robot-detected obstacle${room}`;
+  if (h.source === 'keepout')       return `Keep-out zone${room}`;
+  return 'Hazard';
 }
 
 export function renderHistoryZone(
@@ -34,6 +55,7 @@ export function renderHistoryZone(
   const days = config.history_days ?? 28;
   const unit = config.area_unit ?? 'auto';
   const useMetric = unit === 'm2' || (unit === 'auto' && isMetric);
+  const { historyTab, hazards } = state;
 
   // Summary bar (streak + completion rate)
   const streakEntity     = hass.states[`sensor.${n}_clean_streak`];
@@ -61,6 +83,72 @@ export function renderHistoryZone(
     summaryHtml = `<div class="rpc-history-summary">${
       summaryParts.map((p, i) => i === 0 ? p : `<span class="rpc-summary-sep">·</span>${p}`).join('')
     }</div>`;
+  }
+
+  // F7 — Tab toggle (Calendar / Coverage): only when hasCoverageImage
+  const tabToggleHtml = caps.hasCoverageImage ? `
+    <div class="rpc-history-tabs">
+      <button class="rpc-tab${historyTab === 'calendar' ? ' active' : ''}" data-history-tab="calendar">Calendar</button>
+      <button class="rpc-tab${historyTab === 'coverage' ? ' active' : ''}" data-history-tab="coverage">Coverage</button>
+    </div>` : '';
+
+  // F7 — Coverage panel (replaces heatmap when tab='coverage')
+  let coveragePanelHtml = '';
+  if (caps.hasCoverageImage && historyTab === 'coverage') {
+    const imageEntity = hass.states[`image.${n}_coverage_map`];
+    const attrs       = imageEntity?.attributes ?? {};
+    const xMin        = attrs['x_min_mm'] as number | undefined;
+    const xMax        = attrs['x_max_mm'] as number | undefined;
+    const yMin        = attrs['y_min_mm'] as number | undefined;
+    const yMax        = attrs['y_max_mm'] as number | undefined;
+    const entityPic   = attrs['entity_picture'] as string | undefined;
+    const lastEnd     = attrs['last_mission_end'] as string | undefined;
+    const hasExtent   = xMin != null && xMax != null && yMin != null && yMax != null;
+
+    // All three pin sources renderable (Q_coord resolved: Q6+Q_new confirmed with v2.3.0)
+    // robot_learned/keepout centroids use UMF space — UmfAligner provides pose transform.
+    // TODO v2.0: keepout polygon outlines (centroid pins only here)
+    const pinHtml = hasExtent
+      ? hazards.map(h => {
+          const pos  = mmToImagePct(h.x_mm, h.y_mm, xMin!, xMax!, yMin!, yMax!);
+          const tip  = esc(buildPinTip(h));
+          const icon = pinIcon(h.source);
+          return `<div class="rpc-hazard-pin rpc-pin-${h.source}" style="left:${pos.left};top:${pos.top}" title="${tip}" aria-label="${tip}">${icon}</div>`;
+        }).join('')
+      : '';
+
+    const noExtentNote = !hasExtent && entityPic
+      ? `<div class="rpc-coverage-note">Spatial overlay unavailable — grid accumulating</div>`
+      : '';
+
+    const updatedLine = lastEnd
+      ? `<div class="rpc-coverage-updated">Updated ${timeSince(lastEnd, hass.language)}</div>`
+      : '';
+
+    // Build legend — only show entries for pin sources that are present
+    const hasPinStuck   = hazards.some(h => h.source === 'stuck_events');
+    const hasPinRobot   = hazards.some(h => h.source === 'robot_learned');
+    const hasPinKeeout  = hazards.some(h => h.source === 'keepout');
+    const legendPins    = [
+      hasPinStuck  ? '<span>📍</span> Stuck hotspot'      : '',
+      hasPinRobot  ? '<span>🚧</span> Robot obstacle'      : '',
+      hasPinKeeout ? '<span>🚫</span> Keep-out zone'       : '',
+    ].filter(Boolean).join(' ');
+
+    coveragePanelHtml = entityPic ? `
+      <div class="rpc-coverage-panel">
+        <div class="rpc-coverage-image-wrap">
+          <img class="rpc-coverage-img" src="${entityPic}" alt="Coverage map" />
+          ${pinHtml}
+        </div>
+        ${noExtentNote}
+        <div class="rpc-coverage-legend">
+          <span style="color:var(--rpc-green)">●</span> High coverage
+          <span style="color:var(--rpc-grey-mid,#9ca3af)">●</span> Rarely cleaned
+          ${legendPins}
+        </div>
+        ${updatedLine}
+      </div>` : `<div class="rpc-history-error">Coverage map unavailable</div>`;
   }
 
   // Heatmap area
@@ -132,11 +220,24 @@ export function renderHistoryZone(
           wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal: minimum ${minWifi}% during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${minWifi}% min</span></div>`;
         }
 
-        // v2.0 (F8) — room_coverage and alignment_confidence rendered here.
-        // Fields may arrive in format=records from integration v2.2 onward.
-        // Intentionally unused until F8 is implemented in card v2.0.
-        void (m.room_coverage        ?? null);
-        void (m.alignment_confidence ?? null);
+        // F8 — Room coverage fractions (integration ≥ v2.2, UmfAligner v2.3 for higher accuracy)
+        // room_coverage is Record<string, number> keyed by room display name, value 0.0–1.0
+        let roomCoverageHtml = '';
+        if (m.room_coverage && Object.keys(m.room_coverage).length > 0) {
+          const chips = Object.entries(m.room_coverage)
+            .map(([name, frac]) => {
+              const pct = Math.round(frac * 100);
+              const cls = pct >= 80 ? 'rpc-cov-green' : pct >= 60 ? 'rpc-cov-amber' : 'rpc-cov-red';
+              return `<span class="${cls}">${esc(name)} ${pct}%</span>`;
+            }).join(' · ');
+          roomCoverageHtml = `<div class="rpc-room-coverage">${chips}</div>`;
+        }
+        // Alignment confidence footnote (v2.3+): shown only when < 0.85 threshold
+        let alignmentNote = '';
+        if (m.alignment_confidence != null && m.alignment_confidence < 0.85) {
+          const confPct = Math.round(m.alignment_confidence * 100);
+          alignmentNote = `<div class="rpc-alignment-note">* Coverage estimates (alignment confidence: ${confPct}%)</div>`;
+        }
 
         return `
           <div class="rpc-day-mission">
@@ -147,6 +248,8 @@ export function renderHistoryZone(
             ${demandBadge}
             ${meta ? `<div class="rpc-day-zones">${meta}</div>` : ''}
             ${wifiHtml}
+            ${roomCoverageHtml}
+            ${alignmentNote}
           </div>`;
       }).join('');
     } else if (summary && summary.total > 0) {
@@ -222,8 +325,9 @@ export function renderHistoryZone(
     <div class="rpc-zone rpc-zone6">
       <div class="rpc-zone-header">LAST ${days} DAYS</div>
       ${summaryHtml}
+      ${tabToggleHtml}
       <div class="rpc-heatmap-wrap" data-heatmap>
-        ${heatmapHtml}
+        ${historyTab === 'coverage' && caps.hasCoverageImage ? coveragePanelHtml : heatmapHtml}
       </div>
       ${problemHtml}
       ${popoverHtml}
