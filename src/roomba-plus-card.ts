@@ -3,7 +3,7 @@
  * Spec: roomba_plus_card_spec.md + roomba_plus_card_wave_features.md (Wave A)
  */
 
-import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord } from './types.js';
+import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, HouseholdSummary } from './types.js';
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
 import { renderStatusZone }       from './zones/status-zone.js';
@@ -12,6 +12,7 @@ import { renderHealthZone }       from './zones/health-zone.js';
 import { renderScheduleZone }     from './zones/schedule-zone.js';
 import { renderAlertZone }        from './zones/alert-zone.js';
 import { renderHistoryZone }      from './zones/history-zone.js';
+import { renderHouseholdZone }    from './zones/household-zone.js';
 import { CHIP_TO_OPTION, OPTION_TO_CHIP } from './zones/room-selector-zone.js';
 
 // ──────────────────────────────────────────────
@@ -432,6 +433,36 @@ const STYLES = `
     width: 100%; padding-left: 20px;
     font-size: 0.70rem; color: var(--secondary-text-color); margin-top: 2px;
   }
+
+  /* ── v1.6 — Status zone: destination + cleaned rooms + demand ─────────────── */
+  .rpc-mission-dest   { font-size: 0.80rem; color: var(--secondary-text-color); margin-top: 4px; padding-left: 2px; }
+  .rpc-cleaned-rooms  { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 0.80rem; }
+  .rpc-cleaned-chip   { background: var(--secondary-background-color, #f3f4f6); border-radius: 10px; padding: 2px 8px; }
+  .rpc-demand-blocked { font-size: 0.80rem; color: var(--rpc-amber); margin-top: 6px; padding-left: 2px; }
+
+  /* ── v1.6 — History zone: traversal row ─────────────────────────────────── */
+  .rpc-traversal-row  { width: 100%; padding-left: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-size: 0.75rem; margin-top: 3px; color: var(--secondary-text-color); }
+  .rpc-trav-room      { white-space: nowrap; }
+  .rpc-trav-sep       { color: var(--secondary-text-color); font-size: 0.70rem; }
+  .rpc-mission-dest-popover { width: 100%; padding-left: 20px; font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 2px; }
+
+  /* ── v1.6 — Health zone: energy row ─────────────────────────────────────── */
+  .rpc-energy-val     { font-size: 0.82rem; color: var(--secondary-text-color); margin-left: auto; }
+
+  /* ── v1.6 — Schedule zone: optimal window ───────────────────────────────── */
+  .rpc-next-clean--optimal .rpc-schedule-time { color: var(--primary-text-color); }
+  .rpc-optimal-star   { font-size: 0.70rem; color: var(--rpc-blue); margin-left: 4px; vertical-align: super; }
+
+  /* ── v1.6 — Household zone ──────────────────────────────────────────────── */
+  .rpc-zone7            { }
+  .rpc-household-robot  { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 0.82rem; }
+  .rpc-household-name   { font-weight: 500; min-width: 80px; }
+  .rpc-household-meta   { font-size: 0.75rem; color: var(--secondary-text-color); margin-left: auto; }
+  .rpc-household-combined { border-top: 1px solid var(--divider-color, rgba(0,0,0,.08)); padding-top: 6px; margin-top: 2px; }
+  .rpc-household-divider  { height: 1px; background: var(--divider-color, rgba(0,0,0,.08)); margin: 4px 0; }
+  .rpc-household-floors   { margin-bottom: 4px; }
+  .rpc-household-floor    { display: flex; align-items: baseline; gap: 8px; font-size: 0.75rem; color: var(--secondary-text-color); padding: 2px 0; }
+  .rpc-household-floor-label { font-weight: 500; }
 `;
 
 // ──────────────────────────────────────────────
@@ -490,6 +521,7 @@ class RoombaPlusCard extends HTMLElement {
   private lifetimeExpanded = false;      // C1: lifetime stats footer expanded
   private hazards: HazardRecord[] = [];  // F7: coverage map hazard pins (fetched with history)
   private historyTab: 'calendar' | 'coverage' = 'calendar'; // F7: active tab in history zone
+  private householdData: HouseholdSummary | null = null;     // F17: household summary (multi-robot only)
   private apiClient: MissionApiClient | null = null;
   private prevVacuumState  = '';
   private prevMissionActive = '';   // tracks binary_sensor.*_mission_active across updates
@@ -682,6 +714,7 @@ class RoombaPlusCard extends HTMLElement {
     this.lifetimeExpanded  = false;
     this.hazards           = [];              // F7: clear pins on robot switch
     this.historyTab        = 'calendar';      // F7: reset to default tab
+    this.householdData     = null;            // F17: clear household data on robot switch
     this.prevVacuumState   = '';
     this.prevMissionActive = '';
     this.alertsVisible     = false;
@@ -752,12 +785,18 @@ class RoombaPlusCard extends HTMLElement {
       // F7: fetch hazard pins — returns [] gracefully on integration < v2.2 or no data
       const hazards = await this.apiClient.fetchHazards();
 
+      // F17: fetch household summary — multi-robot configs only; global endpoint
+      const householdData = (this.config.entities?.length ?? 0) >= 2
+        ? await this.apiClient.fetchHousehold(days)
+        : null;
+
       this.missionData  = summary;
       // Tier 2 cap detection: use the MOST RECENT record/summary — oldest may be
       // local-only (no wifi_signal, no room_coverage) even when recent ones are cloud.
       this.firstRecord  = records.length > 0 ? records[records.length - 1] : null;
       this.firstSummary = summary.length > 0 ? summary[summary.length - 1] : null;
       this.hazards      = hazards;
+      this.householdData = householdData;
     } catch (e: unknown) {
       const status = (e as Error).message;
       this.historyError = status === '404'
@@ -831,6 +870,7 @@ class RoombaPlusCard extends HTMLElement {
             lifetimeExpanded: this.lifetimeExpanded,
             historyTab: this.historyTab, hazards: this.hazards },
           isMetric)}
+        ${renderHouseholdZone(this._hass, this.config, caps, this.householdData, isMetric)}
       </div>
     `;
 

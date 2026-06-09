@@ -675,3 +675,69 @@ describe('renderHistoryZone() — F8 room coverage chips', () => {
     expect(html).not.toContain('rpc-room-coverage');
   });
 });
+
+// ── F12: Cleaned rooms sequence in today's day detail ─────────────────────────
+describe('renderHistoryZone() — F12 cleaned rooms sequence', () => {
+  const todayStr = new Date().toLocaleDateString('en-CA');
+
+  const todayRecord: MissionRecord = {
+    id: 'm1', started_at: `${todayStr}T07:14:00Z`, ended_at: `${todayStr}T07:51:00Z`,
+    duration_min: 37, run_min: null, area_sqft: 412,
+    result: 'completed', initiator: 'schedule', zones: [],
+    error_code: null, recharges: null, evacuations: null,
+    dirt_events: null, wifi_signal: null, source: 'cloud',
+  };
+  const todaySummary: DaySummary = {
+    date: todayStr, total: 1, completed: 1, stuck: 0,
+    area_sqft: 412, result: 'completed',
+  };
+
+  it('sequence row shown when openDay is today and last_cleaned_rooms present', () => {
+    const html = renderHistoryZone(
+      makeHass({ [`vacuum.roomba`]: st('docked', { last_cleaned_rooms: ['Kitchen', 'Hallway'] }) }),
+      baseConfig, fullCaps, 'roomba',
+      { ...emptyState, data: [todaySummary], openDay: todayStr,
+        dayMissions: [todayRecord], openDaySummary: todaySummary },
+      false,
+    );
+    expect(html).toContain('rpc-traversal-row');
+    expect(html).toContain('Kitchen');
+    expect(html).toContain('rpc-trav-sep');
+  });
+
+  it('sequence row absent when openDay is not today', () => {
+    const html = renderHistoryZone(
+      makeHass({ [`vacuum.roomba`]: st('docked', { last_cleaned_rooms: ['Kitchen'] }) }),
+      baseConfig, fullCaps, 'roomba',
+      { ...emptyState, data: [todaySummary], openDay: '2025-01-01',
+        dayMissions: [todayRecord], openDaySummary: todaySummary },
+      false,
+    );
+    expect(html).not.toContain('rpc-traversal-row');
+  });
+
+  it('sequence row absent when last_cleaned_rooms is empty', () => {
+    const html = renderHistoryZone(
+      makeHass({ [`vacuum.roomba`]: st('docked', { last_cleaned_rooms: [] }) }),
+      baseConfig, fullCaps, 'roomba',
+      { ...emptyState, data: [todaySummary], openDay: todayStr,
+        dayMissions: [todayRecord], openDaySummary: todaySummary },
+      false,
+    );
+    expect(html).not.toContain('rpc-traversal-row');
+  });
+
+  it('mission_destination line shown below sequence when attribute present', () => {
+    const html = renderHistoryZone(
+      makeHass({ [`vacuum.roomba`]: st('docked', {
+        last_cleaned_rooms: ['Kitchen'], mission_destination: 'Kitchen',
+      }) }),
+      baseConfig, fullCaps, 'roomba',
+      { ...emptyState, data: [todaySummary], openDay: todayStr,
+        dayMissions: [todayRecord], openDaySummary: todaySummary },
+      false,
+    );
+    expect(html).toContain('rpc-mission-dest-popover');
+    expect(html).toContain('Final: Kitchen');
+  });
+});

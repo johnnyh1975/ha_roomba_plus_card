@@ -1,6 +1,7 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord } from '../types.js';
 import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, mmToImagePct } from '../heatmap.js';
 import { esc, timeSince } from '../utils.js';
+import { MDI_TO_EMOJI } from '../const.js';
 
 export interface HistoryZoneState {
   data: DaySummary[] | null;
@@ -56,6 +57,18 @@ export function renderHistoryZone(
   const unit = config.area_unit ?? 'auto';
   const useMetric = unit === 'm2' || (unit === 'auto' && isMetric);
   const { historyTab, hazards } = state;
+
+  // F11/F12: vacuum entity attributes — reflect the most recent mission.
+  // last_cleaned_rooms is a live attribute; it is NOT per-mission historical data.
+  const vacAttrs     = hass.states[`vacuum.${n}`]?.attributes ?? {};
+  const regionIcons  = (vacAttrs.region_icons  ?? {}) as Record<string, string>;
+  const lastRooms    = (vacAttrs.last_cleaned_rooms ?? []) as string[];
+  const missionDest  = (vacAttrs.mission_destination ?? null) as string | null;
+
+  // F12: sequence row only available for today's missions.
+  // en-CA locale gives YYYY-MM-DD in all environments without toISOString() UTC drift.
+  const todayDateStr = new Date().toLocaleDateString('en-CA');
+  const isToday      = state.openDay === todayDateStr;
 
   // Summary bar (streak + completion rate)
   const streakEntity     = hass.states[`sensor.${n}_clean_streak`];
@@ -158,7 +171,7 @@ export function renderHistoryZone(
   } else if (state.error) {
     heatmapHtml = `<div class="rpc-history-error">${esc(state.error)}</div>`;
   } else if (state.data) {
-    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language);
+    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language, caps.hasDirtDensity);
     // Show partial message if API returned fewer calendar days than requested
     if (state.data.length < days) {
       heatmapHtml += `<div class="rpc-history-partial">Showing ${state.data.length} of ${days} days — full history builds over time</div>`;
@@ -194,7 +207,7 @@ export function renderHistoryZone(
       missionRows = '<div class="rpc-day-empty">No missions this day</div>';
     } else if (missions.length > 0) {
       // Real per-mission data from API
-      missionRows = missions.map(m => {
+      missionRows = missions.map((m, index) => {
         const icon  = m.result === 'completed' ? '✓' : '✗';
         const cls   = m.result === 'completed' ? 'rpc-day-ok' : 'rpc-day-err';
         const start = new Date(m.started_at).toLocaleTimeString(hass.language, { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -218,6 +231,23 @@ export function renderHistoryZone(
           const minWifi     = Math.min(...pctReadings);
           const sparkSvg    = renderSparkline(pctReadings, minWifi);
           wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal: minimum ${minWifi}% during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${minWifi}% min</span></div>`;
+        }
+
+        // F12 — Cleaned rooms sequence (today's most recent mission only).
+        // last_cleaned_rooms is a vacuum entity attribute — not per-mission REST data.
+        // Sequence row attaches only to the last mission in today's list.
+        let sequenceHtml = '';
+        const isLastMissionToday = isToday && index === missions.length - 1;
+        if (isLastMissionToday && lastRooms.length > 0) {
+          const chips = lastRooms.map(name => {
+            const mdi  = regionIcons[name];
+            const icon = mdi ? (MDI_TO_EMOJI[mdi] ?? '') : '';
+            return `<span class="rpc-trav-room">${icon ? icon + '\u00a0' : ''}${esc(name)}</span>`;
+          }).join('<span class="rpc-trav-sep">→</span>');
+          const destLine = missionDest
+            ? `<div class="rpc-mission-dest-popover">→ Final: ${esc(missionDest)}</div>`
+            : '';
+          sequenceHtml = `<div class="rpc-traversal-row">${chips}</div>${destLine}`;
         }
 
         // F8 — Room coverage fractions (integration ≥ v2.2, UmfAligner v2.3 for higher accuracy)
@@ -248,6 +278,7 @@ export function renderHistoryZone(
             ${demandBadge}
             ${meta ? `<div class="rpc-day-zones">${meta}</div>` : ''}
             ${wifiHtml}
+            ${sequenceHtml}
             ${roomCoverageHtml}
             ${alignmentNote}
           </div>`;

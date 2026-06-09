@@ -1,6 +1,7 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary } from '../types.js';
 import { esc, timeSince } from '../utils.js';
 import { renderSettingsPanel } from './room-selector-zone.js';
+import { MDI_TO_EMOJI } from '../const.js';
 
 type VacuumState = 'cleaning' | 'paused' | 'returning' | 'docked' | 'idle' | 'error' | 'unavailable';
 
@@ -230,6 +231,39 @@ export function renderStatusZone(props: StatusZoneProps): string {
     }
   }
 
+  // ── F11: Mission destination indicator (during cleaning) ──
+  // Reads from vacuum entity attribute — present when robot is executing a room-targeted mission.
+  const missionDest = attrs.mission_destination as string | undefined;
+  const destHtml = (vacState === 'cleaning' && missionDest)
+    ? `<div class="rpc-mission-dest">→ Targeting: ${esc(missionDest)}</div>`
+    : '';
+
+  // ── F13: Demand cleaning blocked indicator (integration v2.4 F11) ──
+  // Shows when floor is dirty but robot cannot start — home is occupied.
+  let demandHtml = '';
+  if (caps.hasDemandBlocked) {
+    if (hass.states[`binary_sensor.${n}_demand_clean_blocked`]?.state === 'on') {
+      demandHtml = `<div class="rpc-demand-blocked">🧹 Floor needs cleaning — waiting for home to be empty</div>`;
+    }
+  }
+
+  // ── F11: Last cleaned rooms chip row (docked, after mission) ──
+  // Only when caps.hasCleanedRooms (last_cleaned_rooms attribute non-empty).
+  // Absent during mid-mission recharge (robot hasn't finished yet).
+  let cleanedRoomsHtml = '';
+  if (caps.hasCleanedRooms && (vacState === 'docked' || vacState === 'idle') && !isRecharging) {
+    const rooms      = attrs.last_cleaned_rooms as string[] | undefined;
+    const regionIcons = attrs.region_icons as Record<string, string> | undefined;
+    if (rooms && rooms.length > 0) {
+      const chips = rooms.map(name => {
+        const mdi  = regionIcons?.[name];
+        const icon = mdi ? (MDI_TO_EMOJI[mdi] ?? '') : '';
+        return `<span class="rpc-cleaned-chip">${icon ? icon + '\u00a0' : ''}${esc(name)}</span>`;
+      }).join('');
+      cleanedRoomsHtml = `<div class="rpc-cleaned-rooms">${chips}</div>`;
+    }
+  }
+
   // ── Quick action buttons ──
   const spinnerSvg = `<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>`;
 
@@ -283,8 +317,11 @@ export function renderStatusZone(props: StatusZoneProps): string {
       ${areaTodayHtml}
       ${errorHtml}
       ${progressHtml}
+      ${destHtml}
       ${metricsHtml}
       ${dockedHtml}
+      ${demandHtml}
+      ${cleanedRoomsHtml}
       ${buttons ? `<div class="rpc-actions">${buttons}</div>` : ''}
       ${relocatedSettings}
     </div>

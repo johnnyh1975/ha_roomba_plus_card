@@ -219,3 +219,44 @@ describe('renderSkeletonHeatmap() — fixed-size SVG', () => {
     expect(html).toMatch(/height="\d+"/);
   });
 });
+
+// ── F16: Dirt density opacity modulation ─────────────────────────────────────
+describe('renderHeatmap() — F16 dirt density opacity', () => {
+  const day = (date: string, opts: Partial<import('../../src/types').DaySummary> = {}) => ({
+    date, total: 1, completed: 1, stuck: 0, area_sqft: 100, result: 'completed' as const, ...opts,
+  });
+
+  it('cell renders without opacity attribute when showDirtDensity false (default)', () => {
+    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: 2.0 })], 7, 'auto');
+    // No opacity attribute should appear when flag is off
+    expect(html).not.toContain('opacity=');
+  });
+
+  it('cell has opacity < 1.0 when relative_to_baseline < 1.0 (cleaner than usual)', () => {
+    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: 0.5 })], 7, 'auto', 'en-US', true);
+    expect(html).toContain('opacity="');
+    // 0.5 + 0.5/4 = 0.625 → clamped to 0.63
+    const match = html.match(/opacity="([\d.]+)"/);
+    expect(match).not.toBeNull();
+    expect(parseFloat(match![1])).toBeLessThan(1.0);
+  });
+
+  it('cell opacity at max 1.0 when relative_to_baseline is high', () => {
+    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: 4.0 })], 7, 'auto', 'en-US', true);
+    const match = html.match(/opacity="([\d.]+)"/);
+    expect(match).not.toBeNull();
+    expect(parseFloat(match![1])).toBe(1.0);
+  });
+
+  it('cell opacity clamped to minimum 0.5 when relative_to_baseline is 0', () => {
+    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: 0 })], 7, 'auto', 'en-US', true);
+    const match = html.match(/opacity="([\d.]+)"/);
+    expect(match).not.toBeNull();
+    expect(parseFloat(match![1])).toBe(0.5);
+  });
+
+  it('opacity attribute absent when relative_to_baseline is null', () => {
+    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: null })], 7, 'auto', 'en-US', true);
+    expect(html).not.toContain('opacity=');
+  });
+});

@@ -134,3 +134,37 @@ describe('renderScheduleZone() — Wave B2 next likely window', () => {
     expect(html).toContain('rpc-zone4');
   });
 });
+
+// ── F15: Optimal window ───────────────────────────────────────────────────────
+describe('renderScheduleZone() — F15 optimal window', () => {
+  it('optimal window renders with ★ marker when hasOptimalWindow and entity present', () => {
+    const capsWithOptimal = { ...defaultCaps, hasOptimalWindow: true };
+    const html = renderScheduleZone(
+      makeHass({ [`sensor.roomba_optimal_clean_window`]: st('2026-06-12T10:30:00Z') }),
+      baseConfig, capsWithOptimal, n, defaultState,
+    );
+    expect(html).toContain('rpc-next-clean--optimal');
+    expect(html).toContain('★');
+    expect(html).toContain('Optimal window');
+  });
+
+  it('optimal window absent when hasOptimalWindow false', () => {
+    const html = renderScheduleZone(
+      makeHass({
+        [`sensor.roomba_optimal_clean_window`]: st('2026-06-12T10:30:00Z'),
+        [`sensor.roomba_next_clean`]: st('2026-06-12T09:00:00Z'),
+      }),
+      baseConfig, defaultCaps, n, defaultState,
+    );
+    expect(html).not.toContain('rpc-next-clean--optimal');
+  });
+
+  it('zone renders when optimal_clean_window is the only entity present', () => {
+    const capsWithOptimal = { ...defaultCaps, hasOptimalWindow: true };
+    const html = renderScheduleZone(
+      makeHass({ [`sensor.roomba_optimal_clean_window`]: st('2026-06-12T10:30:00Z') }),
+      baseConfig, capsWithOptimal, n, defaultState,
+    );
+    expect(html).toContain('rpc-zone4');
+  });
+});

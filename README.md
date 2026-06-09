@@ -1,27 +1,14 @@
 # Roomba+ Card
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![Version](https://img.shields.io/badge/version-1.6-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
 [![HACS installs](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johnnyh1975&repository=ha_roomba_plus_card&category=dashboard)
-[![Version](https://img.shields.io/badge/version-1.5-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
 
-A full-featured Lovelace card for the [`roomba_plus`](https://github.com/johnnyh1975/roomba_plus) Home Assistant integration.
+The companion Lovelace card for the [`roomba_plus`](https://github.com/johnnyh1975/roomba_plus) Home Assistant integration. One card surfaces everything about your Roomba or Braava — current status, room selector, consumable health, scheduling, alerts, and 28-day cleaning history.
 
-> **Requires:** `roomba_plus` ≥ 2.2.0 · Home Assistant ≥ 2024.1
+> **Requires:** `roomba_plus` integration ≥ 2.4.0 · Home Assistant ≥ 2024.1
 
----
-
-## Features
-
-| Zone | What you get |
-|------|-------------|
-| **Status** | Live state (cleaning / paused / docked / recharging mid-mission / error / emptying bin), animated progress bar, area cleaned, time remaining, vs-usual delta. Quick-action buttons: Start, Pause, Resume, Return home, Locate, Cancel mission. |
-| **Rooms** | Tap-to-select room chips for targeted cleaning. Pass-count selector (Auto / ×1 / ×2). Repeat last mission shortcut. Collapsed settings panel (edge clean, always finish, carpet boost). |
-| **Health** | Consumable bars for Filter, Brush/Pad, Battery, Tank, Clean Base — colour-coded green → amber → red. Tap any bar for detail + "Mark as replaced". Wear trend arrows (↑ → ↓) with one-time legend when L4 installed. |
-| **Schedule & Presence** | Next scheduled clean time, next likely clean window (~estimate). Schedule hold badge (manual / presence-managed). Per-person presence dots. Weekly presence analytics (opportunities / utilisation). |
-| **Alerts** | Collapsed when the robot is healthy. Surfaces errors → bin full → filter wear → brush wear → nav quality — in priority order. 100ms debounce prevents flicker. |
-| **History** | 28-day heatmap calendar (enlarged cells, week-start labels) with tab toggle to coverage heatmap (integration ≥ 2.2, robots with pose data). Streak + completion rate summary. Problem zone callout. Tap any day for mission detail with per-room coverage fractions (cloud + integration ≥ 2.2). Collapsed lifetime stats footer (cloud credentials required). |
-
-Automatically adapts to your robot — 600-series, 900/980, i/s/j-series, and Braava m6 all render correctly from entity presence alone. No manual model configuration needed.
+Works with all iRobot models: 600-series, 900/980, i/s/j-series, and Braava m6. The card detects your robot's capabilities automatically — nothing to configure per model.
 
 ---
 
@@ -29,14 +16,13 @@ Automatically adapts to your robot — 600-series, 900/980, i/s/j-series, and Br
 
 ### Via HACS (recommended)
 
-1. Open HACS → Frontend → **⋮** → Custom repositories
+1. Open **HACS → Frontend → ⋮ → Custom repositories**
 2. Add `https://github.com/johnnyh1975/ha_roomba_plus_card` · Category: **Dashboard**
-3. Click **Download**
-4. Reload the browser
+3. Click **Download** and reload the browser
 
 ### Manual
 
-Copy `dist/roomba-plus-card.js` to `config/www/roomba-plus-card.js`, then add to your dashboard resources:
+Copy `dist/roomba-plus-card.js` to `config/www/roomba-plus-card.js`, then add to **Settings → Dashboards → Resources**:
 
 ```yaml
 url: /local/roomba-plus-card.js
@@ -45,46 +31,100 @@ type: module
 
 ---
 
-## Configuration
+## Quick start
+
+Minimum config — paste this into your dashboard YAML editor:
 
 ```yaml
 type: custom:roomba-plus-card
-entity: vacuum.roomba_i7        # required — your vacuum entity
-show_health: true               # Zone 3 (default: true)
-show_schedule: true             # Zone 4 (default: true)
-show_alerts: true               # Zone 5 (default: true)
-show_history: true              # Zone 6 (default: true)
-show_rooms: true                # Zone 2 (default: true)
-show_settings: true             # settings panel — edge clean, always finish, carpet boost, passes
-                                # when show_rooms:false, settings move into the Status zone
-history_days: 28                # 7 | 14 | 28 (default: 28)
-area_unit: auto                 # auto | sqft | m2 (default: auto)
-presence_entities:              # optional — presence dots in Zone 4
-  - person.alice
-  - person.bob
-show_lifetime: true             # lifetime stats footer (default: true, hidden when cloud sensors absent)
-show_dirt_events: false         # dirt events in day detail (default: false — requires integration ≥ v2.0)
-robot_selector_helper: input_text.active_roomba   # optional — see xiaomi integration below
+entity: vacuum.your_roomba
 ```
 
-All `show_*` options are overrides on top of automatic capability detection. Setting `show_rooms: true` on a 600-series has no effect — the zone is hidden because it has no zone support, regardless of config.
+That's it. The card auto-discovers all companion sensors and adapts to your robot.
 
 ---
 
-## xiaomi-vacuum-map-card Integration
+## What the card shows
 
-Roomba+ Card and [xiaomi-vacuum-map-card](https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card) (~15k stars) are designed to be used **together**, not as alternatives:
+**Status** — Live state with context: cleaning with area and time remaining, mid-mission recharge with resumption countdown, error with description and recovery hint. During a room-targeted clean: the current target room. After docking: which rooms were cleaned and how long ago. Quick actions: Start, Pause, Resume, Return home, Locate.
 
-| Card | Role |
-|------|------|
-| xiaomi-vacuum-map-card | Spatial: floor plan overlay, live robot position, tap-to-clean |
-| Roomba+ Card | Intelligence: mission history, health, alerts, scheduling, settings |
+**Rooms** — Tap room chips to target specific areas. Set pass count (Auto / ×1 / ×2). Repeat last mission in one tap. Settings panel for edge clean, always finish, and carpet boost mode.
 
-**Prerequisites:**
-- xiaomi-vacuum-map-card ≥ v2.0 installed via HACS
-- Roomba+ integration ≥ v2.3.0 (for `calibration` + `rooms` attributes on the map entity)
+**Health** — Colour-coded bars for filter, brush, battery, tank, and Clean Base. Tap any bar to see exact hours remaining, last replacement date, and a one-tap reset. Wear trend arrows show whether each consumable is wearing faster or slower than normal. Battery health (capacity retention, charge cycles, estimated end-of-life) and floor coverage bars when supported.
 
-> ⚠️ **Firmware limitation:** `image.*_cleaning_map` only updates during missions on robots with firmware **< 3.20**. On firmware 3.20+, live path maps are unavailable — the xiaomi card will display the last-known static map image.
+**Schedule & Presence** — Next scheduled clean, presence-derived likely window, and analytically-derived optimal window (★). Hold badge shows whether the schedule is paused manually or by presence automation. Presence dots per person. Weekly clean opportunities vs utilisation.
+
+**Alerts** — Collapsed when the robot is healthy. Surfaces the highest-priority issue: errors, bin full, filter/brush wear, navigation degradation, missed cleaning windows.
+
+**History** — 28-day calendar heatmap. Switch to a coverage heatmap tab on supported robots (i/s/j-series with pose data). Tap any day for per-mission detail: duration, area, room coverage fractions, WiFi signal quality, and — for today's most recent mission — the room sequence. Streak, completion rate, and lifetime stats in a collapsible footer.
+
+**Household** *(2+ robots)* — Combined completion rate and area across all robots for the last 28 days, with per-robot and per-floor breakdowns.
+
+---
+
+## Multiple robots
+
+Add an `entities:` list to switch between robots with a dropdown:
+
+```yaml
+type: custom:roomba-plus-card
+entities:
+  - vacuum.roomba_downstairs
+  - vacuum.roomba_upstairs
+```
+
+The card remembers the last active robot between sessions.
+
+---
+
+## All configuration options
+
+```yaml
+type: custom:roomba-plus-card
+
+# Robot(s) — use entity: for one robot, entities: for multiple
+entity: vacuum.roomba_i7
+# entities:
+#   - vacuum.roomba_downstairs
+#   - vacuum.roomba_upstairs
+
+# Show/hide zones (all default to true)
+show_rooms: true
+show_health: true
+show_schedule: true
+show_alerts: true
+show_history: true
+
+# Settings panel (edge clean / always finish / carpet boost / pass count)
+# When show_rooms: false the settings panel moves into the Status zone
+show_settings: true
+
+# History
+history_days: 28        # 7 | 14 | 28
+show_lifetime: true     # collapsible lifetime stats footer
+show_dirt_events: false # dirt event count in day detail (cloud required)
+
+# Units — auto follows your HA unit system
+area_unit: auto         # auto | sqft | m2
+
+# Presence dots in the Schedule zone
+presence_entities:
+  - person.alice
+  - person.bob
+
+# For xiaomi-vacuum-map-card integration — see section below
+robot_selector_helper: input_text.active_roomba
+```
+
+---
+
+## Using with xiaomi-vacuum-map-card
+
+Roomba+ Card and [xiaomi-vacuum-map-card](https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card) are designed to work **together**: the map card handles spatial interaction (floor plan, live position, tap-to-clean), Roomba+ Card handles intelligence (history, health, alerts, scheduling).
+
+**Requires:** xiaomi-vacuum-map-card ≥ v2.0 · roomba_plus integration ≥ v2.3.0
+
+> ⚠️ Live path maps require robot firmware < 3.20. On firmware 3.20+ the xiaomi card shows the last-known static map.
 
 ### Single robot
 
@@ -95,23 +135,21 @@ cards:
     entity: vacuum.roomba
     map_camera: image.roomba_cleaning_map
     calibration_source:
-      camera: true          # reads calibration from entity attributes (integration ≥ v2.3.0)
+      camera: true      # reads calibration from entity attributes
     rooms:
-      attribute: rooms      # reads room polygons from entity attributes
+      attribute: rooms  # reads room polygons from entity attributes
 
   - type: custom:roomba-plus-card
     entity: vacuum.roomba
-    show_rooms: false       # xiaomi handles room selection
-    show_settings: true     # settings panel moves into Status zone
+    show_rooms: false   # xiaomi handles room selection
+    show_settings: true
 ```
 
-### Multiple robots (two floors)
+### Two robots, two floors
 
 ```yaml
-# Step 1: Create an input_text helper in HA → Settings → Helpers → Create → Text
-#         Name it "active_roomba" — no options to configure, just a text field.
+# 1. Create a Text helper: Settings → Helpers → Text → name it "active_roomba"
 
-# Step 2: Use this dashboard config:
 type: vertical-stack
 cards:
   - type: custom:roomba-plus-card
@@ -147,78 +185,82 @@ cards:
         camera: true
 ```
 
-When you switch robots in the Roomba+ dropdown, the card writes the selected vacuum entity ID to `input_text.active_roomba`. The conditional cards react automatically — only the matching xiaomi card is shown. `input_select` is also supported if you prefer a named dropdown helper.
+Switching robots in the Roomba+ dropdown writes the selected entity ID to `input_text.active_roomba`. The conditional cards react automatically.
+
+### Using with Bubble Card
+
+Place the card inside a Bubble Card pop-up. Use `robot_selector_helper` to wire the active robot to a Bubble Card button row:
+
+```yaml
+# Pop-up card (top-level in your dashboard, not inside a stack)
+type: custom:bubble-card
+card_type: pop-up
+hash: "#roomba"
+
+cards:
+  - type: custom:roomba-plus-card
+    entities:
+      - vacuum.roomba_downstairs
+      - vacuum.roomba_upstairs
+    robot_selector_helper: input_text.active_roomba
+    show_rooms: false
+    show_settings: true
+```
+
+```yaml
+# Trigger button in your Horizontal Buttons Stack
+type: custom:bubble-card
+card_type: button
+button_type: custom
+name: Roomba
+icon: mdi:robot-vacuum
+tap_action:
+  action: navigate
+  navigation_path: "#roomba"
+```
+
+The card's CSS variables chain from HA theme tokens and are compatible with Bubble Card themes out of the box — no extra CSS needed.
 
 ---
 
-## Robot compatibility matrix
+## Robot compatibility
 
 | Feature | 600-series | 900/980 | i/s/j-series | Braava m6 |
-|---------|-----------|---------|--------------|-----------|
-| Status + quick actions | ✅ | ✅ | ✅ | ✅ |
-| Recharge mid-mission state | ✅ | ✅ | ✅ | ✅ |
-| Emptying bin (evac) state | ❌ | ❌ | s9+ only | ❌ |
-| Area / time metrics | ❌ | ✅ | ✅ | ✅ |
-| Room selector | ❌ | ✅ (ephemeral) | ✅ (smart map) | ✅ |
-| Settings panel | ❌ | Partial | ✅ | Partial |
-| Filter bar | ✅ | ✅ | ✅ | ✅ |
-| Brush bar | ✅ | ✅ | ✅ | ❌ |
-| Pad bar | ❌ | ❌ | ❌ | ✅ |
-| Water tank bar | ❌ | ❌ | ❌ | ✅ |
-| Clean Base bar | ❌ | ❌ | s9+ only | ❌ |
-| Wear trend arrows | L4 required | L4 required | L4 required | L4 required |
-| Nav quality alert | ❌ | ❌ | ✅ | ❌ |
-| Schedule / presence | ✅ | ✅ | ✅ | ✅ |
-| Presence analytics | L6 required | L6 required | L6 required | L6 required |
-| History heatmap | ✅ | ✅ | ✅ | ✅ |
-| Coverage heatmap tab | ❌ | ❌¹ | ✅ (pose firmware) | ❌ |
-| Per-room coverage | ❌ | ❌ | ✅ (SMART map + cloud) | ❌ |
+|---|---|---|---|---|
+| Status + controls | ✅ | ✅ | ✅ | ✅ |
+| Room selector | ❌ | ✅ | ✅ | ✅ |
+| Consumable bars | Filter only | ✅ | ✅ | Pad + tank |
+| Coverage heatmap | ❌ | ❌ ¹ | ✅ | ❌ |
+| Per-room coverage | ❌ | ❌ | ✅ (cloud) | ❌ |
+| Scheduling + presence | ✅ | ✅ | ✅ | ✅ |
+| Demand cleaning | ✅ (cloud) | ✅ (cloud) | ✅ (cloud) | ✅ (cloud) |
 | Lifetime stats | Cloud required | Cloud required | Cloud required | Cloud required |
 
-¹ 980-series: pose data absent on firmware ≥ 3.20. Coverage heatmap requires an earlier firmware or a different model.
+¹ 980-series: firmware ≥ 3.20 has no pose data. Coverage heatmap requires an earlier firmware.
+
+Features that say "cloud" require iRobot cloud credentials configured in the integration.
 
 ---
 
-## Integration version requirements
+## Troubleshooting
 
-| Feature | Minimum integration version |
-|---------|-------------------------------|
-| All core zones | 1.8.0 |
-| Recharge mid-mission state, evac phase | 1.9.0 |
-| Wear trend arrows, nav quality alert | 1.9.0 |
-| Presence analytics, next likely window | 1.8.0 (L6) |
-| Lifetime stats | 1.9.0 (cloud credentials) |
-| Dirt events in day detail | 2.0.0 |
-| Battery health (retention %, EOL), coverage bar | 2.1.0 |
-| Speed trend in history summary | 2.1.0 |
-| WiFi sparkline in day detail, WiFi floor alert | 2.1.0 |
-| Consecutive clean skips alert | 2.1.4 |
-| Braava pad consumable bar | 2.1.4 |
-| Coverage heatmap tab, hazard pins | 2.2.0 |
-| Per-room coverage fractions in day detail | 2.2.0 |
-| Mid-mission recharge via `mission_active`, carpet boost select | 2.2.0 |
+**A zone is missing** — The card hides zones when their backing entities are absent. Check that the `roomba_plus` integration is fully loaded and your robot has reported state at least once. Entities are named `sensor.<robot_name>_<key>` — see the integration docs for the full list.
 
----
+**Custom entity IDs** — If you've renamed entities, the card's auto-discovery will miss them. The affected zone degrades silently (hidden, not broken). You can't override entity IDs in the card config; rename them back to the integration defaults or file an issue.
 
-## Entity naming convention
+**Wrong area units** — Set `area_unit: m2` or `area_unit: sqft` explicitly to override the auto-detection.
 
-The card auto-discovers companion entities by replacing `vacuum.` with `sensor.` / `select.` / `binary_sensor.` / `switch.` / `button.` and appending the expected key. Example: `vacuum.roomba_i7` → `sensor.roomba_i7_filter_remaining_hours`.
-
-If your integration uses custom entity IDs, discovery fails silently and the affected zone degrades gracefully — hidden, not broken.
+**History not loading** — Requires integration ≥ 1.8.0. Older builds return a 404 on the history endpoint; the card shows "History requires Roomba+ v1.8 or later".
 
 ---
 
 ## Known limitations
 
-**Full string translation** — UI labels (state names, zone headers, alert texts, action buttons) remain English-only. Date/time formatting has been locale-aware since v1.3; translating static strings requires a `translations/` framework planned for a future release.
+**English only** — All UI labels are English. Date and time formatting follows your HA locale. Full translation support is planned for a future release.
 
-**No visual diff rendering** — The card rebuilds its full DOM on every Home Assistant state update.
+**Keep-out polygon outlines** — Keep-out zone pins (🚫) show the zone centroid only, not the full polygon boundary. Full polygon rendering requires the integration to surface UMF polygon data in the hazards API endpoint.
 
-**Per-mission detail in day popover** — requires `roomba_plus` ≥ 1.8.0. The card shows "Per-mission detail not available" on older builds.
-
-**Braava pad bar** — requires `roomba_plus` ≥ 2.1.4 (`sensor.*_pad_days_until_due`). On earlier versions the pad bar is hidden; the pad type label in the Health zone footer still displays.
-
-**Coverage heatmap — keep-out zone polygons (partial)** — Keep-out zone pins (🚫) are shown as centroid markers only. Full polygon outlines require UMF polygon data to be surfaced through the REST API — not in scope for v1.5. Full polygon rendering planned for card v2.0.
+**Cleaned rooms sequence** — The room sequence in today's day detail popover reflects the most recent mission only (sourced from a live vacuum entity attribute). Historical missions show room coverage percentages but not the room order.
 
 ---
 
@@ -226,9 +268,8 @@ If your integration uses custom entity IDs, discovery fails silently and the aff
 
 ```bash
 npm install
-npm run build   # production build → dist/roomba-plus-card.js
-npm run dev     # watch mode
-npm run check   # TypeScript type-check only
+npm run build   # → dist/roomba-plus-card.js
+npm test        # 367 tests
 ```
 
 ---

@@ -58,5 +58,14 @@ export function detectCapabilities(
     // ── Config-based ──────────────────────────────────────────────────────
     hasRobotSelectorHelper: !!config.robot_selector_helper &&
                             !!hass.states[config.robot_selector_helper],
+
+    // ── v1.6 / integration v2.3–v2.4 ─────────────────────────────────────
+    // hasCleanedRooms: non-empty array only — empty array means whole-home
+    // clean (no room events) and should NOT trigger the chip row.
+    hasCleanedRooms: Array.isArray(hass.states[`vacuum.${name}`]?.attributes?.last_cleaned_rooms)
+                     && (hass.states[`vacuum.${name}`]?.attributes?.last_cleaned_rooms as unknown[]).length > 0,
+    hasDemandBlocked:     b('demand_clean_blocked'),
+    hasEnergyConsumption: e('total_energy_consumed'),
+    hasOptimalWindow:     e('optimal_clean_window'),
   };
 }

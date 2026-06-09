@@ -66,6 +66,15 @@ export interface RobotCapabilities {
   // ── Config-based ──────────────────────────────────────────────────────────
   /** config.robot_selector_helper entity exists in hass.states */
   hasRobotSelectorHelper: boolean;
+  // ── v1.6 / integration v2.3–v2.4 ──────────────────────────────────────────
+  /** vacuum.* last_cleaned_rooms attribute — non-empty array (integration v2.3 CR4) */
+  hasCleanedRooms: boolean;
+  /** binary_sensor.*_demand_clean_blocked (integration v2.4 F11) */
+  hasDemandBlocked: boolean;
+  /** sensor.*_total_energy_consumed (integration v2.4 F12e) */
+  hasEnergyConsumption: boolean;
+  /** sensor.*_optimal_clean_window (integration v2.4 F12a) */
+  hasOptimalWindow: boolean;
 }
 
 /** Per-mission record from GET …/mission_history?format=records (integration ≥ v2.0) */
@@ -130,6 +139,39 @@ export interface DaySummary {
   dirt_density?: number | null;
   /** v2.4 (F12b): ratio to 30-day median dirt density. > 1.5 = notably dirty day. null when no baseline. */
   relative_to_baseline?: number | null;
+}
+
+/** Per-robot row in GET /api/roomba_plus/household (integration ≥ v2.3 F10b) */
+export interface HouseholdRobotSummary {
+  entry_id: string;
+  name: string;
+  floor: string | null;
+  missions: number;
+  completed: number;
+  completion_pct: number;
+  area_sqft: number | null;
+}
+
+/** Per-floor row in GET /api/roomba_plus/household */
+export interface HouseholdFloorSummary {
+  label: string;
+  missions: number;
+  completed: number;
+  area_sqft: number | null;
+}
+
+/** Response from GET /api/roomba_plus/household (integration ≥ v2.3 F10b) */
+export interface HouseholdSummary {
+  period_days: number;
+  total: {
+    missions: number;
+    completed: number;
+    completion_pct: number;
+    area_sqft: number | null;
+  };
+  robots: HouseholdRobotSummary[];
+  /** Present when any robot has a floor label configured */
+  floors?: HouseholdFloorSummary[];
 }
 
 export interface HomeAssistant {

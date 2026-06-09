@@ -36,7 +36,13 @@ function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 'auto' | 'sqft' | 'm2', locale = 'en-US'): string {
+export function renderHeatmap(
+  summaries: DaySummary[],
+  days: number,
+  _areaUnit: 'auto' | 'sqft' | 'm2',
+  locale = 'en-US',
+  showDirtDensity = false,   // F16: modulate cell opacity by relative_to_baseline
+): string {
   // Build date map
   const byDate = new Map<string, DaySummary>();
   for (const s of summaries) byDate.set(s.date, s);
@@ -92,11 +98,22 @@ export function renderHeatmap(summaries: DaySummary[], days: number, _areaUnit: 
       svg += `<text x="${LABEL_COL - 3}" y="${y + CELL / 2 + 3}" text-anchor="end" font-size="9" fill="var(--secondary-text-color, #9ca3af)" font-family="inherit">${dayNum}</text>`;
     }
 
+    // F16 — dirt density opacity modulation.
+    // relative_to_baseline: 1.0 = normal, 2.0 = double dirt, 0.5 = cleaner than usual.
+    // Opacity range 0.5–1.0: cells never fully invisible regardless of density.
+    // null (no baseline yet) → no opacity attribute → renders at full opacity, same as before.
+    let opacityAttr = '';
+    if (showDirtDensity && cell.summary?.relative_to_baseline != null) {
+      const ratio   = cell.summary.relative_to_baseline;
+      const opacity = Math.min(1.0, Math.max(0.5, 0.5 + ratio / 4));
+      opacityAttr   = ` opacity="${opacity.toFixed(2)}"`;
+    }
+
     svg += `<g role="gridcell" aria-label="${label}" data-date="${isoDate(cell.date)}" data-result="${result}" data-total="${total}" style="cursor:pointer">`;
     // Invisible touch target (2px larger each side than cell — 28×28px touch area)
     svg += `<rect x="${x - 2}" y="${y - 2}" width="${CELL + 4}" height="${CELL + 4}" fill="transparent" rx="4"/>`;
     // Visible cell
-    svg += `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" fill="${colour}" rx="3"/>`;
+    svg += `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" fill="${colour}" rx="3"${opacityAttr}/>`;
     // Multi-mission dot indicators (up to 3 dots, bottom edge; scaled for 24px cell)
     if (total > 1) {
       const dots = Math.min(total, 3);

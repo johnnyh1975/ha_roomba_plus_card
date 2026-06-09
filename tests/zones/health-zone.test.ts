@@ -477,3 +477,32 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
     expect(html).not.toContain('103%');
   });
 });
+
+// ── F14: Energy row ───────────────────────────────────────────────────────────
+describe('renderHealthZone() — F14 energy row', () => {
+  const baseHealthState: HealthZoneState = { openPopover: null, resetting: null, resetError: null, legendShown: false };
+
+  it('energy row renders when hasEnergyConsumption and entity present', () => {
+    const capsWithEnergy = { ...defaultCaps, hasEnergyConsumption: true };
+    const html = renderHealthZone(
+      makeHass({
+        [`sensor.roomba_total_energy_consumed`]: st('42.3'),
+        [`sensor.roomba_filter_remaining_hours`]: st('100', { threshold_hours: 200 }),
+      }),
+      baseConfig, capsWithEnergy, 'roomba', baseHealthState,
+    );
+    expect(html).toContain('rpc-energy-val');
+    expect(html).toContain('42.3 kWh');
+  });
+
+  it('energy row absent when hasEnergyConsumption false', () => {
+    const html = renderHealthZone(
+      makeHass({
+        [`sensor.roomba_total_energy_consumed`]: st('42.3'),
+        [`sensor.roomba_filter_remaining_hours`]: st('100', { threshold_hours: 200 }),
+      }),
+      baseConfig, defaultCaps, 'roomba', baseHealthState,
+    );
+    expect(html).not.toContain('rpc-energy-val');
+  });
+});

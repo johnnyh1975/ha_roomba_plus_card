@@ -34,7 +34,7 @@ function formatLikelyWindow(stateStr: string, locale: string): string {
 export function renderScheduleZone(
   hass: HomeAssistant,
   config: CardConfig,
-  _caps: RobotCapabilities,
+  caps: RobotCapabilities,
   robotName: string,
   state: ScheduleZoneState
 ): string {
@@ -58,7 +58,8 @@ export function renderScheduleZone(
     && likelyWindowEntity.state !== 'unavailable';
 
   // Zone is absent only when there's nothing at all to show
-  if (!nextCleanEntity && !holdEntity && !hasPresenceAnalytics && !hasLikelyWindow) return '';
+  if (!nextCleanEntity && !holdEntity && !hasPresenceAnalytics && !hasLikelyWindow
+      && !caps.hasOptimalWindow) return '';
 
   // ── Schedule hold badge ──
   let holdHtml = '';
@@ -100,6 +101,27 @@ export function renderScheduleZone(
           <span class="rpc-schedule-time rpc-schedule-time--approx">${formatted}</span>
         </div>
       `;
+    }
+  }
+
+  // ── F15: Optimal clean window (integration v2.4 F12a) ──
+  // Analytically derived from cleaning history — marked with ★ to distinguish
+  // from the presence-derived likely window.
+  let optimalWindowHtml = '';
+  if (caps.hasOptimalWindow) {
+    const optEntity = hass.states[`sensor.${n}_optimal_clean_window`];
+    if (optEntity && optEntity.state !== 'unavailable' && optEntity.state !== 'unknown') {
+      const formatted = formatNextClean(optEntity.state, hass.language);
+      if (formatted && formatted !== 'No schedule set') {
+        optimalWindowHtml = `
+          <div class="rpc-next-clean rpc-next-clean--optimal">
+            <span class="rpc-schedule-label">Optimal window</span>
+            <span class="rpc-schedule-time">
+              ${formatted}
+              <span class="rpc-optimal-star" title="Analytically derived from cleaning history">★</span>
+            </span>
+          </div>`;
+      }
     }
   }
 
@@ -155,6 +177,7 @@ export function renderScheduleZone(
               <span class="rpc-schedule-time">${formatNextClean(nextCleanEntity.state, hass.language)}</span>
             </div>` : ''}
           ${likelyWindowHtml}
+          ${optimalWindowHtml}
         </div>
         ${holdHtml}
       </div>

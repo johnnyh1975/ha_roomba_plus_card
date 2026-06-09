@@ -171,3 +171,52 @@ describe('detectCapabilities() — hasLifetimeArea (A4)', () => {
     expect(caps.hasLifetimeArea).toBe(false);
   });
 });
+
+// ── v1.6: hasCleanedRooms ─────────────────────────────────────────────────────
+describe('detectCapabilities() — hasCleanedRooms (v1.6)', () => {
+  it('hasCleanedRooms false when vacuum entity absent', () => {
+    const caps = detectCapabilities(makeHass(), n, baseConfig, null);
+    expect(caps.hasCleanedRooms).toBe(false);
+  });
+
+  it('hasCleanedRooms false when last_cleaned_rooms attribute absent', () => {
+    const hass = makeHass({ [`vacuum.${n}`]: st('docked') });
+    expect(detectCapabilities(hass, n, baseConfig, null).hasCleanedRooms).toBe(false);
+  });
+
+  it('hasCleanedRooms false when last_cleaned_rooms is empty array', () => {
+    const hass = makeHass({ [`vacuum.${n}`]: st('docked', { last_cleaned_rooms: [] }) });
+    expect(detectCapabilities(hass, n, baseConfig, null).hasCleanedRooms).toBe(false);
+  });
+
+  it('hasCleanedRooms true when last_cleaned_rooms has entries', () => {
+    const hass = makeHass({ [`vacuum.${n}`]: st('docked', { last_cleaned_rooms: ['Kitchen', 'Hallway'] }) });
+    expect(detectCapabilities(hass, n, baseConfig, null).hasCleanedRooms).toBe(true);
+  });
+});
+
+// ── v1.6: hasDemandBlocked, hasEnergyConsumption, hasOptimalWindow ────────────
+describe('detectCapabilities() — v1.6 entity flags', () => {
+  it('hasDemandBlocked false when entity absent', () => {
+    expect(detectCapabilities(makeHass(), n, baseConfig, null).hasDemandBlocked).toBe(false);
+  });
+
+  it('hasDemandBlocked true when entity present', () => {
+    const hass = makeHass({ [`binary_sensor.${n}_demand_clean_blocked`]: st('off') });
+    expect(detectCapabilities(hass, n, baseConfig, null).hasDemandBlocked).toBe(true);
+  });
+
+  it('hasEnergyConsumption true when entity present', () => {
+    const hass = makeHass({ [`sensor.${n}_total_energy_consumed`]: st('42.3') });
+    expect(detectCapabilities(hass, n, baseConfig, null).hasEnergyConsumption).toBe(true);
+  });
+
+  it('hasOptimalWindow false when entity absent', () => {
+    expect(detectCapabilities(makeHass(), n, baseConfig, null).hasOptimalWindow).toBe(false);
+  });
+
+  it('hasOptimalWindow true when entity present', () => {
+    const hass = makeHass({ [`sensor.${n}_optimal_clean_window`]: st('2026-06-12T10:30:00Z') });
+    expect(detectCapabilities(hass, n, baseConfig, null).hasOptimalWindow).toBe(true);
+  });
+});

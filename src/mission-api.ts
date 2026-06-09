@@ -1,4 +1,4 @@
-import { HomeAssistant, CardConfig, DaySummary, MissionRecord, HazardRecord } from './types.js';
+import { HomeAssistant, CardConfig, DaySummary, MissionRecord, HazardRecord, HouseholdSummary } from './types.js';
 
 export class MissionApiClient {
   private entryId: string | null = null;
@@ -60,6 +60,18 @@ export class MissionApiClient {
     const url = `/api/roomba_plus/${entryId}/mission_history?format=hazards`;
     const resp = await this.hass.fetchWithAuth(url);
     if (!resp.ok) return [];
+    return resp.json();
+  }
+
+  /**
+   * Fetch household summary — global endpoint, no entry_id (integration ≥ v2.3 F10b).
+   * Returns null on non-200: graceful degradation for single-robot installs,
+   * integration < v2.3, or network errors.
+   */
+  async fetchHousehold(days: number): Promise<HouseholdSummary | null> {
+    const url = `/api/roomba_plus/household?days=${days}`;
+    const resp = await this.hass.fetchWithAuth(url);
+    if (!resp.ok) return null;
     return resp.json();
   }
 }

@@ -366,3 +366,77 @@ describe('renderStatusZone() — A4 vs-usual delta', () => {
     expect(html).not.toContain('vs usual');
   });
 });
+
+// ── F11: Mission destination + cleaned rooms ──────────────────────────────────
+describe('renderStatusZone() — F11 mission destination', () => {
+  it('destination indicator shown during cleaning when mission_destination present', () => {
+    const html = renderStatusZone(props('cleaning', {}, {
+      'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_destination: 'Kitchen' }),
+    }));
+    expect(html).toContain('Targeting: Kitchen');
+    expect(html).toContain('rpc-mission-dest');
+  });
+
+  it('destination indicator absent when vacState is not cleaning', () => {
+    const html = renderStatusZone(props('docked', {}, {
+      'vacuum.roomba': st('docked', { mission_destination: 'Kitchen' }),
+    }));
+    expect(html).not.toContain('Targeting');
+  });
+
+  it('destination indicator absent when mission_destination attribute absent', () => {
+    const html = renderStatusZone(props('cleaning'));
+    expect(html).not.toContain('Targeting');
+  });
+
+  it('cleaned rooms chips rendered when docked and last_cleaned_rooms present', () => {
+    const capsWithRooms = { ...defaultCaps, hasCleanedRooms: true };
+    const html = renderStatusZone({
+      ...props('docked', { caps: capsWithRooms }, {
+        'vacuum.roomba': st('docked', { last_cleaned_rooms: ['Kitchen', 'Hallway'] }),
+      }),
+      caps: capsWithRooms,
+    });
+    expect(html).toContain('rpc-cleaned-rooms');
+    expect(html).toContain('Kitchen');
+    expect(html).toContain('Hallway');
+  });
+
+  it('cleaned rooms absent when last_cleaned_rooms is empty array', () => {
+    const capsWithRooms = { ...defaultCaps, hasCleanedRooms: false };
+    const html = renderStatusZone({
+      ...props('docked', {}, { 'vacuum.roomba': st('docked', { last_cleaned_rooms: [] }) }),
+      caps: capsWithRooms,
+    });
+    expect(html).not.toContain('rpc-cleaned-rooms');
+  });
+});
+
+// ── F13: Demand cleaning blocked indicator ────────────────────────────────────
+describe('renderStatusZone() — F13 demand indicator', () => {
+  it('demand indicator shown when hasDemandBlocked and entity is on', () => {
+    const capsWithDemand = { ...defaultCaps, hasDemandBlocked: true };
+    const html = renderStatusZone({
+      ...props('docked', {}, { [`binary_sensor.roomba_demand_clean_blocked`]: st('on') }),
+      caps: capsWithDemand,
+    });
+    expect(html).toContain('rpc-demand-blocked');
+    expect(html).toContain('Floor needs cleaning');
+  });
+
+  it('demand indicator absent when entity is off', () => {
+    const capsWithDemand = { ...defaultCaps, hasDemandBlocked: true };
+    const html = renderStatusZone({
+      ...props('docked', {}, { [`binary_sensor.roomba_demand_clean_blocked`]: st('off') }),
+      caps: capsWithDemand,
+    });
+    expect(html).not.toContain('rpc-demand-blocked');
+  });
+
+  it('demand indicator absent when hasDemandBlocked false', () => {
+    const html = renderStatusZone(props('docked', {}, {
+      [`binary_sensor.roomba_demand_clean_blocked`]: st('on'),
+    }));
+    expect(html).not.toContain('rpc-demand-blocked');
+  });
+});

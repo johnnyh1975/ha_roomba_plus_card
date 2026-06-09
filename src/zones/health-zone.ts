@@ -265,6 +265,40 @@ export function renderHealthZone(
     ? `<div class="rpc-health-battery-sep"></div>${retentionBarHtml}${coverageBarHtml}`
     : '';
 
+  // F14 — Lifetime energy consumption (integration v2.4 F12e)
+  let energyHtml = '';
+  if (caps.hasEnergyConsumption) {
+    const energyEntity = hass.states[`sensor.${n}_total_energy_consumed`];
+    if (energyEntity && energyEntity.state !== 'unavailable' && energyEntity.state !== 'unknown') {
+      const kwh = parseFloat(energyEntity.state);
+      if (!isNaN(kwh)) {
+        const cyclesEntity = hass.states[`sensor.${n}_battery_cycles`];
+        const cyclesVal    = cyclesEntity ? parseInt(cyclesEntity.state, 10) : NaN;
+        const isOpen = state.openPopover === 'energy';
+        const popover = isOpen ? `
+          <div class="rpc-popover">
+            <div class="rpc-popover-header">
+              <span>Energy</span>
+              <button class="rpc-popover-close" data-close="energy" aria-label="Close">×</button>
+            </div>
+            <div class="rpc-popover-divider"></div>
+            <div class="rpc-popover-body">
+              <div>~${kwh.toFixed(1)} kWh used${!isNaN(cyclesVal) ? ` over ${cyclesVal} charge cycles` : ''}</div>
+              <div class="rpc-popover-sub">Estimated from battery capacity and cycle count.</div>
+              <div class="rpc-popover-sub">Connect to the HA Energy dashboard for home-wide monitoring.</div>
+            </div>
+          </div>` : '';
+        energyHtml = `
+          <div class="rpc-bar-row" data-bar="energy" role="button" aria-expanded="${isOpen}" tabindex="0"
+               aria-label="Lifetime energy ~${kwh.toFixed(1)} kWh">
+            <span class="rpc-bar-label">Energy</span>
+            <span class="rpc-energy-val">~${kwh.toFixed(1)} kWh lifetime</span>
+          </div>
+          ${popover}`;
+      }
+    }
+  }
+
   // Wave A4 — Braava pad type + intensity row
   let mopConfigHtml = '';
   if (caps.isMop) {
@@ -286,6 +320,7 @@ export function renderHealthZone(
       <div class="rpc-zone-header">HEALTH</div>
       ${barsHtml}
       ${retentionHtml}
+      ${energyHtml}
       ${mopConfigHtml}
     </div>
   `;
