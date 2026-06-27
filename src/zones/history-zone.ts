@@ -1,5 +1,5 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord } from '../types.js';
-import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, mmToImagePct, mmToImagePctNum } from '../heatmap.js';
+import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, mmToImagePct, mmToImagePctNum } from '../heatmap.js';
 import { esc, timeSince } from '../utils.js';
 import { MDI_TO_EMOJI } from '../const.js';
 
@@ -22,6 +22,14 @@ export interface HistoryZoneState {
    *  via tap-to-select on the Map tab overlay. Undefined/omitted when this
    *  zone is rendered for the History tab (calendar) rather than Map tab. */
   mapSelectedRooms?: Set<string>;
+  /** v2.0: suppresses the internal Calendar/Coverage sub-tab toggle.
+   *  This zone is reused for BOTH the dedicated Map tab (forced
+   *  historyTab: 'coverage') and the History tab — in standalone mode
+   *  each top-level tab already IS one of these views, so the internal
+   *  toggle is redundant and, worse, lets a tap inside the "Map" tab
+   *  silently switch it to show the calendar. Only companion mode's
+   *  History tab (no separate Map tab exists there) needs this toggle. */
+  suppressSubTabToggle?: boolean;
 }
 
 function formatArea(sqft: number, useMetric: boolean): string {
@@ -60,7 +68,7 @@ export function renderHistoryZone(
   const days = config.history_days ?? 28;
   const unit = config.area_unit ?? 'auto';
   const useMetric = unit === 'm2' || (unit === 'auto' && isMetric);
-  const { historyTab, hazards, mapSelectedRooms } = state;
+  const { historyTab, hazards, mapSelectedRooms, suppressSubTabToggle } = state;
 
   // F11/F12: vacuum entity attributes — reflect the most recent mission.
   // last_cleaned_rooms is a live attribute; it is NOT per-mission historical data.
@@ -106,7 +114,7 @@ export function renderHistoryZone(
   }
 
   // F7 — Tab toggle (Calendar / Coverage): only when hasCoverageImage
-  const tabToggleHtml = caps.hasCoverageImage ? `
+  const tabToggleHtml = (caps.hasCoverageImage && !suppressSubTabToggle) ? `
     <div class="rpc-history-tabs">
       <button class="rpc-tab${historyTab === 'calendar' ? ' active' : ''}" data-history-tab="calendar">Calendar</button>
       <button class="rpc-tab${historyTab === 'coverage' ? ' active' : ''}" data-history-tab="coverage">Coverage</button>
@@ -290,8 +298,20 @@ export function renderHistoryZone(
     } else if (missions.length > 0) {
       // Real per-mission data from API
       missionRows = missions.map((m, index) => {
-        const icon  = m.result === 'completed' ? '✓' : '✗';
-        const cls   = m.result === 'completed' ? 'rpc-day-ok' : 'rpc-day-err';
+      // Found via screenshot review: this previously mapped any result
+      // other than the literal string 'completed' to ✗ — including
+      // 'stuck_and_resumed' ("Robot stuck but continued and finished" per
+      // REST_API_CONTRACT.md). That's a genuine success the integration
+      // itself counts toward DaySummary.completed (and therefore the
+      // calendar cell's green colour and the day's "100% completion rate"
+      // line) — so a day could show fully green while every individual
+      // mission row inside it showed ✗, which is exactly the contradiction
+      // spotted in a screenshot review. Group the same two values the
+      // integration already groups for DaySummary.completed, rather than
+      // a literal string-equality check against 'completed' alone.
+      const isSuccess = m.result === 'completed' || m.result === 'stuck_and_resumed';
+      const icon  = isSuccess ? '✓' : '✗';
+      const cls   = isSuccess ? 'rpc-day-ok' : 'rpc-day-err';
         const start = new Date(m.started_at).toLocaleTimeString(hass.language, { hour: '2-digit', minute: '2-digit', hour12: false });
         const area  = m.area_sqft !== null ? formatArea(m.area_sqft, useMetric) : '—';
         const zones = m.zones?.map(z => esc(z)).join(' · ') ?? '';
@@ -305,14 +325,32 @@ export function renderHistoryZone(
           ? `<span class="rpc-initiator-badge">demand</span>`
           : '';
 
-        // F6b — WiFi sparkline (v2.1+ cloud records with wifi_signal array).
-        // Normalise wlBars (0–4 int) → percentage before rendering.
+        // F6b — WiFi signal display (v2.1+ cloud records with wifi_signal array).
+        //
+        // v2.0.1 bug fix: the 5-element histogram case (the data shape for
+        // current integration versions — see wifiQualityFromHistogram()
+        // docstring in heatmap.ts) has no real "minimum reading during the
+        // mission" concept; it's a static signal-quality distribution, not
+        // a time-ordered sequence. Display the weighted-mean quality %
+        // instead, matching the integration's own wifi_health calculation.
+        // The legacy variable-length time-series case (older integration
+        // versions, per REST_API_CONTRACT.md's own 6-element example)
+        // keeps the original "minimum reading" semantics unchanged.
         let wifiHtml = '';
         if (m.wifi_signal && m.wifi_signal.length > 0) {
-          const pctReadings = normalisedWifiPct(m.wifi_signal);
-          const minWifi     = Math.min(...pctReadings);
-          const sparkSvg    = renderSparkline(pctReadings, minWifi);
-          wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal: minimum ${minWifi}% during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${minWifi}% min</span></div>`;
+          const isHistogram = m.wifi_signal.length === 5;
+          const barHeights   = normalisedWifiPct(m.wifi_signal);
+          const sparkSvg     = renderSparkline(barHeights, Math.min(...barHeights));
+
+          if (isHistogram) {
+            const quality = wifiQualityFromHistogram(m.wifi_signal);
+            if (quality !== null) {
+              wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal quality: ${quality}% average during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${quality}% avg</span></div>`;
+            }
+          } else {
+            const minWifi = Math.min(...barHeights);
+            wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal: minimum ${minWifi}% during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${minWifi}% min</span></div>`;
+          }
         }
 
         // F12 — Cleaned rooms sequence (today's most recent mission only).

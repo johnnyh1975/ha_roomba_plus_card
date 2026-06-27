@@ -152,11 +152,63 @@ export function renderHeatmap(
  * The legacy path is retained for backward compatibility with any pre-v2.2
  * integration records that stored raw 0–4 scalar values.
  */
+/**
+ * v2.0.1 bug fix (found via screenshot review — "0% min" wifi sparkline
+ * label, traced to the source rather than guessed at).
+ *
+ * CONFIRMED against integration source (sensor.py): `wlBars` — the field
+ * the REST API's `wifi_signal` is sourced from — is a 5-element histogram
+ * where **the value at each index is a COUNT of readings in that signal
+ * bucket**, not a percentage ("index = signal bucket, value = count").
+ * The previous implementation here treated a 5-element array as "already
+ * bucket percentages, pass through unchanged" — a count like `[0,1,1,0,3]`
+ * was displayed as if it meant "0%, 1%, 1%, 0%, 3%", which is meaningless,
+ * and explains why a mission's minimum reading was almost always 0% (most
+ * missions simply have zero readings in at least one of the five buckets —
+ * a count of 0 there is not a "0% signal" event).
+ *
+ * This also means the data is a static distribution snapshot for the whole
+ * mission, not a time-ordered sequence — there is no real "minimum signal
+ * reading during the mission" to report. The correct metric is the
+ * **weighted-mean signal quality %**, computed with the exact same formula
+ * the integration's own `wifi_health` sensor uses per mission
+ * (`_raw_wifi_quality_pct` in sensor.py): weighted mean bucket index,
+ * scaled from a 0.0–4.0 range to 0–100%.
+ *
+ * The REST API contract's own example payload shows a 6-element array
+ * (`[3, 3, 4, 3, 2, 3]`), suggesting older integration versions may have
+ * sent a genuine variable-length time series of 0–4 scalar readings rather
+ * than the fixed 5-element count histogram. That legacy shape is preserved
+ * below — only the 5-element histogram case was wrong.
+ */
+export function wifiQualityFromHistogram(bars: number[]): number | null {
+  if (!bars || bars.length !== 5) return null;
+  const total = bars.reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+  const weightedMean = bars.reduce((sum, count, i) => sum + i * count, 0) / total;
+  return Math.round((weightedMean / 4) * 100 * 10) / 10; // 1 decimal, matches integration rounding
+}
+
+/**
+ * Normalised bar heights (0–100 scale) for the sparkline visual.
+ *
+ * 5-element case: returns each bucket's count as a percentage of the
+ * mission's total reading count — an honest "share of time in each signal
+ * level" distribution shape, left (weakest) to right (strongest). This is
+ * NOT a time-ordered sequence; the bars represent signal-strength buckets,
+ * not chronological samples.
+ *
+ * Other lengths: legacy variable-length time series of 0–4 scalar
+ * readings (see REST_API_CONTRACT.md's own example) — scaled ×25 as
+ * before. This branch is unchanged from the original implementation.
+ */
 export function normalisedWifiPct(values: number[]): number[] {
   if (!values || values.length === 0) return [];
-  // 5-element histogram: values are already bucket percentages — pass through unchanged.
-  // Minimum signal = index of first non-zero bucket × 25 (e.g. [0,35,65,0,0] → floor=25%).
-  if (values.length === 5) return values;
+  if (values.length === 5) {
+    const total = values.reduce((a, b) => a + b, 0);
+    if (total === 0) return [0, 0, 0, 0, 0];
+    return values.map(v => Math.round((v / total) * 100));
+  }
   // Legacy time-series of 0–4 bar scalars: scale to percentage.
   const needsScale = values.every(v => v <= 4);
   return needsScale ? values.map(v => v * 25) : values;

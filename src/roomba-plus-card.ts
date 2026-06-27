@@ -1064,12 +1064,20 @@ class RoombaPlusCard extends HTMLElement {
         // room polygon overlays render when caps.hasAlignment. Tap-to-select
         // shares this.selectedRooms with the header "Rooms…" chip picker —
         // selecting via map or via chips is the same pending selection.
+        //
+        // suppressSubTabToggle: true — fixed after screenshot review found
+        // the internal Calendar/Coverage pill toggle rendering inside this
+        // tab, which is wrong: this tab IS the coverage view at the
+        // top-level tab bar already. Without suppression, tapping
+        // "Calendar" here silently swapped the Map tab's content to the
+        // calendar heatmap with no way back except switching tabs and back.
         tabContentHtml = renderHistoryZone(this._hass, this.config, caps, this.robotName,
           { data: this.missionData, loading: this.historyLoading, error: this.historyError,
             openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
             lifetimeExpanded: this.lifetimeExpanded,
             historyTab: 'coverage', hazards: this.hazards,
-            mapSelectedRooms: this.selectedRooms },
+            mapSelectedRooms: this.selectedRooms,
+            suppressSubTabToggle: true },
           isMetric);
         break;
       case 'history':
@@ -1077,11 +1085,14 @@ class RoombaPlusCard extends HTMLElement {
           { data: this.missionData, loading: this.historyLoading, error: this.historyError,
             openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
             lifetimeExpanded: this.lifetimeExpanded,
-            // Companion mode keeps the Calendar/Coverage sub-tab toggle
-            // (handled internally by renderHistoryZone via caps.hasCoverageImage);
-            // standalone mode forces 'calendar' since Coverage lives on the Map tab.
+            // Companion mode keeps the Calendar/Coverage sub-tab toggle —
+            // it's the only mode where this History tab needs to reach the
+            // coverage view, since no separate Map tab exists there.
+            // Standalone mode forces 'calendar' AND suppresses the toggle,
+            // since Coverage already has its own top-level Map tab.
             historyTab: this.config.mode === 'companion' ? this.historyTab : 'calendar',
-            hazards: this.hazards },
+            hazards: this.hazards,
+            suppressSubTabToggle: this.config.mode !== 'companion' },
           isMetric);
         break;
       case 'health':

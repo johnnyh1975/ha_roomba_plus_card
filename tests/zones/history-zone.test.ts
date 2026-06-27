@@ -140,6 +140,50 @@ describe('renderHistoryZone() — day detail popover', () => {
     const html = render({}, { openDay: '2025-05-14', dayMissions: ms, openDaySummary: summary });
     expect(html).toContain('Kitchen &amp; Dining');
   });
+
+  // ── v2.0.1 bug fix (found via screenshot review): a mission with
+  // result 'stuck_and_resumed' was shown with the ✗ failure icon, even
+  // though the integration counts it toward DaySummary.completed (and
+  // therefore the calendar cell's success colour) — per
+  // REST_API_CONTRACT.md: "Robot stuck but continued and finished".
+  // A day could render fully green/"100% completion rate" while every
+  // individual mission row inside it showed ✗. ──
+  describe('v2.0.1 success icon grouping (stuck_and_resumed)', () => {
+    const mkMission = (result: string): MissionRecord => ({
+      id: 'm1', started_at: '2025-05-14T07:14:00Z', ended_at: null,
+      duration_min: 37, run_min: null, area_sqft: 412, result: result as MissionRecord['result'],
+      initiator: 'schedule', zones: [], error_code: null,
+      recharges: null, evacuations: null, dirt_events: null, wifi_signal: null, source: 'local',
+    });
+
+    it('stuck_and_resumed shows the success icon, not the failure icon', () => {
+      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('stuck_and_resumed')], openDaySummary: summary });
+      expect(html).toContain('rpc-day-ok');
+      expect(html).not.toContain('rpc-day-err');
+    });
+
+    it('completed still shows the success icon (no regression)', () => {
+      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('completed')], openDaySummary: summary });
+      expect(html).toContain('rpc-day-ok');
+      expect(html).not.toContain('rpc-day-err');
+    });
+
+    it('stuck_and_abandoned still shows the failure icon (genuine failure, not regrouped)', () => {
+      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('stuck_and_abandoned')], openDaySummary: summary });
+      expect(html).toContain('rpc-day-err');
+      expect(html).not.toContain('rpc-day-ok');
+    });
+
+    it('error still shows the failure icon (no regression)', () => {
+      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('error')], openDaySummary: summary });
+      expect(html).toContain('rpc-day-err');
+    });
+
+    it('cancelled still shows the failure icon (no regression)', () => {
+      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('cancelled')], openDaySummary: summary });
+      expect(html).toContain('rpc-day-err');
+    });
+  });
 });
 
 describe('renderHistoryZone() — Wave C1 lifetime stats (SC1: migrated to cleaning_analytics_30d)', () => {
@@ -540,6 +584,40 @@ describe('renderHistoryZone() — F7 tab toggle', () => {
     expect(html).toContain('rpc-history-tabs');
     expect(html).toContain('data-history-tab="calendar"');
     expect(html).toContain('data-history-tab="coverage"');
+  });
+
+  // ── v2.0 bug fix (found via screenshot review): the Map tab and standalone
+  // History tab both reuse this zone with a forced historyTab, but the
+  // internal Calendar/Coverage toggle rendered regardless — letting a tap
+  // inside the dedicated Map tab silently swap its content to the calendar
+  // heatmap, with no top-level indication of what had happened. ──
+  describe('v2.0 suppressSubTabToggle', () => {
+    it('toggle absent when suppressSubTabToggle is true, even with hasCoverageImage', () => {
+      const html = renderWithCoverage({}, { suppressSubTabToggle: true });
+      expect(html).not.toContain('rpc-history-tabs');
+      expect(html).not.toContain('data-history-tab');
+    });
+
+    it('toggle present when suppressSubTabToggle is false', () => {
+      const html = renderWithCoverage({}, { suppressSubTabToggle: false });
+      expect(html).toContain('rpc-history-tabs');
+    });
+
+    it('toggle present when suppressSubTabToggle is omitted (default unset, backward compatible)', () => {
+      const html = renderWithCoverage();
+      expect(html).toContain('rpc-history-tabs');
+    });
+
+    it('forced historyTab content still renders correctly when toggle is suppressed', () => {
+      // The Map tab forces historyTab: 'coverage' AND suppresses the toggle —
+      // confirms suppressing the toggle doesn't also break the forced content.
+      const html = renderWithCoverage(
+        { [`image.${n}_coverage_map`]: st('idle', { entity_picture: '/api/image/serve/abc/512x512' }) },
+        { historyTab: 'coverage', suppressSubTabToggle: true },
+      );
+      expect(html).not.toContain('rpc-history-tabs');
+      expect(html).toContain('rpc-coverage-img');
+    });
   });
 
   it('calendar tab has active class by default', () => {

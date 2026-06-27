@@ -72,7 +72,7 @@ describe('renderHeatmap()', () => {
 });
 
 // ── v1.3 F6b: renderSparkline ─────────────────────────────────────────────────
-import { renderSparkline, normalisedWifiPct, normalisedWifiFloor, mmToImagePct } from '../src/heatmap';
+import { renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, normalisedWifiFloor, mmToImagePct } from '../src/heatmap';
 
 describe('renderSparkline()', () => {
   it('returns an SVG element with 7 bars for 7 readings', () => {
@@ -116,18 +116,35 @@ describe('renderSparkline()', () => {
 });
 
 describe('normalisedWifiPct()', () => {
-  it('5-element histogram: passes through unchanged (values already bucket percentages)', () => {
-    // Confirmed format from Amendment 8d: [0, 35, 65, 0, 0] = buckets 1+2 occupied
-    // length===5 → histogram path → pass through, never multiply by 25
+  // v2.0.1 bug fix (found via screenshot review, confirmed against
+  // integration source): the 5-element case is a COUNT histogram
+  // (sensor.py: "wlBars is a 5-element histogram (index = signal bucket,
+  // value = count)"), NOT already-computed percentages. The previous
+  // version of this test asserted pass-through behaviour that only
+  // "happened to work" because its fixture's counts summed to exactly
+  // 100 — a coincidence that masked the bug rather than testing for it.
+  it('5-element histogram: normalises counts to % of total reading count', () => {
+    // counts [0,1,1,0,3] sum to 5, not 100 — this is the case that exposes
+    // the bug: pass-through would wrongly return [0,1,1,0,3] (≈0%/1%/1%/0%/3%)
+    expect(normalisedWifiPct([0, 1, 1, 0, 3])).toEqual([0, 20, 20, 0, 60]);
+  });
+
+  it('5-element histogram: a fixture that sums to 100 is numerically identical to pass-through (regression coincidence guard)', () => {
+    // Retained to document the lucky-coincidence case from the original
+    // (buggy) test — both formulas agree only because this fixture's
+    // counts sum to exactly 100.
     expect(normalisedWifiPct([0, 35, 65, 0, 0])).toEqual([0, 35, 65, 0, 0]);
   });
 
-  it('5-element histogram with all-zero input: passes through unchanged', () => {
+  it('5-element histogram with all-zero input: returns all zeros, not NaN from a 0/0 division', () => {
     expect(normalisedWifiPct([0, 0, 0, 0, 0])).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('legacy scalar time-series: multiplies by 25 when length != 5 and all values <= 4', () => {
-    // 7-element reading array — old format, not a histogram
+    // 7-element reading array — older integration versions per
+    // REST_API_CONTRACT.md's own 6-element example payload; genuinely a
+    // different data shape from the 5-element count histogram, unchanged
+    // by the v2.0.1 fix.
     expect(normalisedWifiPct([0, 1, 2, 3, 4, 3, 2])).toEqual([0, 25, 50, 75, 100, 75, 50]);
   });
 
@@ -137,6 +154,35 @@ describe('normalisedWifiPct()', () => {
 
   it('returns empty array for empty input', () => {
     expect(normalisedWifiPct([])).toEqual([]);
+  });
+});
+
+// ── v2.0.1: weighted-mean signal quality from the count histogram ───────────
+describe('wifiQualityFromHistogram()', () => {
+  it('matches the integration\'s own per-mission formula for a known distribution', () => {
+    // weighted mean = (0*0 + 1*1 + 2*1 + 3*0 + 4*3) / 5 = (0+1+2+0+12)/5 = 3.0
+    // quality% = 3.0 / 4 * 100 = 75.0
+    expect(wifiQualityFromHistogram([0, 1, 1, 0, 3])).toBe(75);
+  });
+
+  it('all readings in the strongest bucket → 100%', () => {
+    expect(wifiQualityFromHistogram([0, 0, 0, 0, 5])).toBe(100);
+  });
+
+  it('all readings in the weakest bucket → 0%', () => {
+    expect(wifiQualityFromHistogram([5, 0, 0, 0, 0])).toBe(0);
+  });
+
+  it('returns null for an all-zero histogram (no readings) rather than NaN', () => {
+    expect(wifiQualityFromHistogram([0, 0, 0, 0, 0])).toBeNull();
+  });
+
+  it('returns null for a non-5-element array (not a histogram)', () => {
+    expect(wifiQualityFromHistogram([0, 1, 2, 3, 4, 3, 2])).toBeNull();
+  });
+
+  it('returns null for an empty array', () => {
+    expect(wifiQualityFromHistogram([])).toBeNull();
   });
 });
 
