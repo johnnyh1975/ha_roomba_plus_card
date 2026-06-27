@@ -272,6 +272,77 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     expect(html).toContain('247 charge cycles');
   });
 
+  // v2.0.2 UX fix: layout alignment + battery replacement trigger
+  it('bar row includes an rpc-bar-hours placeholder for layout alignment with Filter/Brush', () => {
+    const hass = makeHass({
+      [`sensor.${n}_battery_capacity_retention`]: st('100'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toMatch(/data-bar="retention"[\s\S]*?rpc-bar-hours/);
+  });
+
+  it('retention popover includes a "Mark as replaced" button wired to reset_battery', () => {
+    const hass = makeHass({
+      [`sensor.${n}_battery_capacity_retention`]: st('100'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).toContain('Mark as replaced');
+    expect(html).toContain('data-reset="retention"');
+    expect(html).toContain('data-service="reset_battery"');
+  });
+
+  it('Mark as replaced button shows a spinner and is disabled while resetting', () => {
+    const hass = makeHass({
+      [`sensor.${n}_battery_capacity_retention`]: st('100'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: 'retention', resetting: 'retention', resetError: null, legendShown: false,
+    });
+    expect(html).toContain('rpc-btn-loading');
+    expect(html).toContain('disabled');
+    expect(html).not.toContain('Mark as replaced');
+  });
+
+  it('shows reset-failed message when resetError matches', () => {
+    const hass = makeHass({
+      [`sensor.${n}_battery_capacity_retention`]: st('100'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: 'retention', resetting: null, resetError: 'retention', legendShown: false,
+    });
+    expect(html).toContain('Reset failed');
+  });
+
+  // v2.0.2 bug fix: the early-return guard didn't account for
+  // hasBatteryRetention/hasCoveragePct, both computed independently of the
+  // `bars` array — a robot with only retention or only coverage data (no
+  // consumable bars, no health score, no maintenance calendar, no
+  // anomaly) would see an entirely empty Health tab.
+  it('renders the zone for retention-only data, with zero consumable bars present', () => {
+    const hass = makeHass({
+      [`sensor.${n}_battery_capacity_retention`]: st('72'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).not.toBe('');
+    expect(html).toContain('data-bar="retention"');
+  });
+
+  it('renders the zone for coverage-only data, with zero consumable bars present', () => {
+    const hass = makeHass({
+      [`sensor.${n}_recent_coverage_pct`]: st('91'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    expect(html).not.toBe('');
+  });
+
   it('A5: charge_cycles is absent from popover when only stale _charge_cycles entity present', () => {
     const hass = makeHass({
       [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),

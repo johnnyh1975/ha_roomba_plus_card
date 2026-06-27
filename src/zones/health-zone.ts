@@ -318,7 +318,19 @@ export function renderHealthZone(
   // maintenance calendar (C2), and anomaly banner (C5) are independent of
   // the consumable bars and must still render if any is present, even on a
   // robot with zero filter/brush/battery sensors detected.
-  if (bars.length === 0 && !caps.hasRobotHealthScore && !caps.hasMaintenanceCalendar && !anomalyHtml) return '';
+  // v2.0.2 bug fix: this guard already accounted for the health score,
+  // maintenance calendar, and anomaly banner (v2.0 additions, fixed
+  // earlier) but never accounted for the battery retention bar or
+  // coverage percentage bar — both independent sections computed further
+  // below, unrelated to the `bars` array. A robot with only one of those
+  // two (no consumable bars, no health score, no maintenance calendar, no
+  // anomaly) would see an entirely empty Health tab despite having real
+  // content to show. Found while adding a "Mark as replaced" button to
+  // the retention bar and writing a minimal test fixture for it — the
+  // fixture exposed that retention-only data already produced an empty
+  // render even before today's changes.
+  if (bars.length === 0 && !caps.hasRobotHealthScore && !caps.hasMaintenanceCalendar
+      && !anomalyHtml && !caps.hasBatteryRetention && !caps.hasCoveragePct) return '';
 
   const barsHtml = bars.map(bar => renderBar(bar, hass, n, state)).join('');
 
@@ -350,6 +362,8 @@ export function renderHealthZone(
         }
 
         const isOpen = state.openPopover === 'retention';
+        const isResetting = state.resetting === 'retention';
+        const spinnerSvg = `<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>`;
         const popover = isOpen ? `
           <div class="rpc-popover">
             <div class="rpc-popover-header">
@@ -362,14 +376,29 @@ export function renderHealthZone(
               ${cycleText ? `<div class="rpc-popover-sub">${cycleText}</div>` : ''}
               ${eolHtml}
             </div>
+            <button class="rpc-btn rpc-btn-secondary${isResetting ? ' rpc-btn-loading' : ''}"
+                    data-reset="retention" data-service="reset_battery"
+                    ${isResetting ? 'disabled' : ''}>
+              ${isResetting ? spinnerSvg : 'Mark as replaced'}
+            </button>
+            ${state.resetError === 'retention' ? `<div class="rpc-send-error">Reset failed — try again</div>` : ''}
           </div>` : '';
 
+        // v2.0.2 bug fix (UX report): this row previously omitted the
+        // rpc-bar-hours placeholder that Filter/Brush always include
+        // (their "Xh" remaining text), so its flex-1 track expanded wider
+        // than theirs and the percentage column landed in a different
+        // horizontal position — even though the percentage itself was
+        // correctly computed. An empty span with the same class reserves
+        // the identical 30px slot regardless of content, aligning the
+        // track width and percent column with every other bar in this tab.
         retentionBarHtml = `
           <div class="rpc-bar-row" data-bar="retention" role="button" aria-expanded="${isOpen}" tabindex="0"
                aria-label="Bat. Health — ${retPct}%">
             <span class="rpc-bar-label">Bat. Health</span>
             <span class="rpc-bar-track"><span class="rpc-bar-fill" style="width:${retPct}%;background:${colour}"></span></span>
             <span class="rpc-bar-pct" style="color:${colour}">${retPct}%</span>
+            <span class="rpc-bar-hours"></span>
           </div>
           ${popover}`;
       }
