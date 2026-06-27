@@ -141,14 +141,21 @@ describe('renderHistoryZone() — day detail popover', () => {
     expect(html).toContain('Kitchen &amp; Dining');
   });
 
-  // ── v2.0.1 bug fix (found via screenshot review): a mission with
-  // result 'stuck_and_resumed' was shown with the ✗ failure icon, even
-  // though the integration counts it toward DaySummary.completed (and
-  // therefore the calendar cell's success colour) — per
-  // REST_API_CONTRACT.md: "Robot stuck but continued and finished".
-  // A day could render fully green/"100% completion rate" while every
-  // individual mission row inside it showed ✗. ──
-  describe('v2.0.1 success icon grouping (stuck_and_resumed)', () => {
+  // ── v2.0.2: three-tier mission result classification ─────────────────────
+  // Supersedes the v2.0.1 binary success/failure icon fix. User feedback:
+  // "stuck_and_resumed ist aus cloud sicht completed, battery error kann
+  // auch aus cloud sicht completed sein — in beiden fällen wurde die
+  // mission beendet." The binary model conflated "did the mission end"
+  // with "was it a clean success." Three tiers per
+  // REST_API_CONTRACT.md's result enumeration:
+  //   success ✓ — completed, stuck_and_resumed
+  //   caution ⚠ — mission ended with an incident: cancelled,
+  //               cancelled_by_user, error/error_* (e.g. error_battery),
+  //               and unclassified 'unknown' (treated cautiously, not as
+  //               a hard failure, since its actual severity is unknown)
+  //   failure ✗ — robot stuck and never recovered, or never started:
+  //               stuck, stuck_and_abandoned, blocked_timeout
+  describe('v2.0.2 three-tier mission result classification', () => {
     const mkMission = (result: string): MissionRecord => ({
       id: 'm1', started_at: '2025-05-14T07:14:00Z', ended_at: null,
       duration_min: 37, run_min: null, area_sqft: 412, result: result as MissionRecord['result'],
@@ -156,33 +163,31 @@ describe('renderHistoryZone() — day detail popover', () => {
       recharges: null, evacuations: null, dirt_events: null, wifi_signal: null, source: 'local',
     });
 
-    it('stuck_and_resumed shows the success icon, not the failure icon', () => {
-      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('stuck_and_resumed')], openDaySummary: summary });
-      expect(html).toContain('rpc-day-ok');
-      expect(html).not.toContain('rpc-day-err');
-    });
+    const expectTier = (result: string, expectedClass: string) => {
+      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission(result)], openDaySummary: summary });
+      const otherClasses = ['rpc-day-ok', 'rpc-day-caution', 'rpc-day-err'].filter(c => c !== expectedClass);
+      expect(html).toContain(expectedClass);
+      otherClasses.forEach(c => expect(html).not.toContain(c));
+    };
 
-    it('completed still shows the success icon (no regression)', () => {
-      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('completed')], openDaySummary: summary });
-      expect(html).toContain('rpc-day-ok');
-      expect(html).not.toContain('rpc-day-err');
-    });
+    it('completed → success (✓)', () => expectTier('completed', 'rpc-day-ok'));
+    it('stuck_and_resumed → success (✓) — counted as completed by the integration', () =>
+      expectTier('stuck_and_resumed', 'rpc-day-ok'));
 
-    it('stuck_and_abandoned still shows the failure icon (genuine failure, not regrouped)', () => {
-      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('stuck_and_abandoned')], openDaySummary: summary });
-      expect(html).toContain('rpc-day-err');
-      expect(html).not.toContain('rpc-day-ok');
-    });
+    it('cancelled → caution (⚠) — mission ended, not a hard failure', () =>
+      expectTier('cancelled', 'rpc-day-caution'));
+    it('cancelled_by_user → caution (⚠)', () => expectTier('cancelled_by_user', 'rpc-day-caution'));
+    it('error → caution (⚠) — mission ended despite the error', () => expectTier('error', 'rpc-day-caution'));
+    it('error_battery → caution (⚠) — prefix-style error result, e.g. from a live cloud record', () =>
+      expectTier('error_battery', 'rpc-day-caution'));
+    it('unknown → caution (⚠) — unclassified, treated cautiously rather than as a hard failure', () =>
+      expectTier('unknown', 'rpc-day-caution'));
 
-    it('error still shows the failure icon (no regression)', () => {
-      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('error')], openDaySummary: summary });
-      expect(html).toContain('rpc-day-err');
-    });
-
-    it('cancelled still shows the failure icon (no regression)', () => {
-      const html = render({}, { openDay: '2025-05-14', dayMissions: [mkMission('cancelled')], openDaySummary: summary });
-      expect(html).toContain('rpc-day-err');
-    });
+    it('stuck → failure (✗)', () => expectTier('stuck', 'rpc-day-err'));
+    it('stuck_and_abandoned → failure (✗) — robot stuck and never recovered', () =>
+      expectTier('stuck_and_abandoned', 'rpc-day-err'));
+    it('blocked_timeout → failure (✗) — mission never ran', () =>
+      expectTier('blocked_timeout', 'rpc-day-err'));
   });
 });
 

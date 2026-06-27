@@ -25,21 +25,36 @@ function props(
 }
 
 describe('renderRoomSelectorZone() — visibility', () => {
-  it('returns empty string when !caps.hasZones', () =>
+  it('returns empty string when !caps.hasSmartZones', () =>
     expect(renderRoomSelectorZone(props())).toBe(''));
 
+  // v2.0.2 bug fix (confirmed against integration source): roomba_plus.clean_room
+  // throws a ServiceValidationError for any robot where map_capability != SMART.
+  // hasZones alone (true for EITHER smart_zone_select OR zone_select) used to
+  // gate this function, letting an EPHEMERAL robot's zone_select render the
+  // full multi-select "Clean selected rooms" flow — a promise the service call
+  // would then break on tap. Confirm EPHEMERAL's zone_select alone, without
+  // hasSmartZones, is correctly rejected.
+  it('returns empty string for EPHEMERAL: hasZones true via zone_select but hasSmartZones false', () => {
+    const p = props(
+      { hasZones: true, hasSmartZones: false },
+      { [`select.${n}_zone_select`]: st('Kitchen', { options: ['Kitchen', 'Hallway'] }) },
+    );
+    expect(renderRoomSelectorZone(p)).toBe('');
+  });
+
   it('returns empty string when show_rooms: false', () => {
-    const p = props({ hasZones: true }, {}, { config: { ...baseConfig, show_rooms: false } });
+    const p = props({ hasZones: true, hasSmartZones: true }, {}, { config: { ...baseConfig, show_rooms: false } });
     expect(renderRoomSelectorZone(p)).toBe('');
   });
 
   it('returns empty string when selector entity missing', () =>
-    expect(renderRoomSelectorZone(props({ hasZones: true }))).toBe(''));
+    expect(renderRoomSelectorZone(props({ hasZones: true, hasSmartZones: true }))).toBe(''));
 
   it('returns empty string when options array is empty', () => {
     const p = props(
-      { hasZones: true },
-      { [`select.${n}_zone_select`]: st('none', { options: [] }) },
+      { hasZones: true, hasSmartZones: true },
+      { [`select.${n}_smart_zone_select`]: st('none', { options: [] }) },
     );
     expect(renderRoomSelectorZone(p)).toBe('');
   });
@@ -79,8 +94,8 @@ describe('renderRoomSelectorZone() — room chips', () => {
   });
 
   it('escapes room names with special chars', () => {
-    const p = props({ hasZones: true }, {
-      [`select.${n}_zone_select`]: st('Living', { options: ['Living & Dining'] }),
+    const p = props({ hasZones: true, hasSmartZones: true }, {
+      [`select.${n}_smart_zone_select`]: st('Living', { options: ['Living & Dining'] }),
     });
     const html = renderRoomSelectorZone(p);
     expect(html).toContain('Living &amp; Dining');
@@ -90,32 +105,33 @@ describe('renderRoomSelectorZone() — room chips', () => {
 
 describe('renderRoomSelectorZone() — passes selector (Wave A2)', () => {
   const states = {
-    [`select.${n}_zone_select`]:      st('K', { options: ['K'] }),
-    [`select.${n}_cleaning_passes`]:  st('Auto', { options: ['Auto', 'One pass', 'Two passes'] }),
+    [`select.${n}_smart_zone_select`]: st('K', { options: ['K'] }),
+    [`select.${n}_cleaning_passes`]:   st('Auto', { options: ['Auto', 'One pass', 'Two passes'] }),
   };
 
   it('passes row shown when entity exists', () => {
-    const p = props({ hasZones: true }, states);
+    const p = props({ hasZones: true, hasSmartZones: true }, states);
     expect(renderRoomSelectorZone(p)).toContain('Passes:');
   });
 
   it('active chip matches passes state', () => {
-    const p = props({ hasZones: true }, states, { passes: '×2' });
+    const p = props({ hasZones: true, hasSmartZones: true }, states, { passes: '×2' });
     const html = renderRoomSelectorZone(p);
     expect(html).toContain('rpc-pass-chip--selected');
   });
 
   it('passes row hidden when entity absent', () => {
-    const p = props({ hasZones: true }, { [`select.${n}_zone_select`]: st('K', { options: ['K'] }) });
+    const p = props({ hasZones: true, hasSmartZones: true }, { [`select.${n}_smart_zone_select`]: st('K', { options: ['K'] }) });
     expect(renderRoomSelectorZone(p)).not.toContain('Passes:');
   });
 });
 
 describe('renderRoomSelectorZone() — repeat last (Wave A1)', () => {
-  const base = { [`select.${n}_zone_select`]: st('K', { options: ['K'] }) };
+  const base = { [`select.${n}_smart_zone_select`]: st('K', { options: ['K'] }) };
+  const caps = { hasZones: true, hasSmartZones: true };
 
   it('repeat button shown when entity available', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`button.${n}_repeat_mission`]: st('unknown'),
     });
@@ -123,7 +139,7 @@ describe('renderRoomSelectorZone() — repeat last (Wave A1)', () => {
   });
 
   it('repeat button hidden when entity unavailable', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`button.${n}_repeat_mission`]: st('unavailable'),
     });
@@ -131,21 +147,22 @@ describe('renderRoomSelectorZone() — repeat last (Wave A1)', () => {
   });
 
   it('repeat button hidden when entity missing', () => {
-    const p = props({ hasZones: true }, base);
+    const p = props(caps, base);
     expect(renderRoomSelectorZone(p)).not.toContain('Repeat last');
   });
 });
 
 describe('renderRoomSelectorZone() — Wave B3 settings panel', () => {
-  const base = { [`select.${n}_zone_select`]: st('K', { options: ['K'] }) };
+  const base = { [`select.${n}_smart_zone_select`]: st('K', { options: ['K'] }) };
+  const caps = { hasZones: true, hasSmartZones: true };
 
   it('settings row hidden when no setting entities', () => {
-    const p = props({ hasZones: true }, base);
+    const p = props(caps, base);
     expect(renderRoomSelectorZone(p)).not.toContain('rpc-settings-row');
   });
 
   it('settings row shown when edge_clean entity exists', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`switch.${n}_edge_clean`]: st('on'),
     });
@@ -154,7 +171,7 @@ describe('renderRoomSelectorZone() — Wave B3 settings panel', () => {
   });
 
   it('settings panel hidden when settingsPanelOpen=false', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`switch.${n}_edge_clean`]: st('on'),
     });
@@ -162,7 +179,7 @@ describe('renderRoomSelectorZone() — Wave B3 settings panel', () => {
   });
 
   it('settings panel shown when settingsPanelOpen=true', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`switch.${n}_edge_clean`]: st('on'),
     }, { settingsPanelOpen: true });
@@ -170,7 +187,7 @@ describe('renderRoomSelectorZone() — Wave B3 settings panel', () => {
   });
 
   it('edge clean ● when on', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`switch.${n}_edge_clean`]: st('on'),
     }, { settingsPanelOpen: true });
@@ -180,7 +197,7 @@ describe('renderRoomSelectorZone() — Wave B3 settings panel', () => {
   });
 
   it('edge clean ○ when off', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`switch.${n}_edge_clean`]: st('off'),
     }, { settingsPanelOpen: true });
@@ -190,7 +207,7 @@ describe('renderRoomSelectorZone() — Wave B3 settings panel', () => {
   });
 
   it('carpet boost cycle button shows current value', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`select.${n}_carpet_boost_select`]: st('Boost', { options: ['Auto', 'Boost', 'Off'] }),
     }, { settingsPanelOpen: true });
@@ -200,7 +217,7 @@ describe('renderRoomSelectorZone() — Wave B3 settings panel', () => {
   });
 
   it('always_finish entity hidden when absent from panel', () => {
-    const p = props({ hasZones: true }, {
+    const p = props(caps, {
       ...base,
       [`switch.${n}_edge_clean`]: st('on'),
     }, { settingsPanelOpen: true });

@@ -6,6 +6,7 @@
 import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, HouseholdSummary } from './types.js';
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
+import { timeSince } from './utils.js';
 import { renderRoomSelectorZone, renderSettingsPanel } from './zones/room-selector-zone.js';
 import { renderHealthZone }       from './zones/health-zone.js';
 import { renderScheduleZone }     from './zones/schedule-zone.js';
@@ -268,11 +269,18 @@ const STYLES = `
   /* v2.0 — ⚙ tab maintenance service links */
   .rpc-maint-link-row {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 4px 2px; font-size: 0.8rem;
+    padding: 4px 2px 0; font-size: 0.8rem;
   }
   .rpc-maint-link-label   { color: var(--primary-text-color); }
   .rpc-maint-link-service {
     font-family: monospace; font-size: 0.72rem; color: var(--secondary-text-color, #9ca3af);
+  }
+  /* v2.0.1: per-row "last reset" line, mirroring the Health tab's
+     maintenance calendar rows so all four rows (wheel/contact/bin/battery)
+     show consistent recency information instead of only three of them. */
+  .rpc-maint-link-lastreset {
+    font-size: 0.72rem; color: var(--secondary-text-color, #9ca3af);
+    padding: 0 2px 8px;
   }
   .rpc-maint-link-hint {
     font-size: 0.72rem; color: var(--secondary-text-color, #9ca3af);
@@ -326,8 +334,9 @@ const STYLES = `
   .rpc-day-empty   { font-size: 0.82rem; color: var(--secondary-text-color); }
   .rpc-day-mission { display: flex; align-items: baseline; gap: 8px; font-size: 0.82rem; margin-bottom: 6px; flex-wrap: wrap; }
   .rpc-day-icon  { font-weight: 700; flex-shrink: 0; }
-  .rpc-day-ok    { color: var(--rpc-green); }
-  .rpc-day-err   { color: var(--rpc-red); }
+  .rpc-day-ok      { color: var(--rpc-green); }
+  .rpc-day-caution { color: var(--rpc-amber); }
+  .rpc-day-err     { color: var(--rpc-red); }
   .rpc-day-time  { font-weight: 500; }
   .rpc-day-dur, .rpc-day-area { color: var(--secondary-text-color); }
   .rpc-day-zones { width: 100%; padding-left: 20px; color: var(--secondary-text-color); font-size: 0.78rem; }
@@ -845,6 +854,32 @@ class RoombaPlusCard extends HTMLElement {
       // cleaning_analytics_30d and missions_last_30d already tracked above — A4 vs-usual delta uses both
       // v2.2+
       `image.${n}_coverage_map`,               // B2: hasCoverageImage detection
+
+      // v2.0.1 bug fix: these v2.0 entities were never added to the render
+      // guard when their features were built — an update to any of them
+      // alone (e.g. robot_health_score recalculating, or
+      // battery_last_replaced changing after a reset_battery call) would
+      // sit in this._hass unrendered until some unrelated tracked entity
+      // happened to change and trigger a re-render that incidentally
+      // picked up the fresher data. Found while fixing a missing
+      // last-reset display on the Battery baseline maintenance row —
+      // checked the whole v2.0 entity surface for the same gap rather than
+      // only adding the one entity that prompted the check.
+      `sensor.${n}_robot_health_score`,         // C1-HEALTH
+      `sensor.${n}_wheel_last_cleaned`,         // C2-MAINT
+      `sensor.${n}_contact_last_cleaned`,       // C2-MAINT
+      `sensor.${n}_bin_last_cleaned`,           // C2-MAINT
+      `sensor.${n}_battery_last_replaced`,      // C2-MAINT (battery row)
+      `sensor.${n}_mission_progress`,           // C3-PROGRESS
+      `sensor.${n}_last_mission_result`,        // C5-ANOMALY (inactive pending integration L3-FIX, tracked for when it activates)
+      `select.${n}_carpet_boost_select`,        // Settings panel
+      `switch.${n}_edge_clean`,                 // Settings panel
+      `switch.${n}_always_finish`,              // Settings panel
+      `binary_sensor.${n}_demand_clean_blocked`, // Header demand-blocked line
+      // Pre-existing gap, not v2.0-specific, fixed alongside the above
+      // since it was found during the same audit:
+      `sensor.${n}_optimal_clean_window`,       // F15 (⚙ tab schedule)
+
       // F3b — robot selector helper (when configured)
       ...(this.config.robot_selector_helper ? [this.config.robot_selector_helper] : []),
     ];
@@ -1165,32 +1200,54 @@ class RoombaPlusCard extends HTMLElement {
    *
    * Only includes services confirmed against integration source:
    * reset_wheel_cleaning / reset_contact_cleaning / reset_bin_cleaning
-   * (IA74-MAINT, v2.7.0) and reset_battery (confirmed via card project
-   * memory). A "reset robot profile" service was referenced in an earlier
-   * card plan draft but its existence was never confirmed against source —
-   * deliberately omitted here rather than guessing at a service name.
+   * (IA74-MAINT, v2.7.0) and reset_battery. A "reset robot profile" service
+   * was referenced in an earlier card plan draft but its existence was
+   * never confirmed against source — deliberately omitted here rather than
+   * guessing at a service name.
+   *
+   * v2.0.1 bug fix (user-reported, traced to source rather than guessed
+   * at): `sensor.*_battery_last_replaced` exists in the integration as a
+   * TIMESTAMP sensor — the exact same IA74-MAINT pattern as
+   * wheel/contact/bin_last_cleaned, just for the battery baseline reset.
+   * The Battery baseline row only showed the service name with no "last
+   * reset" date, while the other three rows already had one — an
+   * inconsistency the card introduced by missing this sensor when the
+   * maintenance links section was first built. Now every row shows the
+   * same "Reset X ago" / "Never recorded" treatment.
    */
   private renderMaintenanceLinks(caps: import('./types.js').RobotCapabilities): string {
     if (!caps.hasMaintenanceCalendar && !this._hass.states[`sensor.${this.robotName}_battery_capacity_retention`]) return '';
 
     const n = this.robotName;
-    const rows: { label: string; service: string }[] = [];
-    if (this._hass.states[`sensor.${n}_wheel_last_cleaned`])   rows.push({ label: 'Wheel cleaning',   service: 'roomba_plus.reset_wheel_cleaning' });
-    if (this._hass.states[`sensor.${n}_contact_last_cleaned`]) rows.push({ label: 'Contact cleaning', service: 'roomba_plus.reset_contact_cleaning' });
-    if (this._hass.states[`sensor.${n}_bin_last_cleaned`])     rows.push({ label: 'Bin cleaning',      service: 'roomba_plus.reset_bin_cleaning' });
-    if (this._hass.states[`sensor.${n}_battery_capacity_retention`]) rows.push({ label: 'Battery baseline', service: 'roomba_plus.reset_battery' });
+    const rows: { label: string; service: string; tsEntityId: string }[] = [];
+    if (this._hass.states[`sensor.${n}_wheel_last_cleaned`])
+      rows.push({ label: 'Wheel cleaning',   service: 'roomba_plus.reset_wheel_cleaning',   tsEntityId: `sensor.${n}_wheel_last_cleaned` });
+    if (this._hass.states[`sensor.${n}_contact_last_cleaned`])
+      rows.push({ label: 'Contact cleaning', service: 'roomba_plus.reset_contact_cleaning', tsEntityId: `sensor.${n}_contact_last_cleaned` });
+    if (this._hass.states[`sensor.${n}_bin_last_cleaned`])
+      rows.push({ label: 'Bin cleaning',     service: 'roomba_plus.reset_bin_cleaning',     tsEntityId: `sensor.${n}_bin_last_cleaned` });
+    if (this._hass.states[`sensor.${n}_battery_capacity_retention`])
+      rows.push({ label: 'Battery baseline', service: 'roomba_plus.reset_battery',          tsEntityId: `sensor.${n}_battery_last_replaced` });
 
     if (rows.length === 0) return '';
 
     return `
       <div class="rpc-settings-divider"></div>
       <div class="rpc-zone-header">MAINTENANCE</div>
-      ${rows.map(r => `
-        <div class="rpc-maint-link-row">
-          <span class="rpc-maint-link-label">${r.label}</span>
-          <span class="rpc-maint-link-service">${r.service}</span>
-        </div>
-      `).join('')}
+      ${rows.map(r => {
+        const tsEntity = this._hass.states[r.tsEntityId];
+        const recorded = !!tsEntity && tsEntity.state !== 'unavailable' && tsEntity.state !== 'unknown';
+        const lastReset = recorded
+          ? `Reset ${timeSince(tsEntity!.state, this._hass.language)}`
+          : 'Never recorded';
+        return `
+          <div class="rpc-maint-link-row">
+            <span class="rpc-maint-link-label">${r.label}</span>
+            <span class="rpc-maint-link-service">${r.service}</span>
+          </div>
+          <div class="rpc-maint-link-lastreset">${lastReset}</div>
+        `;
+      }).join('')}
       <div class="rpc-maint-link-hint">Trigger via Developer Tools → Services</div>
     `;
   }
@@ -1639,7 +1696,7 @@ class RoombaPlusCard extends HTMLElement {
     if (!this.config || !this._hass) return 10;
     const caps = detectCapabilities(this._hass, this.robotName, this.config, this.firstRecord, this.firstSummary);
     let size = 4;
-    if (caps.hasZones && this.config.show_rooms  !== false) size += 3;
+    if (caps.hasSmartZones && this.config.show_rooms !== false) size += 3;
     if (this.config.show_health   !== false) size += 2;
     if (this.config.show_schedule !== false) size += 2;
     if (this.config.show_history  !== false) size += 4;

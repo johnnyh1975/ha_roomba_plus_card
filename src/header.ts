@@ -329,7 +329,13 @@ export function renderHeader(props: HeaderProps): string {
       const startLabel = demandBlocked ? '▶ Start anyway' : '▶ Start full clean';
       buttons = btn('start', 'Start full clean', startLabel);
       // "Rooms…" is hidden in companion mode — XVMC owns room selection there.
-      if (config.mode !== 'companion' && caps.hasZones) {
+      // v2.0.2 bug fix: this button opens the multi-select chip picker that
+      // calls roomba_plus.clean_room — hard-blocked for non-SMART robots
+      // (see room-selector-zone.ts for the full explanation). Was gated on
+      // caps.hasZones, which is also true for EPHEMERAL's zone_select
+      // entity even though that tier's zone-cleaning model is select +
+      // a separate button, not multi-select + clean_room.
+      if (config.mode !== 'companion' && caps.hasSmartZones) {
         buttons += `<button class="rpc-btn" data-action="toggle-room-picker" aria-expanded="${roomPickerOpen}">
           🗺 Rooms…
         </button>`;

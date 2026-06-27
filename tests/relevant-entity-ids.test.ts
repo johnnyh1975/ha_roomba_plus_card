@@ -72,6 +72,19 @@ function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?
     `sensor.${n}_mission_count_30d`,
     `binary_sensor.${n}_demand_clean_blocked`,
     `image.${n}_coverage_map`,
+    // v2.0.1: kept in sync with the production list after a render-guard
+    // gap was found — these v2.0 entities were missing from both places.
+    `sensor.${n}_robot_health_score`,
+    `sensor.${n}_wheel_last_cleaned`,
+    `sensor.${n}_contact_last_cleaned`,
+    `sensor.${n}_bin_last_cleaned`,
+    `sensor.${n}_battery_last_replaced`,
+    `sensor.${n}_mission_progress`,
+    `sensor.${n}_last_mission_result`,
+    `select.${n}_carpet_boost_select`,
+    `switch.${n}_edge_clean`,
+    `switch.${n}_always_finish`,
+    `sensor.${n}_optimal_clean_window`,
     ...(helperEntity ? [helperEntity] : []),
   ];
 }
@@ -132,6 +145,36 @@ describe('relevantEntityIds() — B2: previously missing entity IDs now watched'
 
   it('watches image coverage_map (hasCoverageImage cap detection)', () =>
     expect(has(`image.${n}_coverage_map`)).toBe(true));
+
+  // ── v2.0.1 bug fix: render-guard gap found while fixing the missing
+  // battery_last_replaced display — none of these v2.0 entities were
+  // tracked, so an update to any one alone wouldn't trigger a re-render. ──
+  it('watches robot_health_score (C1-HEALTH)', () =>
+    expect(has(`sensor.${n}_robot_health_score`)).toBe(true));
+
+  it('watches wheel/contact/bin_last_cleaned (C2-MAINT)', () => {
+    expect(has(`sensor.${n}_wheel_last_cleaned`)).toBe(true);
+    expect(has(`sensor.${n}_contact_last_cleaned`)).toBe(true);
+    expect(has(`sensor.${n}_bin_last_cleaned`)).toBe(true);
+  });
+
+  it('watches battery_last_replaced (Maintenance section, battery row)', () =>
+    expect(has(`sensor.${n}_battery_last_replaced`)).toBe(true));
+
+  it('watches mission_progress (C3-PROGRESS)', () =>
+    expect(has(`sensor.${n}_mission_progress`)).toBe(true));
+
+  it('watches last_mission_result (C5-ANOMALY, inactive pending integration)', () =>
+    expect(has(`sensor.${n}_last_mission_result`)).toBe(true));
+
+  it('watches carpet_boost_select, edge_clean, always_finish (Settings panel)', () => {
+    expect(has(`select.${n}_carpet_boost_select`)).toBe(true);
+    expect(has(`switch.${n}_edge_clean`)).toBe(true);
+    expect(has(`switch.${n}_always_finish`)).toBe(true);
+  });
+
+  it('watches optimal_clean_window (F15, pre-existing gap fixed alongside)', () =>
+    expect(has(`sensor.${n}_optimal_clean_window`)).toBe(true));
 });
 
 describe('relevantEntityIds() — robot_selector_helper', () => {

@@ -309,9 +309,28 @@ export function renderHistoryZone(
       // spotted in a screenshot review. Group the same two values the
       // integration already groups for DaySummary.completed, rather than
       // a literal string-equality check against 'completed' alone.
-      const isSuccess = m.result === 'completed' || m.result === 'stuck_and_resumed';
-      const icon  = isSuccess ? '✓' : '✗';
-      const cls   = isSuccess ? 'rpc-day-ok' : 'rpc-day-err';
+      // v2.0.2: three-tier mission result classification, replacing the
+      // v2.0.1 binary success/failure icon. User feedback: "stuck_and_resumed
+      // ist aus cloud sicht completed, battery error kann auch aus cloud
+      // sicht completed sein — in beiden fällen wurde die mission beendet."
+      // The previous binary model conflated two different questions — "did
+      // the mission end" and "was it a clean success" — into one ✓/✗ icon.
+      // Three tiers per REST_API_CONTRACT.md's result enumeration:
+      //   success ✓ — completed, stuck_and_resumed
+      //   caution ⚠ — mission ended, but with an incident worth noting
+      //               (cancelled, cancelled_by_user, error/error_* — e.g.
+      //               error_battery — and unclassified 'unknown' results,
+      //               treated cautiously rather than as a hard failure
+      //               since their actual severity is unknown)
+      //   failure ✗ — robot stuck and never recovered, or never started
+      //               (stuck, stuck_and_abandoned, blocked_timeout)
+      const tier = m.result === 'completed' || m.result === 'stuck_and_resumed'
+        ? 'success'
+        : m.result === 'stuck' || m.result === 'stuck_and_abandoned' || m.result === 'blocked_timeout'
+        ? 'failure'
+        : 'caution';
+      const icon = tier === 'success' ? '✓' : tier === 'failure' ? '✗' : '⚠';
+      const cls  = tier === 'success' ? 'rpc-day-ok' : tier === 'failure' ? 'rpc-day-err' : 'rpc-day-caution';
         const start = new Date(m.started_at).toLocaleTimeString(hass.language, { hour: '2-digit', minute: '2-digit', hour12: false });
         const area  = m.area_sqft !== null ? formatArea(m.area_sqft, useMetric) : '—';
         const zones = m.zones?.map(z => esc(z)).join(' · ') ?? '';

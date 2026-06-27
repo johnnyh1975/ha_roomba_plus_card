@@ -20,23 +20,36 @@ function render(states: Record<string, ReturnType<typeof st>> = {}, overrides: P
 }
 
 describe('renderHeader() — state-contextual buttons (v2.0: max 2, 3 for paused)', () => {
-  it('docked: shows Start full clean only (no Rooms… without hasZones)', () => {
+  it('docked: shows Start full clean only (no Rooms… without hasSmartZones)', () => {
     const html = render({ 'vacuum.roomba': st('docked') });
     expect(html).toContain('Start full clean');
     const btnCount = (html.match(/<button class="rpc-btn/g) || []).length;
     expect(btnCount).toBeLessThanOrEqual(2);
   });
 
-  it('docked + hasZones: shows Start and Rooms… (2 buttons)', () => {
-    const html = render({ 'vacuum.roomba': st('docked') }, { caps: { ...defaultCaps, hasZones: true } });
+  it('docked + hasSmartZones: shows Start and Rooms… (2 buttons)', () => {
+    const html = render({ 'vacuum.roomba': st('docked') }, { caps: { ...defaultCaps, hasSmartZones: true } });
     expect(html).toContain('Start full clean');
     expect(html).toContain('Rooms…');
   });
 
-  it('docked + companion mode: Rooms… hidden even with hasZones', () => {
+  // v2.0.2 bug fix: roomba_plus.clean_room throws a ServiceValidationError
+  // for any robot where map_capability != SMART. hasZones is true for
+  // EITHER smart_zone_select (SMART) OR zone_select (EPHEMERAL) — gating
+  // this button on hasZones let it appear for EPHEMERAL robots, promising
+  // a targeted clean that would then fail on tap.
+  it('docked + hasZones true via EPHEMERAL zone_select but hasSmartZones false: Rooms… hidden', () => {
     const html = render(
       { 'vacuum.roomba': st('docked') },
-      { config: { ...baseConfig, mode: 'companion' }, caps: { ...defaultCaps, hasZones: true } },
+      { caps: { ...defaultCaps, hasZones: true, hasSmartZones: false } },
+    );
+    expect(html).not.toContain('Rooms…');
+  });
+
+  it('docked + companion mode: Rooms… hidden even with hasSmartZones', () => {
+    const html = render(
+      { 'vacuum.roomba': st('docked') },
+      { config: { ...baseConfig, mode: 'companion' }, caps: { ...defaultCaps, hasSmartZones: true } },
     );
     expect(html).not.toContain('Rooms…');
   });
@@ -79,7 +92,7 @@ describe('renderHeader() — v2.0 selected-room button swap', () => {
   it('shows "Start N selected rooms" and hides Rooms… when selectedRoomCount > 0', () => {
     const html = render(
       { 'vacuum.roomba': st('docked') },
-      { caps: { ...defaultCaps, hasZones: true }, selectedRoomCount: 2 },
+      { caps: { ...defaultCaps, hasSmartZones: true }, selectedRoomCount: 2 },
     );
     expect(html).toContain('Start 2 selected rooms');
     expect(html).not.toContain('Rooms…');
@@ -89,7 +102,7 @@ describe('renderHeader() — v2.0 selected-room button swap', () => {
   it('singular "1 selected room" for count of 1', () => {
     const html = render(
       { 'vacuum.roomba': st('docked') },
-      { caps: { ...defaultCaps, hasZones: true }, selectedRoomCount: 1 },
+      { caps: { ...defaultCaps, hasSmartZones: true }, selectedRoomCount: 1 },
     );
     expect(html).toContain('Start 1 selected room');
     expect(html).not.toContain('Start 1 selected rooms');
@@ -98,7 +111,7 @@ describe('renderHeader() — v2.0 selected-room button swap', () => {
   it('falls back to Start full clean + Rooms… when selectedRoomCount is 0', () => {
     const html = render(
       { 'vacuum.roomba': st('docked') },
-      { caps: { ...defaultCaps, hasZones: true }, selectedRoomCount: 0 },
+      { caps: { ...defaultCaps, hasSmartZones: true }, selectedRoomCount: 0 },
     );
     expect(html).toContain('Start full clean');
     expect(html).toContain('Rooms…');

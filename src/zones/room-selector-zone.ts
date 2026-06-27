@@ -123,13 +123,26 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
   const { hass, config, caps, robotName, selectedRooms, passes,
           isSending, sendError, settingsPanelOpen, includeSettingsPanel = true } = props;
 
-  if (!caps.hasZones) return '';
+  // v2.0.2 bug fix (confirmed against integration source): this entire
+  // multi-select + "Clean selected rooms" flow calls roomba_plus.clean_room
+  // (via the clean-selected action), which hard-fails with a
+  // ServiceValidationError for any robot where map_capability != SMART:
+  //   "{entity_id} does not support Smart Map room cleaning. Only i7, s9,
+  //    and j-series robots support this action."
+  // caps.hasZones is true whenever EITHER smart_zone_select (SMART) OR
+  // zone_select (EPHEMERAL) exists — gating on it let this multi-select UI
+  // render for EPHEMERAL robots using zone_select's real, valid options,
+  // promising a targeted clean that would then throw on tap. EPHEMERAL's
+  // actual zone-cleaning model is select.*_zone_select + a separate
+  // ZoneCleanButton (single zone at a time, no multi-select, no ordering) —
+  // a genuinely different interaction this function doesn't implement.
+  // Gate strictly on hasSmartZones until that EPHEMERAL flow is built as
+  // its own widget.
+  if (!caps.hasSmartZones) return '';
   if (config.show_rooms === false) return '';
 
   const n = robotName;
-  const smartSelect = hass.states[`select.${n}_smart_zone_select`];
-  const zoneSelect  = hass.states[`select.${n}_zone_select`];
-  const selector    = smartSelect ?? zoneSelect;
+  const selector = hass.states[`select.${n}_smart_zone_select`];
   if (!selector) return '';
 
   const options: string[] = (selector.attributes.options as string[]) ?? [];
