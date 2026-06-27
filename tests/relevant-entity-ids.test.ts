@@ -54,14 +54,17 @@ function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?
     `sensor.${n}_clean_streak`,
     `sensor.${n}_completion_rate_30d`,
     `sensor.${n}_lifetime_missions`,
-    `sensor.${n}_recent_area_30d`,
-    `sensor.${n}_recent_time_30d`,
+    // SC1 (integration v2.7.0): recent_area_30d / recent_time_30d deprecated,
+    // removed in v3.0 — consolidated into cleaning_analytics_30d.
+    `sensor.${n}_cleaning_analytics_30d`,
     `sensor.${n}_battery_capacity_retention`,
     `sensor.${n}_estimated_battery_eol`,
-    `sensor.${n}_recent_wifi_floor`,
+    // SC1 (integration v2.7.0): recent_wifi_floor deprecated, removed in v3.0.
+    `sensor.${n}_wifi_health`,
     `sensor.${n}_recent_coverage_pct`,
     `sensor.${n}_missions_last_30d`,
-    `sensor.${n}_cleaning_speed_trend`,
+    // SC1 (integration v2.7.0): cleaning_speed_trend deprecated, removed in v3.0.
+    `sensor.${n}_cleaning_performance`,
     `binary_sensor.${n}_consecutive_clean_skips`,
     `sensor.${n}_area_cleaned_today`,
     `sensor.${n}_mission_expire_time`,

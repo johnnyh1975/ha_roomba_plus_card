@@ -186,9 +186,36 @@ export function mmToImagePct(
 }
 
 /**
+ * v2.0 C7-ROOM-BOUNDS: numeric variant of mmToImagePct for SVG polygon
+ * point lists (`points="x1,y1 x2,y2 ..."` needs raw numbers, not CSS
+ * percentage strings). Same transform, same mm-space convention — the
+ * `rooms` attribute on image.*_coverage_map gives outline coordinates in
+ * pose-space mm (confirmed against integration source; NOT image pixels
+ * as an earlier plan draft assumed), so this reuses the identical
+ * spatial-extent-based transform already used for hazard pins.
+ */
+export function mmToImagePctNum(
+  xMm: number, yMm: number,
+  xMin: number, xMax: number, yMin: number, yMax: number,
+): { x: number; y: number } {
+  const x = (xMm - xMin) / (xMax - xMin) * 100;
+  const y = (yMax - yMm) / (yMax - yMin) * 100; // y-axis inverted
+  return { x, y };
+}
+
+/**
  * Normalise a single wlBars sensor state value to percentage.
  * Same heuristic: ≤ 4 → multiply by 25; already % → pass through.
  */
+// Originally compensated for a confirmed integration bug: the deprecated
+// sensor.*_recent_wifi_floor was declared as a percentage but its value_fn
+// actually returned a raw 0–4 signal-bucket index. Post-SC1 migration
+// (integration v2.7.0), the card reads sensor.*_wifi_health's
+// `weakest_bucket_observed` attribute instead, which is always a genuine
+// 0–4 bucket index by construction (no longer a workaround for mislabelled
+// data) — the `raw <= 4` branch below still always applies, kept as-is for
+// the bucket→percentage display conversion rather than inlining `raw * 25`
+// at the one remaining call site.
 export function normalisedWifiFloor(raw: number): number {
   return raw <= 4 ? raw * 25 : raw;
 }

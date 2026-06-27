@@ -151,22 +151,25 @@ describe('detectCapabilities() — B1 regression: most recent record used', () =
   });
 });
 
-// ── A4: hasLifetimeArea — sensor.*_recent_area_30d (renamed in integration v2.1.2) ──
-describe('detectCapabilities() — hasLifetimeArea (A4)', () => {
-  it('hasLifetimeArea false when recent_area_30d entity absent', () => {
+// ── A4 / SC1: hasLifetimeArea — sensor.*_cleaning_analytics_30d ──────────────
+// SC1 (integration v2.7.0): migrated from sensor.*_recent_area_30d, which is
+// itself deprecated (was renamed from lifetime_area in v2.1.2) and removed
+// in integration v3.0.
+describe('detectCapabilities() — hasLifetimeArea (A4 / SC1)', () => {
+  it('hasLifetimeArea false when cleaning_analytics_30d entity absent', () => {
     const caps = detectCapabilities(makeHass(), n, baseConfig, null);
     expect(caps.hasLifetimeArea).toBe(false);
   });
 
-  it('hasLifetimeArea true when recent_area_30d entity present', () => {
-    const hass = makeHass({ [`sensor.${n}_recent_area_30d`]: '12345' });
+  it('hasLifetimeArea true when cleaning_analytics_30d entity present', () => {
+    const hass = makeHass({ [`sensor.${n}_cleaning_analytics_30d`]: '12345' });
     const caps = detectCapabilities(hass, n, baseConfig, null);
     expect(caps.hasLifetimeArea).toBe(true);
   });
 
-  it('hasLifetimeArea false when legacy lifetime_area entity present (regression guard)', () => {
-    // Confirms the old slug no longer triggers the flag — entity was renamed in v2.1.2
-    const hass = makeHass({ [`sensor.${n}_lifetime_area`]: '12345' });
+  it('hasLifetimeArea false when deprecated recent_area_30d entity present (regression guard)', () => {
+    // Confirms the deprecated SC1 slug no longer triggers the flag.
+    const hass = makeHass({ [`sensor.${n}_recent_area_30d`]: '12345' });
     const caps = detectCapabilities(hass, n, baseConfig, null);
     expect(caps.hasLifetimeArea).toBe(false);
   });

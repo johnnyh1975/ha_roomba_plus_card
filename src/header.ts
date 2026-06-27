@@ -1,25 +1,39 @@
-import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary } from '../types.js';
-import { esc, timeSince } from '../utils.js';
-import { renderSettingsPanel } from './room-selector-zone.js';
-import { MDI_TO_EMOJI } from '../const.js';
+/**
+ * header.ts — v2.0 persistent header.
+ *
+ * Replaces the old Status zone's role as a stacked zone with an always-
+ * visible header shown above the tab bar regardless of active tab.
+ *
+ * Design principle (v2.0 plan): never show a static row of all possible
+ * buttons. Render only the buttons that are meaningful for the current
+ * robot state — maximum two, except Paused which gets three. Verbs are
+ * always explicit ("Return home", not "Home").
+ *
+ * F11 (mission_destination) and C3-PROGRESS (mission_progress sensor) are
+ * merged into a single spatial line here, rather than rendered as two
+ * separate lines as the original incremental plan would have produced.
+ */
+import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary } from './types.js';
+import { esc, timeSince } from './utils.js';
+import { MDI_TO_EMOJI } from './const.js';
 
 type VacuumState = 'cleaning' | 'paused' | 'returning' | 'docked' | 'idle' | 'error' | 'unavailable';
 
-export interface StatusZoneProps {
+export interface HeaderProps {
   hass: HomeAssistant;
   config: CardConfig;
   caps: RobotCapabilities;
   robotName: string;
   loadingAction: string | null;
-  /** Today's DaySummary from history data, for Wave A3 context line */
   todayMissionCount: number | null;
-  /**
-   * F1: Full history data for "Last cleaned X ago" display when docked.
-   * null when history not yet loaded or show_history: false.
-   */
   missionData: DaySummary[] | null;
-  /** F3b: settings panel expanded state — passed when show_rooms:false so settings render here */
-  settingsPanelOpen: boolean;
+  /** v2.0: whether the inline room picker (header "Rooms…" expansion) is open */
+  roomPickerOpen: boolean;
+  /** v2.0 C7-ROOM-BOUNDS: count of rooms currently selected via the header
+   *  chip picker or Map tab tap-to-select. When > 0 while docked, the
+   *  header button swaps from "Start full clean" / "Rooms…" to a single
+   *  "Start selected rooms" action. */
+  selectedRoomCount: number;
 }
 
 function st(hass: HomeAssistant, entityId: string): string {
@@ -32,10 +46,7 @@ function formatArea(sqft: number, unit: 'auto' | 'sqft' | 'm2', isMetric: boolea
   return `${sqft} ft²`;
 }
 
-/**
- * F1: Returns a human-readable "X ago" string for the most recent completed mission.
- * Scans missionData from most-recent backward; returns null if no data yet.
- */
+/** F1: "X ago" for the most recent completed mission. */
 function lastCleanedAgo(missionData: DaySummary[] | null, locale: string): string | null {
   if (!missionData) return null;
   for (let i = missionData.length - 1; i >= 0; i--) {
@@ -58,8 +69,8 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
 }
 
-export function renderStatusZone(props: StatusZoneProps): string {
-  const { hass, config, caps, robotName, loadingAction, todayMissionCount, settingsPanelOpen } = props;
+export function renderHeader(props: HeaderProps): string {
+  const { hass, config, caps, robotName, loadingAction, todayMissionCount, roomPickerOpen, selectedRoomCount } = props;
   const entityId = config.entity;
   const vacState = (st(hass, entityId)) as VacuumState;
   const attrs = hass.states[entityId]?.attributes ?? {};
@@ -67,13 +78,11 @@ export function renderStatusZone(props: StatusZoneProps): string {
   const unit = config.area_unit ?? 'auto';
   const unavailable = vacState === 'unavailable';
   const anyLoading = loadingAction !== null;
-
   const n = robotName;
 
-  // Sensors
   const errorSensor        = `sensor.${n}_last_error_code`;
   const errorZoneSensor    = `sensor.${n}_last_error_zone`;
-  const rechargeTimeSensor = `sensor.${n}_mission_recharge_time`;  // pre-1.9 fallback only
+  const rechargeTimeSensor = `sensor.${n}_mission_recharge_time`;
   const avgDurationSensor  = `sensor.${n}_average_mission_time`;
   const areaCleanedToday   = `sensor.${n}_area_cleaned_today`;
 
@@ -82,30 +91,21 @@ export function renderStatusZone(props: StatusZoneProps): string {
   const avgDurRaw      = parseFloat(st(hass, avgDurationSensor));
   const estimatedTotal = isNaN(avgDurRaw) || avgDurRaw <= 0 ? 45 : avgDurRaw;
 
-  // Robot identity
   const isMop      = caps.isMop;
   const robotIcon  = isMop ? '🧹' : '🤖';
   const friendlyName = esc((attrs.friendly_name as string) ?? entityId);
 
-  // ── Mission phase (v1.9+) ──
-  // These give precise state that the vacuum entity alone cannot convey.
   const missionPhase      = hass.states[`sensor.${n}_phase`]?.state ?? '';
   const missionActiveRaw  = hass.states[`binary_sensor.${n}_mission_active`]?.state ?? '';
   const isMissionActive   = missionActiveRaw === 'on';
   const hasMissionActive  = caps.hasMissionActive;
 
-  // ── Recharge ETA (independent of detection method) ──
-  // mission_expire_time gives the resumption time regardless of whether we detected
-  // the recharge via mission_active (v1.9+) or the recharge/expire pair (pre-1.9).
   const expireRaw  = hass.states[`sensor.${n}_mission_expire_time`]?.state ?? '';
   const expireDate = expireRaw && expireRaw !== 'unavailable' && expireRaw !== 'unknown'
     ? new Date(expireRaw) : null;
   const hasETA     = !!expireDate && !isNaN(expireDate.getTime()) && expireDate > new Date();
   const resumeMin  = hasETA ? Math.max(1, Math.round((expireDate!.getTime() - Date.now()) / 60000)) : null;
 
-  // ── Recharging mid-mission detection ──
-  // v1.9+: binary_sensor.mission_active = on while vacuum is docked → mid-mission recharge.
-  // Pre-1.9 fallback: recharge/expire sensor pair.
   let isRecharging = false;
   if (hasMissionActive) {
     isRecharging = vacState === 'docked' && isMissionActive;
@@ -116,12 +116,24 @@ export function renderStatusZone(props: StatusZoneProps): string {
     isRecharging = vacState === 'docked' && rechargeValid && hasETA;
   }
 
+  // ── v2.0 mid-mission recharge line (mission_duration_min / recharge_min) ──
+  // New attributes on mission_progress (v2.8.6). When mid-recharge, show
+  // elapsed recharge time inline rather than letting the percentage stall
+  // silently — the header opportunity flagged in the v2.0 plan.
+  let rechargeLineHtml = '';
+  if (isRecharging && caps.hasMissionProgressSensor) {
+    const mp = hass.states[`sensor.${n}_mission_progress`];
+    const rechargeMin = mp?.attributes?.recharge_min;
+    if (typeof rechargeMin === 'number') {
+      rechargeLineHtml = `<div class="rpc-recharge-line">⚡ Recharging · ${Math.round(rechargeMin)} min</div>`;
+    }
+  }
+
   // ── State label ──
   let stateDot = '';
   let stateLabel = '';
   let extraClass = '';
 
-  // Evac (Clean Base emptying) — phase takes precedence over vacuum state
   if (missionPhase === 'evac') {
     stateDot   = '⬆';
     stateLabel = 'Emptying bin';
@@ -142,7 +154,7 @@ export function renderStatusZone(props: StatusZoneProps): string {
     }
   }
 
-  // ── Error details (Zone 1 inline) ──
+  // ── Error details ──
   let errorHtml = '';
   if (vacState === 'error') {
     const errEntity = hass.states[errorSensor];
@@ -161,8 +173,7 @@ export function renderStatusZone(props: StatusZoneProps): string {
     }
   }
 
-  // ── Wave A3: area-today context line ──
-  // Show during any active mission state: cleaning, paused, or mid-mission recharge.
+  // ── Area-today context line ──
   let areaTodayHtml = '';
   const missionInProgress = hasMissionActive
     ? isMissionActive
@@ -171,7 +182,6 @@ export function renderStatusZone(props: StatusZoneProps): string {
     const todayAreaRaw = parseFloat(st(hass, areaCleanedToday));
     if (!isNaN(todayAreaRaw) && todayAreaRaw > 0) {
       const areaStr = formatArea(todayAreaRaw, unit, isMetric);
-      // Heatmap data shows COMPLETED missions; current mission is +1
       const currentMission = todayMissionCount !== null ? todayMissionCount + 1 : null;
       const missionCtx = currentMission !== null && currentMission > 1
         ? ` · ${esc(ordinal(currentMission))} mission`
@@ -187,6 +197,34 @@ export function renderStatusZone(props: StatusZoneProps): string {
     progressHtml = `<div class="rpc-progress-track"><div class="rpc-progress-fill" style="width:${pct}%"></div></div>`;
   }
 
+  // ── v2.0: unified spatial line — merges F11 mission_destination and
+  // C3-PROGRESS mission_progress into one line instead of two. When the
+  // mission_progress sensor is present, it drives the line (current room +
+  // percentage); mission_destination (final room) is NOT duplicated here —
+  // it belongs in the ⚙ tab's mission panel per the v2.0 plan. When the
+  // sensor is absent (EPHEMERAL, no cloud, pre-2.6.0 integration), fall back
+  // to the old destination-only line.
+  let spatialLineHtml = '';
+  if (vacState === 'cleaning') {
+    if (caps.hasMissionProgressSensor) {
+      const mp = hass.states[`sensor.${n}_mission_progress`];
+      const currentRoom = mp?.attributes?.current_room as string | undefined;
+      const progressPct = mp && mp.state !== 'unavailable' && mp.state !== 'unknown'
+        ? parseFloat(mp.state) : NaN;
+      if (currentRoom || !isNaN(progressPct)) {
+        const parts: string[] = [];
+        if (currentRoom) parts.push(esc(currentRoom));
+        if (!isNaN(progressPct)) parts.push(`${Math.round(progressPct)}%`);
+        spatialLineHtml = `<div class="rpc-spatial-line">${parts.join(' · ')}</div>`;
+      }
+    } else {
+      const missionDest = attrs.mission_destination as string | undefined;
+      if (missionDest) {
+        spatialLineHtml = `<div class="rpc-spatial-line">→ Targeting: ${esc(missionDest)}</div>`;
+      }
+    }
+  }
+
   // ── In-mission metrics ──
   let metricsHtml = '';
   if (vacState === 'cleaning') {
@@ -200,9 +238,6 @@ export function renderStatusZone(props: StatusZoneProps): string {
     if (caps.hasArea && missionArea !== null) {
       parts.push(`<div class="rpc-metric"><span class="rpc-metric-val">${formatArea(missionArea, unit, isMetric)}</span><span class="rpc-metric-lbl">Cleaned</span></div>`);
 
-      // A4: compute average from existing sensors — sensor.*_average_area_30d does not exist
-      // SC1 (integration v2.7.0): sensor.*_recent_area_30d deprecated, removed in v3.0.
-      // Migrated to sensor.*_cleaning_analytics_30d (same m² unit, state value).
       const recentAreaRaw    = parseFloat(st(hass, `sensor.${n}_cleaning_analytics_30d`));
       const missionCount30   = parseFloat(st(hass, `sensor.${n}_missions_last_30d`));
       const avgArea = (!isNaN(recentAreaRaw) && !isNaN(missionCount30) && missionCount30 >= 5)
@@ -220,10 +255,9 @@ export function renderStatusZone(props: StatusZoneProps): string {
     if (parts.length) metricsHtml = `<div class="rpc-metrics-row">${parts.join('')}</div>`;
   }
 
-  // ── Docked: last cleaned hint from mission history (F1) ──
+  // ── Docked: last cleaned hint ──
   let dockedHtml = '';
   if (vacState === 'docked' && !isRecharging) {
-    // Prefer history data (accurate started_at) over entity last_changed (less precise)
     const lastCleaned = lastCleanedAgo(props.missionData, hass.language);
     if (lastCleaned) {
       dockedHtml = `<div class="rpc-docked-since">Last cleaned: ${lastCleaned}</div>`;
@@ -233,15 +267,7 @@ export function renderStatusZone(props: StatusZoneProps): string {
     }
   }
 
-  // ── F11: Mission destination indicator (during cleaning) ──
-  // Reads from vacuum entity attribute — present when robot is executing a room-targeted mission.
-  const missionDest = attrs.mission_destination as string | undefined;
-  const destHtml = (vacState === 'cleaning' && missionDest)
-    ? `<div class="rpc-mission-dest">→ Targeting: ${esc(missionDest)}</div>`
-    : '';
-
-  // ── F13: Demand cleaning blocked indicator (integration v2.4 F11) ──
-  // Shows when floor is dirty but robot cannot start — home is occupied.
+  // ── Demand cleaning blocked ──
   let demandHtml = '';
   if (caps.hasDemandBlocked) {
     if (hass.states[`binary_sensor.${n}_demand_clean_blocked`]?.state === 'on') {
@@ -249,9 +275,7 @@ export function renderStatusZone(props: StatusZoneProps): string {
     }
   }
 
-  // ── F11: Last cleaned rooms chip row (docked, after mission) ──
-  // Only when caps.hasCleanedRooms (last_cleaned_rooms attribute non-empty).
-  // Absent during mid-mission recharge (robot hasn't finished yet).
+  // ── Last cleaned rooms chip row ──
   let cleanedRoomsHtml = '';
   if (caps.hasCleanedRooms && (vacState === 'docked' || vacState === 'idle') && !isRecharging) {
     const rooms      = attrs.last_cleaned_rooms as string[] | undefined;
@@ -266,7 +290,7 @@ export function renderStatusZone(props: StatusZoneProps): string {
     }
   }
 
-  // ── Quick action buttons ──
+  // ── v2.0: state-contextual buttons — max 2 (3 for Paused) ──
   const spinnerSvg = `<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>`;
 
   const btn = (action: string, label: string, display: string): string => {
@@ -281,33 +305,40 @@ export function renderStatusZone(props: StatusZoneProps): string {
   };
 
   let buttons = '';
+  // Demand-blocked + docked: "Start anyway" is the only meaningful action —
+  // a plain "Start" alongside the blocked banner reads as contradictory.
+  const demandBlocked = caps.hasDemandBlocked
+    && hass.states[`binary_sensor.${n}_demand_clean_blocked`]?.state === 'on';
+
   if (vacState === 'cleaning' || missionPhase === 'evac') {
-    buttons = btn('pause', 'Pause', '⏸ Pause') + btn('return_home', 'Return home', '↩ Return home');
+    buttons = btn('pause', 'Pause', '⏸ Pause') + btn('return_home', 'Return home', '🏠 Return home');
   } else if (vacState === 'paused') {
-    buttons = btn('resume', 'Resume', '▶ Resume') + btn('return_home', 'Return home', '↩ Return home');
+    buttons = btn('resume', 'Resume', '▶ Resume')
+            + btn('return_home', 'Return home', '🏠 Return home')
+            + btn('stop', 'Stop', '⏹ Stop');
+  } else if (vacState === 'error') {
+    buttons = btn('return_home', 'Return home', '🏠 Return home') + btn('retry', 'Retry', '🔄 Retry');
   } else if (isRecharging) {
-    // Mid-mission recharge: mission is still live — offer pause/cancel, not Start
     buttons = btn('return_home', 'Cancel mission', '✕ Cancel mission');
   } else if (vacState !== 'returning' && !unavailable) {
-    buttons = btn('start', 'Start', '▶ Start') + btn('locate', 'Locate', '⊙ Locate');
-  }
-
-  // F3b: when show_rooms:false, repeat-last joins the action button row; settings renders below
-  const showRooms = config.show_rooms !== false;
-  if (!showRooms) {
-    const repeatEntity = hass.states[`button.${robotName}_repeat_mission`];
-    const canRepeat    = !!repeatEntity && repeatEntity.state !== 'unavailable';
-    if (canRepeat) {
-      buttons += `<button class="rpc-btn-text" data-action="repeat-last">↩ Repeat last</button>`;
+    if (selectedRoomCount > 0) {
+      // v2.0 C7-ROOM-BOUNDS: selection active (via header chip picker or
+      // Map tab tap-to-select) — single action replaces Start + Rooms….
+      buttons = btn('clean-selected', 'Start selected rooms', `▶ Start ${selectedRoomCount} selected room${selectedRoomCount !== 1 ? 's' : ''}`);
+    } else {
+      const startLabel = demandBlocked ? '▶ Start anyway' : '▶ Start full clean';
+      buttons = btn('start', 'Start full clean', startLabel);
+      // "Rooms…" is hidden in companion mode — XVMC owns room selection there.
+      if (config.mode !== 'companion' && caps.hasZones) {
+        buttons += `<button class="rpc-btn" data-action="toggle-room-picker" aria-expanded="${roomPickerOpen}">
+          🗺 Rooms…
+        </button>`;
+      }
     }
   }
 
-  const relocatedSettings = !showRooms
-    ? renderSettingsPanel(hass, config, robotName, settingsPanelOpen, true)
-    : '';
-
   return `
-    <div class="rpc-zone rpc-zone1${extraClass ? ' ' + extraClass : ''}">
+    <div class="rpc-header${extraClass ? ' ' + extraClass : ''}">
       <div class="rpc-robot-identity">
         <span class="rpc-robot-icon">${robotIcon}</span>
         <span class="rpc-robot-name">${friendlyName}</span>
@@ -319,13 +350,13 @@ export function renderStatusZone(props: StatusZoneProps): string {
       ${areaTodayHtml}
       ${errorHtml}
       ${progressHtml}
-      ${destHtml}
+      ${spatialLineHtml}
+      ${rechargeLineHtml}
       ${metricsHtml}
       ${dockedHtml}
       ${demandHtml}
       ${cleanedRoomsHtml}
       ${buttons ? `<div class="rpc-actions">${buttons}</div>` : ''}
-      ${relocatedSettings}
     </div>
   `;
 }

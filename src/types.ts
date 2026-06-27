@@ -6,8 +6,11 @@ export interface CardConfig {
   show_alerts?: boolean;
   show_history?: boolean;
   show_rooms?: boolean;
-  /** F3b: show settings panel (edge clean, always finish, carpet boost, passes).
-   *  When show_rooms:false and show_settings:true, settings panel moves to Status zone. */
+  /** @deprecated v2.0 — use mode: 'companion' instead. Accepted for one
+   *  release as an alias with a console warning. Previously: show settings
+   *  panel (edge clean, always finish, carpet boost, passes); when
+   *  show_rooms:false and show_settings:true, settings panel moved to
+   *  Status zone. */
   show_settings?: boolean;
   history_days?: 7 | 14 | 28;
   area_unit?: 'auto' | 'sqft' | 'm2';
@@ -19,6 +22,16 @@ export interface CardConfig {
   /** F3b: input_text.* or input_select.* entity ID — written when robot dropdown switches.
    *  Used by conditional xiaomi-vacuum-map-card instances to show/hide per active robot. */
   robot_selector_helper?: string;
+
+  // ── v2.0 ──────────────────────────────────────────────────────────────────
+  /** 'standalone' (default): card owns the Map tab and room selection.
+   *  'companion': card assumes an external map card (e.g. XVMC) handles the
+   *  spatial view and room selection — Map tab is hidden, header room picker
+   *  is disabled. Cannot be auto-detected; the user opts in explicitly. */
+  mode?: 'standalone' | 'companion';
+  /** Optional override for which tab is shown on first render.
+   *  Default: 'map' for standalone SMART/EPHEMERAL, 'history' otherwise. */
+  default_tab?: 'map' | 'history' | 'health' | 'settings';
 }
 
 export interface RobotCapabilities {
@@ -30,6 +43,9 @@ export interface RobotCapabilities {
   hasZones: boolean;
   hasSmartZones: boolean;
   hasProblemZone: boolean;
+  /** sensor.*_cleaning_analytics_30d (state = m²). SC1 (integration v2.7.0):
+   *  migrated from sensor.*_recent_area_30d, which is deprecated and removed
+   *  in integration v3.0. Same m² unit — no display-side conversion needed. */
   hasLifetimeArea: boolean;
   hasWearRate: boolean;
   isMop: boolean;
@@ -38,11 +54,17 @@ export interface RobotCapabilities {
   /** sensor.*_phase (run/charge/dock/pause/evac/none) — v1.9.0+ */
   hasMissionPhase: boolean;
   // ── v1.3 / integration v2.1+ ──────────────────────────────────────────────
-  /** sensor.*_cleaning_speed_trend — 'improving'|'stable'|'declining' */
+  /** sensor.*_cleaning_performance attr `trend` — 'improving'|'stable'|'declining'.
+   *  SC1 (integration v2.7.0): migrated from sensor.*_cleaning_speed_trend,
+   *  which is deprecated and removed in integration v3.0. */
   hasCleaningSpeedTrend: boolean;
   /** sensor.*_battery_capacity_retention — percentage, green>85/amber>70/red≤70 */
   hasBatteryRetention: boolean;
-  /** sensor.*_recent_wifi_floor — min wifi % across last mission; alert <50 */
+  /** sensor.*_wifi_health — entity presence only. NOT a like-for-like swap for
+   *  the old sensor.*_recent_wifi_floor: wifi_health's state is a weighted
+   *  AVERAGE signal quality %, a different metric from the old "floor" value.
+   *  The floor concept's actual successor is the `weakest_bucket_observed`
+   *  attribute (0–4 int, not a percentage) — see alert-zone.ts for the read. */
   hasWifiFloor: boolean;
   /** sensor.*_recent_coverage_pct — percentage of floor covered last mission */
   hasCoveragePct: boolean;
@@ -75,6 +97,26 @@ export interface RobotCapabilities {
   hasEnergyConsumption: boolean;
   /** sensor.*_optimal_clean_window (integration v2.4 F12a) */
   hasOptimalWindow: boolean;
+
+  // ── v2.0 — new capability flags (integration v2.7.0–v2.8.6) ───────────────
+  /** sensor.*_robot_health_score (L8). Entity key corrected from initial plan
+   *  draft (robot_health) against v2.8.6 source. Distinct from the unrelated
+   *  sensor.*_integration_health (INTEG-HEALTH) — never conflate the two. */
+  hasRobotHealthScore: boolean;
+  /** Any of sensor.*_wheel_last_cleaned / _contact_last_cleaned /
+   *  _bin_last_cleaned present (IA74-MAINT, v2.7.0). */
+  hasMaintenanceCalendar: boolean;
+  /** sensor.*_mission_progress (MP1, v2.6.0+). Also carries mission_duration_min
+   *  and recharge_min attributes (v2.8.6). */
+  hasMissionProgressSensor: boolean;
+  /** Non-empty `rooms` dict on image.*_coverage_map. NOT a confidence
+   *  threshold check — the integration only populates `rooms` once its own
+   *  internal alignment confidence is ≥ 0.70, so presence alone is sufficient.
+   *  No `alignment_confidence` attribute exists anywhere to read instead. */
+  hasAlignment: boolean;
+  /** button.*_fav_* (any present) — FAVORITES, fully shipped in the
+   *  integration but with no home in the card before v2.0. */
+  hasFavorites: boolean;
 }
 
 /** Per-mission record from GET …/mission_history?format=records (integration ≥ v2.0) */

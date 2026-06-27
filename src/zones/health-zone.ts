@@ -22,6 +22,11 @@ export interface HealthZoneState {
   resetError: string | null;
   /** True once the user has seen the wear-arrow legend — shown only once per session */
   legendShown: boolean;
+  /** v2.0 C1-HEALTH: component bars collapsed by default, user can expand.
+   *  Session-only — resets between sessions, not persisted. */
+  healthDetailsExpanded: boolean;
+  /** v2.0 C2-MAINT: which maintenance calendar row's info popover is open. */
+  openMaintPopover: string | null;
 }
 
 function pct(remaining: number, threshold: number): number {
@@ -63,6 +68,153 @@ function cleanBaseDisplay(state: string): string {
   if (state === 'Empty') return 'Bag full — replace soon';
   if (state === 'Full')  return 'Bag has capacity';
   return esc(state);
+}
+
+// ── v2.0 C1-HEALTH — robot health score ──────────────────────────────────────
+//
+// sensor.*_robot_health_score (L8). Entity key corrected against v2.8.6
+// source — earlier plan drafts referenced the wrong key (robot_health).
+// Distinct from the unrelated sensor.*_integration_health (INTEG-HEALTH),
+// which has its own internal healthy/degraded/critical band system used for
+// a different HA event; robot_health_score has NO native band of its own —
+// the colour triage below is a card-side design decision only.
+//
+// Calibration state pattern: native_value returns None (renders as HA
+// `unknown`) when fewer than 20 missions exist in the last 30 days, or
+// fewer than 3 of the 5 component signals are available. This is the
+// canonical "Calibrating…" placeholder pattern for the card — never zero,
+// never an error state.
+function healthScoreColour(score: number): string {
+  if (score >= 80) return 'var(--rpc-green)';
+  if (score >= 60) return 'var(--rpc-amber)';
+  return 'var(--rpc-red)';
+}
+
+function healthScoreBand(score: number): string {
+  if (score >= 80) return 'GOOD';
+  if (score >= 60) return 'FAIR';
+  return 'NEEDS ATTENTION';
+}
+
+function renderHealthScore(
+  hass: HomeAssistant,
+  caps: RobotCapabilities,
+  n: string,
+  expanded: boolean,
+): string {
+  if (!caps.hasRobotHealthScore) return '';
+
+  const entity = hass.states[`sensor.${n}_robot_health_score`];
+  if (!entity) return '';
+
+  const isCalibrating = entity.state === 'unknown' || entity.state === 'unavailable';
+  if (isCalibrating) {
+    return `
+      <div class="rpc-health-score rpc-health-score--calibrating">
+        <span class="rpc-health-score-label">ROBOT HEALTH</span>
+        <span class="rpc-health-score-calibrating">Calibrating… (needs more mission history)</span>
+      </div>
+      <button class="rpc-health-details-toggle" data-health-details-toggle aria-expanded="${expanded}">
+        ${expanded ? 'Hide details ▲' : 'Show details ▼'}
+      </button>
+    `;
+  }
+
+  const score = Math.round(parseFloat(entity.state));
+  if (isNaN(score)) return '';
+  const colour = healthScoreColour(score);
+  const band   = healthScoreBand(score);
+
+  return `
+    <div class="rpc-health-score" aria-label="Robot health ${score} out of 100, ${band}">
+      <span class="rpc-health-score-label">ROBOT HEALTH</span>
+      <span class="rpc-health-score-value" style="color:${colour}">${score}</span>
+      <span class="rpc-health-score-band" style="color:${colour}">● ${band}</span>
+    </div>
+    <button class="rpc-health-details-toggle" data-health-details-toggle aria-expanded="${expanded}">
+      ${expanded ? 'Hide details ▲' : 'Show details ▼'}
+    </button>
+  `;
+}
+
+// ── v2.0 C5-ANOMALY — mission anomaly banner ─────────────────────────────────
+//
+// CONFIRMED INTEGRATION GAP (v2.8.6 source audit): last_mission_result has
+// NO extra_state_attributes at all — neither `anomalous` nor
+// `consecutive_anomalous` is exposed on any sensor. MissionStore's
+// consecutive_anomalous property exists only internally, consumed
+// exclusively by robot_health_score's own Signal 4 computation. This
+// feature is BLOCKED until the integration adds these attributes (L3-FIX,
+// flagged for integration v3.0). The function below is written against
+// the planned shape so it activates automatically once the attributes
+// ship — it does not need to be revisited, only the integration does.
+function renderAnomalyBanner(hass: HomeAssistant, n: string): string {
+  const entity = hass.states[`sensor.${n}_last_mission_result`];
+  const consecutive = entity?.attributes?.consecutive_anomalous;
+  if (typeof consecutive !== 'number' || consecutive < 2) return '';
+
+  return `
+    <div class="rpc-anomaly-banner" role="alert">
+      ⚠ Last ${consecutive} missions were anomalous — check brushes and filter
+    </div>
+  `;
+}
+
+// ── v2.0 C2-MAINT — maintenance calendar ─────────────────────────────────────
+//
+// Three TIMESTAMP sensors from IA74-MAINT (integration v2.7.0).
+// "Never recorded" when a sensor is unavailable (no reset_* service call
+// yet) — distinct from the entity being entirely absent (which is handled
+// by hasMaintenanceCalendar gating the whole section).
+function renderMaintenanceCalendar(
+  hass: HomeAssistant,
+  caps: RobotCapabilities,
+  n: string,
+  state: HealthZoneState,
+): string {
+  if (!caps.hasMaintenanceCalendar) return '';
+
+  const rows: { key: string; label: string; entityId: string; service: string }[] = [
+    { key: 'wheel',   label: 'Wheels',   entityId: `sensor.${n}_wheel_last_cleaned`,   service: 'roomba_plus.reset_wheel_cleaning' },
+    { key: 'contact', label: 'Contacts', entityId: `sensor.${n}_contact_last_cleaned`, service: 'roomba_plus.reset_contact_cleaning' },
+    { key: 'bin',     label: 'Bin',      entityId: `sensor.${n}_bin_last_cleaned`,     service: 'roomba_plus.reset_bin_cleaning' },
+  ].filter(r => !!hass.states[r.entityId]);
+
+  if (rows.length === 0) return '';
+
+  const rowsHtml = rows.map(r => {
+    const entity = hass.states[r.entityId];
+    const isOpen = state.openMaintPopover === r.key;
+    const recorded = entity.state !== 'unavailable' && entity.state !== 'unknown';
+    const displayVal = recorded
+      ? `Cleaned ${timeSince(entity.state, hass.language)}`
+      : 'Never recorded';
+
+    return `
+      <div class="rpc-maint-row" data-maint="${r.key}" role="button" aria-expanded="${isOpen}" tabindex="0"
+           aria-label="${r.label} — ${displayVal}">
+        <span class="rpc-maint-label">${r.label}</span>
+        <span class="rpc-maint-val">${displayVal}</span>
+      </div>
+      ${isOpen ? `
+        <div class="rpc-popover">
+          <div class="rpc-popover-header">
+            <span>${r.label}</span>
+            <button class="rpc-popover-close" data-close-maint="${r.key}" aria-label="Close">×</button>
+          </div>
+          <div class="rpc-popover-divider"></div>
+          <div class="rpc-popover-sub">Reset via Developer Tools → Services:</div>
+          <div class="rpc-maint-service">${r.service}</div>
+        </div>
+      ` : ''}
+    `;
+  }).join('');
+
+  return `
+    <div class="rpc-maint-divider"></div>
+    <div class="rpc-maint-header">Other maintenance</div>
+    ${rowsHtml}
+  `;
 }
 
 export function renderHealthZone(
@@ -154,7 +306,19 @@ export function renderHealthZone(
     });
   }
 
-  if (bars.length === 0) return '';
+  // v2.0: do NOT early-return when bars are empty — the health score (C1)
+  // and maintenance calendar (C2) are independent of the consumable bars
+  // and must still render if either capability is present, even on a robot
+  // with zero filter/brush/battery sensors detected.
+  // v2.0: compute anomaly banner early so its presence is accounted for in
+  // the early-return guard below — it's independent of bars/score/maintenance.
+  const anomalyHtml = renderAnomalyBanner(hass, n);
+
+  // v2.0: do NOT early-return when bars are empty — the health score (C1),
+  // maintenance calendar (C2), and anomaly banner (C5) are independent of
+  // the consumable bars and must still render if any is present, even on a
+  // robot with zero filter/brush/battery sensors detected.
+  if (bars.length === 0 && !caps.hasRobotHealthScore && !caps.hasMaintenanceCalendar && !anomalyHtml) return '';
 
   const barsHtml = bars.map(bar => renderBar(bar, hass, n, state)).join('');
 
@@ -318,10 +482,15 @@ export function renderHealthZone(
   return `
     <div class="rpc-zone rpc-zone3">
       <div class="rpc-zone-header">HEALTH</div>
-      ${barsHtml}
-      ${retentionHtml}
-      ${energyHtml}
-      ${mopConfigHtml}
+      ${anomalyHtml}
+      ${renderHealthScore(hass, caps, n, state.healthDetailsExpanded)}
+      ${caps.hasRobotHealthScore && !state.healthDetailsExpanded ? '' : `
+        ${barsHtml}
+        ${retentionHtml}
+        ${energyHtml}
+        ${mopConfigHtml}
+      `}
+      ${renderMaintenanceCalendar(hass, caps, n, state)}
     </div>
   `;
 }

@@ -35,6 +35,12 @@ export const defaultCaps: RobotCapabilities = {
   hasWifiSignal: false, hasRoomCoverage: false, hasDirtDensity: false,
   // Config-based
   hasRobotSelectorHelper: false,
+  // v1.6
+  hasCleanedRooms: false, hasDemandBlocked: false, hasEnergyConsumption: false,
+  hasOptimalWindow: false,
+  // v2.0
+  hasRobotHealthScore: false, hasMaintenanceCalendar: false,
+  hasMissionProgressSensor: false, hasAlignment: false, hasFavorites: false,
 };
 
 export const fullCaps: RobotCapabilities = {
@@ -52,6 +58,12 @@ export const fullCaps: RobotCapabilities = {
   hasWifiSignal: true, hasRoomCoverage: false, hasDirtDensity: false,
   // Config-based
   hasRobotSelectorHelper: false,
+  // v1.6
+  hasCleanedRooms: true, hasDemandBlocked: true, hasEnergyConsumption: true,
+  hasOptimalWindow: true,
+  // v2.0
+  hasRobotHealthScore: true, hasMaintenanceCalendar: true,
+  hasMissionProgressSensor: true, hasAlignment: false, hasFavorites: false,
 };
 
 export const baseConfig: CardConfig = {

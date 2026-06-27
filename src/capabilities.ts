@@ -34,15 +34,16 @@ export function detectCapabilities(
     hasZones:         s('smart_zone_select') || s('zone_select'),
     hasSmartZones:    s('smart_zone_select'),
     hasProblemZone:   e('problem_zone'),
-    hasLifetimeArea:  e('recent_area_30d'),   // A4: renamed in integration v2.1.2; was e('lifetime_area')
+    hasLifetimeArea:  e('cleaning_analytics_30d'),  // SC1 (v2.7.0): was recent_area_30d
     hasWearRate:      e('filter_wear_rate'),
     isMop:            hasPad && !hasBrush,
     hasMissionActive: b('mission_active'),
     hasMissionPhase:  e('phase'),
     // v1.3 / integration v2.1+
-    hasCleaningSpeedTrend: e('cleaning_speed_trend'),
+    hasCleaningSpeedTrend: e('cleaning_performance'),  // SC1 (v2.7.0): was cleaning_speed_trend
     hasBatteryRetention:   e('battery_capacity_retention'),
-    hasWifiFloor:          e('recent_wifi_floor'),
+    hasWifiFloor:          e('wifi_health'),  // SC1 (v2.7.0): was recent_wifi_floor — NOT a like-for-like
+                                               // metric swap, see WIFI_FLOOR_MIGRATION note in alert-zone.ts
     hasCoveragePct:        e('recent_coverage_pct'),
     hasBatteryEol:         e('estimated_battery_eol'),
     hasConsecutiveSkips:   e('consecutive_clean_skips'),
@@ -67,5 +68,22 @@ export function detectCapabilities(
     hasDemandBlocked:     b('demand_clean_blocked'),
     hasEnergyConsumption: e('total_energy_consumed'),
     hasOptimalWindow:     e('optimal_clean_window'),
+
+    // ── v2.0 — integration v2.7.0–v2.8.6 ─────────────────────────────────────
+    hasRobotHealthScore:    e('robot_health_score'),
+    hasMaintenanceCalendar: e('wheel_last_cleaned') || e('contact_last_cleaned') || e('bin_last_cleaned'),
+    hasMissionProgressSensor: e('mission_progress'),
+    // hasAlignment: non-empty `rooms` dict on image.*_coverage_map. The
+    // integration only populates this once its own internal alignment
+    // confidence is >= 0.70 — no threshold check needed here, presence alone
+    // is sufficient. No `alignment_confidence` attribute exists to read.
+    hasAlignment: (() => {
+      const rooms = hass.states[`image.${name}_coverage_map`]?.attributes?.rooms;
+      return !!rooms && typeof rooms === 'object' && Object.keys(rooms).length > 0;
+    })(),
+    // hasFavorites: at least one button.*_fav_<id> entity. Favorite IDs are
+    // arbitrary per-user iRobot routine identifiers, so this scans all
+    // entity_ids for the prefix rather than checking a single fixed key.
+    hasFavorites: Object.keys(hass.states).some(id => id.startsWith(`button.${name}_fav_`)),
   };
 }

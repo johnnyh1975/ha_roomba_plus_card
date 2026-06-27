@@ -226,14 +226,26 @@ describe('renderHeatmap() — F16 dirt density opacity', () => {
     date, total: 1, completed: 1, stuck: 0, area_sqft: 100, result: 'completed' as const, ...opts,
   });
 
+  // Bug fix: previously hardcoded to '2026-06-01'. renderHeatmap(..., 7, ...)
+  // builds its window relative to the REAL wall-clock `new Date()`, so a
+  // fixed literal date silently falls outside the 7-day window as calendar
+  // time passes the suite no longer being run on/near 2026-06-01 — the cell
+  // is never generated and match() returns null, which looks like a product
+  // bug but is actually just test staleness. Using "2 days ago" keeps the
+  // fixture inside the window indefinitely.
+  const recentDate = (() => {
+    const d = new Date(Date.now() - 2 * 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+
   it('cell renders without opacity attribute when showDirtDensity false (default)', () => {
-    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: 2.0 })], 7, 'auto');
+    const html = renderHeatmap([day(recentDate, { relative_to_baseline: 2.0 })], 7, 'auto');
     // No opacity attribute should appear when flag is off
     expect(html).not.toContain('opacity=');
   });
 
   it('cell has opacity < 1.0 when relative_to_baseline < 1.0 (cleaner than usual)', () => {
-    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: 0.5 })], 7, 'auto', 'en-US', true);
+    const html = renderHeatmap([day(recentDate, { relative_to_baseline: 0.5 })], 7, 'auto', 'en-US', true);
     expect(html).toContain('opacity="');
     // 0.5 + 0.5/4 = 0.625 → clamped to 0.63
     const match = html.match(/opacity="([\d.]+)"/);
@@ -242,21 +254,21 @@ describe('renderHeatmap() — F16 dirt density opacity', () => {
   });
 
   it('cell opacity at max 1.0 when relative_to_baseline is high', () => {
-    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: 4.0 })], 7, 'auto', 'en-US', true);
+    const html = renderHeatmap([day(recentDate, { relative_to_baseline: 4.0 })], 7, 'auto', 'en-US', true);
     const match = html.match(/opacity="([\d.]+)"/);
     expect(match).not.toBeNull();
     expect(parseFloat(match![1])).toBe(1.0);
   });
 
   it('cell opacity clamped to minimum 0.5 when relative_to_baseline is 0', () => {
-    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: 0 })], 7, 'auto', 'en-US', true);
+    const html = renderHeatmap([day(recentDate, { relative_to_baseline: 0 })], 7, 'auto', 'en-US', true);
     const match = html.match(/opacity="([\d.]+)"/);
     expect(match).not.toBeNull();
     expect(parseFloat(match![1])).toBe(0.5);
   });
 
   it('opacity attribute absent when relative_to_baseline is null', () => {
-    const html = renderHeatmap([day('2026-06-01', { relative_to_baseline: null })], 7, 'auto', 'en-US', true);
+    const html = renderHeatmap([day(recentDate, { relative_to_baseline: null })], 7, 'auto', 'en-US', true);
     expect(html).not.toContain('opacity=');
   });
 });

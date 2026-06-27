@@ -1,5 +1,5 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord } from '../types.js';
-import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, mmToImagePct } from '../heatmap.js';
+import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, mmToImagePct, mmToImagePctNum } from '../heatmap.js';
 import { esc, timeSince } from '../utils.js';
 import { MDI_TO_EMOJI } from '../const.js';
 
@@ -18,6 +18,10 @@ export interface HistoryZoneState {
   historyTab: 'calendar' | 'coverage';
   /** F7: hazard pins from format=hazards — all three sources (stuck_events / robot_learned / keepout) */
   hazards: HazardRecord[];
+  /** v2.0 C7-ROOM-BOUNDS: room names currently selected for a targeted clean
+   *  via tap-to-select on the Map tab overlay. Undefined/omitted when this
+   *  zone is rendered for the History tab (calendar) rather than Map tab. */
+  mapSelectedRooms?: Set<string>;
 }
 
 function formatArea(sqft: number, useMetric: boolean): string {
@@ -56,7 +60,7 @@ export function renderHistoryZone(
   const days = config.history_days ?? 28;
   const unit = config.area_unit ?? 'auto';
   const useMetric = unit === 'm2' || (unit === 'auto' && isMetric);
-  const { historyTab, hazards } = state;
+  const { historyTab, hazards, mapSelectedRooms } = state;
 
   // F11/F12: vacuum entity attributes — reflect the most recent mission.
   // last_cleaned_rooms is a live attribute; it is NOT per-mission historical data.
@@ -84,9 +88,12 @@ export function renderHistoryZone(
   // F6a — Speed trend indicator (v2.1+). Corrected from spec: belongs in History zone,
   // not Status zone — it's a 14-day analytical signal, not a real-time operational one.
   // 'stable' is intentionally silent — no noise when things are normal.
+  // SC1 (integration v2.7.0): migrated from sensor.*_cleaning_speed_trend
+  // (deprecated, removed in v3.0) to the `trend` attribute on the consolidated
+  // sensor.*_cleaning_performance. Attribute key confirmed against source.
   if (caps.hasCleaningSpeedTrend) {
-    const trendEntity = hass.states[`sensor.${n}_cleaning_speed_trend`];
-    const trend = trendEntity?.state;
+    const perfEntity = hass.states[`sensor.${n}_cleaning_performance`];
+    const trend = perfEntity?.attributes?.trend;
     if (trend === 'declining') summaryParts.push('<span class="rpc-trend-declining">↓ Speed declining</span>');
     else if (trend === 'improving') summaryParts.push('<span class="rpc-trend-improving">↑ Speed improving</span>');
     // 'stable': no indicator — normal state, no noise
@@ -148,10 +155,85 @@ export function renderHistoryZone(
       hasPinKeeout ? '<span>🚫</span> Keep-out zone'       : '',
     ].filter(Boolean).join(' ');
 
+    // v2.0 C7-ROOM-BOUNDS: room polygon overlays + tap-to-select.
+    // Gated on caps.hasAlignment — non-empty `rooms` dict on the image
+    // entity. Coordinates are pose-space mm (confirmed against integration
+    // source — NOT image pixels), so they need the same xMin/xMax/yMin/yMax
+    // spatial-extent transform already used for hazard pins above.
+    let roomOverlayHtml = '';
+    if (hasExtent && caps.hasAlignment) {
+      const rooms = (attrs['rooms'] ?? {}) as Record<string, {
+        outline: [number, number][]; name: string; room_id: string; icon: string; x: number; y: number;
+      }>;
+
+      const polygons = Object.values(rooms).map(room => {
+        if (!room.outline || room.outline.length < 3) return '';
+        const pointsAttr = room.outline
+          .map(([x, y]) => {
+            const p = mmToImagePctNum(x, y, xMin!, xMax!, yMin!, yMax!);
+            return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+          })
+          .join(' ');
+        const selected = mapSelectedRooms?.has(room.name) ?? false;
+        return `<polygon class="rpc-room-poly${selected ? ' rpc-room-poly--selected' : ''}"
+          points="${pointsAttr}" data-room-poly="${esc(room.name)}" />`;
+      }).join('');
+
+      // v2.0.1: region_areas_m2 (integration v2.9.1) — lives on the
+      // CloudSmartZoneSelect entity, same location as region_icons, NOT on
+      // the image entity that supplies `rooms` above. This is a deliberate
+      // cross-entity lookup: room geometry (outline/centroid/icon) comes
+      // from the image entity's `rooms` dict, while the area annotation
+      // comes from the select entity by room name — the two are joined
+      // here, not at the integration level. Room name labels are drawn by
+      // the card only (the integration stopped baking labels into the PNG
+      // as of v2.7.3, specifically to avoid duplicate labels appearing
+      // once the card started drawing its own) — this area annotation
+      // follows that same card-side-only convention.
+      //
+      // Per-room: absent when the integration hasn't computed an area for
+      // that specific room (e.g. partial cloud data). Whole-attribute
+      // absent: local-only setup, integration < v2.9.1, an inactive floor,
+      // or an EPHEMERAL robot with no CloudSmartZoneSelect entity at all.
+      // All of these degrade to the name-only label exactly as before —
+      // never an error, never a placeholder.
+      const regionAreasM2 = (() => {
+        const selectId = caps.hasSmartZones
+          ? `select.${n}_smart_zone_select`
+          : `select.${n}_zone_select`;
+        const raw = hass.states[selectId]?.attributes?.['region_areas_m2'];
+        return (raw && typeof raw === 'object' && !Array.isArray(raw))
+          ? raw as Record<string, number>
+          : {} as Record<string, number>;
+      })();
+
+      const labels = Object.values(rooms).map(room => {
+        const pos    = mmToImagePct(room.x, room.y, xMin!, xMax!, yMin!, yMax!);
+        const emoji  = MDI_TO_EMOJI[room.icon] ?? '';
+        const selected = mapSelectedRooms?.has(room.name) ?? false;
+        const areaM2 = regionAreasM2[room.name];
+        const areaSuffix = typeof areaM2 === 'number' && !isNaN(areaM2)
+          ? ` / ${areaM2.toFixed(1)} m²`
+          : '';
+        return `<div class="rpc-room-label${selected ? ' rpc-room-label--selected' : ''}"
+          style="left:${pos.left};top:${pos.top}" data-room-label="${esc(room.name)}">
+          ${emoji ? `${emoji} ` : ''}${esc(room.name)}${esc(areaSuffix)}
+        </div>`;
+      }).join('');
+
+      roomOverlayHtml = `
+        <svg class="rpc-room-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
+          ${polygons}
+        </svg>
+        ${labels}
+      `;
+    }
+
     coveragePanelHtml = entityPic ? `
       <div class="rpc-coverage-panel">
         <div class="rpc-coverage-image-wrap">
           <img class="rpc-coverage-img" src="${entityPic}" alt="Coverage map" />
+          ${roomOverlayHtml}
           ${pinHtml}
         </div>
         ${noExtentNote}
@@ -313,24 +395,32 @@ export function renderHistoryZone(
   // C1 — Lifetime stats collapsed footer (cloud sensors, requires credentials)
   let lifetimeHtml = '';
   if (config.show_lifetime !== false) {
-    // Entity IDs as of integration v2.1.2:
-    // _lifetime_missions  — unchanged (true lifetime count)
-    // _recent_area_30d — true lifetime area (was _lifetime_area pre-v2.1.2)
-    // _recent_time_30d    — 30-day cleaning time (was _lifetime_time pre-v2.1.2;
-    //                       no true lifetime time sensor exists in the integration)
+    // SC1 (integration v2.7.0): sensor.*_recent_area_30d and
+    // sensor.*_recent_time_30d are deprecated, removed in v3.0. Both are
+    // replaced by sensor.*_cleaning_analytics_30d — state is area (m²),
+    // `time_h` attribute is time (hours).
+    //
+    // Bug fix incidental to this migration: the old recent_time_30d sensor's
+    // native unit is MINUTES, but this code parsed it into a variable named
+    // `hours` and displayed it with an "h" suffix below — a pre-existing
+    // display bug (minutes shown as if they were hours). cleaning_analytics_30d's
+    // `time_h` attribute is genuinely in hours, so the display is now correct
+    // with no separate conversion needed.
     const lifetimeMissions = hass.states[`sensor.${n}_lifetime_missions`];
-    const lifetimeArea     = hass.states[`sensor.${n}_recent_area_30d`];
-    const lifetimeTime     = hass.states[`sensor.${n}_recent_time_30d`];
+    const analyticsEntity  = hass.states[`sensor.${n}_cleaning_analytics_30d`];
 
     // Parse values individually — show the section if at least one is available.
     // Each span is only rendered when its value is a real number, so a missing
     // sensor (unknown/unavailable) just omits that one line rather than hiding
     // the entire Stats section.
-    const missions = lifetimeMissions ? parseInt(lifetimeMissions.state, 10)  : NaN;
-    const hours    = lifetimeTime     ? parseInt(lifetimeTime.state, 10)      : NaN;
-    // recent_area_30d stores m² (cloud API is metric) — pass raw value and
-    // always format as m² regardless of user unit preference.
-    const areaM2   = lifetimeArea     ? parseFloat(lifetimeArea.state)        : NaN;
+    const missions = lifetimeMissions ? parseInt(lifetimeMissions.state, 10) : NaN;
+    const hours    = (() => {
+      const raw = analyticsEntity?.attributes?.time_h;
+      return typeof raw === 'number' ? raw : NaN;
+    })();
+    // cleaning_analytics_30d state is m² (cloud API is metric) — pass raw value
+    // and always format as m² regardless of user unit preference.
+    const areaM2   = analyticsEntity ? parseFloat(analyticsEntity.state) : NaN;
     const hasAny   = !isNaN(missions) || !isNaN(hours) || !isNaN(areaM2);
 
     if (hasAny) {

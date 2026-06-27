@@ -12,6 +12,7 @@ function render(
 ) {
   const healthState: HealthZoneState = {
     openPopover: null, resetting: null, resetError: null, legendShown: false,
+    healthDetailsExpanded: false, openMaintPopover: null,
     ...stateOpts,
   };
   return renderHealthZone(makeHass(states), baseConfig, caps, n, healthState);
@@ -480,7 +481,10 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
 
 // ── F14: Energy row ───────────────────────────────────────────────────────────
 describe('renderHealthZone() — F14 energy row', () => {
-  const baseHealthState: HealthZoneState = { openPopover: null, resetting: null, resetError: null, legendShown: false };
+  const baseHealthState: HealthZoneState = {
+    openPopover: null, resetting: null, resetError: null, legendShown: false,
+    healthDetailsExpanded: false, openMaintPopover: null,
+  };
 
   it('energy row renders when hasEnergyConsumption and entity present', () => {
     const capsWithEnergy = { ...defaultCaps, hasEnergyConsumption: true };
@@ -504,5 +508,149 @@ describe('renderHealthZone() — F14 energy row', () => {
       baseConfig, defaultCaps, 'roomba', baseHealthState,
     );
     expect(html).not.toContain('rpc-energy-val');
+  });
+});
+
+// ── v2.0 C1-HEALTH: robot health score ───────────────────────────────────────
+describe('renderHealthZone() — v2.0 C1-HEALTH robot health score', () => {
+  const capsWithScore = { ...defaultCaps, hasRobotHealthScore: true };
+
+  it('shows score and GOOD band when score >= 80', () => {
+    const html = render({ [`sensor.${n}_robot_health_score`]: st('82') }, capsWithScore);
+    expect(html).toContain('rpc-health-score-value');
+    expect(html).toContain('82');
+    expect(html).toContain('GOOD');
+  });
+
+  it('shows FAIR band when score is 60-79', () => {
+    const html = render({ [`sensor.${n}_robot_health_score`]: st('65') }, capsWithScore);
+    expect(html).toContain('FAIR');
+  });
+
+  it('shows NEEDS ATTENTION band when score < 60', () => {
+    const html = render({ [`sensor.${n}_robot_health_score`]: st('45') }, capsWithScore);
+    expect(html).toContain('NEEDS ATTENTION');
+  });
+
+  it('shows "Calibrating…" placeholder when state is unknown', () => {
+    const html = render({ [`sensor.${n}_robot_health_score`]: st('unknown') }, capsWithScore);
+    expect(html).toContain('Calibrating');
+    expect(html).not.toContain('rpc-health-score-value');
+  });
+
+  it('shows "Calibrating…" placeholder when state is unavailable', () => {
+    const html = render({ [`sensor.${n}_robot_health_score`]: st('unavailable') }, capsWithScore);
+    expect(html).toContain('Calibrating');
+  });
+
+  it('absent entirely when hasRobotHealthScore is false', () => {
+    const html = render({ [`sensor.${n}_robot_health_score`]: st('82') }, defaultCaps);
+    expect(html).not.toContain('rpc-health-score');
+  });
+
+  it('component bars hidden by default (collapsed) when score present', () => {
+    const html = render({
+      [`sensor.${n}_robot_health_score`]: st('82'),
+      [`sensor.${n}_filter_remaining_hours`]: st('100', { threshold_hours: 200 }),
+    }, capsWithScore);
+    expect(html).toContain('Show details');
+    expect(html).not.toContain('rpc-bar-row" data-bar="filter"');
+  });
+
+  it('component bars shown when healthDetailsExpanded is true', () => {
+    const html = render({
+      [`sensor.${n}_robot_health_score`]: st('82'),
+      [`sensor.${n}_filter_remaining_hours`]: st('100', { threshold_hours: 200 }),
+    }, capsWithScore, { healthDetailsExpanded: true });
+    expect(html).toContain('Hide details');
+    expect(html).toContain('data-bar="filter"');
+  });
+
+  it('component bars always shown when hasRobotHealthScore is false, regardless of expand state', () => {
+    const html = render({
+      [`sensor.${n}_filter_remaining_hours`]: st('100', { threshold_hours: 200 }),
+    }, defaultCaps, { healthDetailsExpanded: false });
+    expect(html).toContain('data-bar="filter"');
+  });
+
+  it('zone still renders score when robot has zero consumable bars', () => {
+    // Regression guard: the pre-v2.0 `bars.length === 0` early-return would
+    // have hidden the entire zone, including the score, for a robot with no
+    // detected filter/brush/battery/pad/tank/cleanbase sensors.
+    const html = render({ [`sensor.${n}_robot_health_score`]: st('82') }, capsWithScore);
+    expect(html).toContain('rpc-health-score-value');
+  });
+});
+
+// ── v2.0 C2-MAINT: maintenance calendar ──────────────────────────────────────
+describe('renderHealthZone() — v2.0 C2-MAINT maintenance calendar', () => {
+  const capsWithMaint = { ...defaultCaps, hasMaintenanceCalendar: true };
+
+  it('shows "Cleaned X ago" when sensor has a real timestamp', () => {
+    const html = render({
+      [`sensor.${n}_wheel_last_cleaned`]: st('2026-05-01T00:00:00Z'),
+    }, capsWithMaint);
+    expect(html).toContain('Wheels');
+    expect(html).toContain('Cleaned');
+  });
+
+  it('shows "Never recorded" when sensor is unavailable', () => {
+    const html = render({
+      [`sensor.${n}_bin_last_cleaned`]: st('unavailable'),
+    }, capsWithMaint);
+    expect(html).toContain('Bin');
+    expect(html).toContain('Never recorded');
+  });
+
+  it('only renders rows for sensors that are actually present', () => {
+    const html = render({
+      [`sensor.${n}_wheel_last_cleaned`]: st('2026-05-01T00:00:00Z'),
+    }, capsWithMaint);
+    expect(html).toContain('Wheels');
+    expect(html).not.toContain('Contacts');
+    expect(html).not.toContain('Bin');
+  });
+
+  it('absent entirely when hasMaintenanceCalendar is false', () => {
+    const html = render({
+      [`sensor.${n}_wheel_last_cleaned`]: st('2026-05-01T00:00:00Z'),
+    }, defaultCaps);
+    expect(html).not.toContain('rpc-maint-row');
+  });
+
+  it('zone still renders maintenance calendar when robot has zero consumable bars', () => {
+    const html = render({
+      [`sensor.${n}_wheel_last_cleaned`]: st('2026-05-01T00:00:00Z'),
+    }, capsWithMaint);
+    expect(html).toContain('rpc-maint-row');
+  });
+});
+
+// ── v2.0 C5-ANOMALY: mission anomaly banner ──────────────────────────────────
+// CONFIRMED INTEGRATION GAP: last_mission_result has no extra_state_attributes
+// at all in integration v2.8.6 — these tests document the intended behaviour
+// once the integration ships consecutive_anomalous (L3-FIX). They construct
+// the attribute directly since no current integration version produces it.
+describe('renderHealthZone() — v2.0 C5-ANOMALY banner (blocked on integration L3-FIX)', () => {
+  it('shows banner when consecutive_anomalous >= 2', () => {
+    const html = render({
+      [`sensor.${n}_last_mission_result`]: st('completed', { consecutive_anomalous: 2 }),
+    });
+    expect(html).toContain('rpc-anomaly-banner');
+    expect(html).toContain('Last 2 missions were anomalous');
+  });
+
+  it('does not show banner when consecutive_anomalous is 1', () => {
+    const html = render({
+      [`sensor.${n}_last_mission_result`]: st('completed', { consecutive_anomalous: 1 }),
+    });
+    expect(html).not.toContain('rpc-anomaly-banner');
+  });
+
+  it('does not show banner when attribute is absent (current integration reality)', () => {
+    const html = render({
+      [`sensor.${n}_last_mission_result`]: st('completed'),
+    });
+    expect(html).not.toContain('rpc-anomaly-banner');
   });
 });

@@ -331,14 +331,18 @@ describe('renderStatusZone() — F3b settings relocation', () => {
   });
 });
 
-describe('renderStatusZone() — A4 vs-usual delta', () => {
+describe('renderStatusZone() — A4 vs-usual delta (SC1: migrated to cleaning_analytics_30d)', () => {
+  // SC1 (integration v2.7.0): sensor.*_recent_area_30d deprecated, removed in
+  // v3.0 — migrated to sensor.*_cleaning_analytics_30d (same m²/sqft-source
+  // semantics for this delta computation, only the entity name changed).
+
   it('shows ▲ delta when mission area exceeds 30d average by 20%', () => {
-    // recent_area_30d = 300, missions_last_30d = 10 → avg = 30 sqft/mission
+    // cleaning_analytics_30d = 300, missions_last_30d = 10 → avg = 30 sqft/mission
     // current mission area = 36 sqft → delta = +20%
     const p = props('cleaning', { caps: { ...defaultCaps, hasArea: true } }, {
       'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_area_sqft: 36 }),
-      [`sensor.${n}_recent_area_30d`]:   st('300'),
-      [`sensor.${n}_missions_last_30d`]: st('10'),
+      [`sensor.${n}_cleaning_analytics_30d`]: st('300'),
+      [`sensor.${n}_missions_last_30d`]:      st('10'),
     });
     const html = renderStatusZone(p);
     expect(html).toContain('▲ 20%');
@@ -348,8 +352,8 @@ describe('renderStatusZone() — A4 vs-usual delta', () => {
   it('shows ▼ delta when mission area is below average', () => {
     const p = props('cleaning', { caps: { ...defaultCaps, hasArea: true } }, {
       'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_area_sqft: 24 }),
-      [`sensor.${n}_recent_area_30d`]:   st('300'),
-      [`sensor.${n}_missions_last_30d`]: st('10'),
+      [`sensor.${n}_cleaning_analytics_30d`]: st('300'),
+      [`sensor.${n}_missions_last_30d`]:      st('10'),
     });
     const html = renderStatusZone(p);
     expect(html).toContain('▼ 20%');
@@ -359,8 +363,8 @@ describe('renderStatusZone() — A4 vs-usual delta', () => {
   it('no delta when mission count < 5 (insufficient baseline)', () => {
     const p = props('cleaning', { caps: { ...defaultCaps, hasArea: true } }, {
       'vacuum.roomba': st('cleaning', { friendly_name: 'Roomba', mission_area_sqft: 30 }),
-      [`sensor.${n}_recent_area_30d`]:   st('100'),
-      [`sensor.${n}_missions_last_30d`]: st('4'),
+      [`sensor.${n}_cleaning_analytics_30d`]: st('100'),
+      [`sensor.${n}_missions_last_30d`]:      st('4'),
     });
     const html = renderStatusZone(p);
     expect(html).not.toContain('vs usual');

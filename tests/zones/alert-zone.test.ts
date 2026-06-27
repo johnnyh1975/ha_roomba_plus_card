@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderAlertZone } from '../../src/zones/alert-zone';
+import { renderAlertZone, hasAlertForTab } from '../../src/zones/alert-zone';
 import { makeHass, defaultCaps, fullCaps, baseConfig, st } from '../helpers';
 
 const n = 'roomba';
@@ -166,49 +166,56 @@ describe('renderAlertZone() — A3 consecutive skips alert', () => {
   });
 });
 
-describe('renderAlertZone() — F6a wifi floor alert', () => {
+describe('renderAlertZone() — F6a wifi floor alert (SC1: migrated to wifi_health)', () => {
   const n = 'roomba';
 
-  it('shows wifi alert when recent_wifi_floor is wlBars=1 (25% after normalisation)', () => {
-    // wlBars=1 → 25%, which is < 50 threshold → alert fires
+  // SC1 (integration v2.7.0): sensor.*_recent_wifi_floor deprecated, removed
+  // in v3.0. The replacement entity sensor.*_wifi_health exposes the floor
+  // concept via the `weakest_bucket_observed` attribute (0–4 int), not its
+  // own state (which is a different metric — average quality %). See
+  // WIFI_FLOOR_MIGRATION comment in alert-zone.ts for the full rationale.
+
+  it('shows wifi alert when weakest_bucket_observed=1 (25% after normalisation)', () => {
+    // bucket=1 → 25%, which is < 50 threshold → alert fires
     const hass = makeHass({
-      [`sensor.${n}_recent_wifi_floor`]: st('1'),
+      [`sensor.${n}_wifi_health`]: st('72', { weakest_bucket_observed: 1 }),
     });
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasWifiFloor: true }, n);
     expect(html).toContain('Wi-Fi signal dropped to 25%');
   });
 
-  it('does not show wifi alert when wlBars=2 (50% after normalisation, at threshold)', () => {
-    // wlBars=2 → 50%, which is not < 50 → no alert
+  it('does not show wifi alert when weakest_bucket_observed=2 (50%, at threshold)', () => {
+    // bucket=2 → 50%, which is not < 50 → no alert
     const hass = makeHass({
-      [`sensor.${n}_recent_wifi_floor`]: st('2'),
+      [`sensor.${n}_wifi_health`]: st('80', { weakest_bucket_observed: 2 }),
     });
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasWifiFloor: true }, n);
     expect(html).toBe('');
   });
 
-  it('does not show wifi alert when wlBars=3 (75% after normalisation)', () => {
+  it('does not show wifi alert when weakest_bucket_observed=3 (75%)', () => {
     const hass = makeHass({
-      [`sensor.${n}_recent_wifi_floor`]: st('3'),
+      [`sensor.${n}_wifi_health`]: st('88', { weakest_bucket_observed: 3 }),
     });
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasWifiFloor: true }, n);
     expect(html).toBe('');
   });
 
-  it('shows wifi alert when already-percentage value is below 50 (future integration fix)', () => {
-    // If integration is fixed to return actual %, values >4 pass through unchanged
+  it('does not show wifi alert when weakest_bucket_observed attribute is absent', () => {
+    // Entity present (hasWifiFloor true via flag) but attribute missing —
+    // e.g. no records in the cloud window yet. Must not throw or show '0%'.
     const hass = makeHass({
-      [`sensor.${n}_recent_wifi_floor`]: st('38'),
+      [`sensor.${n}_wifi_health`]: st('80'),
     });
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasWifiFloor: true }, n);
-    expect(html).toContain('Wi-Fi signal dropped to 38%');
+    expect(html).toBe('');
   });
 
   it('nav quality (P5) takes priority over wifi floor alert (P7) when both present', () => {
     // Nav quality is priority 5, wifi alert is priority 7 — nav quality wins
     const hass = makeHass({
-      [`sensor.${n}_nav_quality`]: st('45'),
-      [`sensor.${n}_recent_wifi_floor`]: st('1'),  // wlBars=1 → 25% → alert would fire
+      [`sensor.${n}_nav_quality`]:  st('45'),
+      [`sensor.${n}_wifi_health`]:  st('72', { weakest_bucket_observed: 1 }),  // bucket=1 → 25% → alert would fire
     });
     const html = renderAlertZone(hass, baseConfig, { ...defaultCaps, hasWifiFloor: true }, n);
     expect(html).toContain('Navigation quality low');
@@ -257,5 +264,57 @@ describe('renderAlertZone() — error sensor unknown state (B5)', () => {
   it('never shows "Robot error" fallback', () => {
     const html = render({ [`sensor.${n}_last_error_code`]: st('17', {}) });
     expect(html).not.toContain('Robot error');
+  });
+});
+
+// ── v2.0: alert category tagging (tab badge source of truth) ───────────────
+describe('hasAlertForTab() — category tagging shared with renderAlertZone()', () => {
+  it('wifi floor alert is tagged history, not health', () => {
+    const hass = makeHass({ [`sensor.${n}_wifi_health`]: st('72', { weakest_bucket_observed: 1 }) });
+    const caps = { ...defaultCaps, hasWifiFloor: true };
+    expect(hasAlertForTab(hass, caps, n, 'history')).toBe(true);
+    expect(hasAlertForTab(hass, caps, n, 'health')).toBe(false);
+  });
+
+  it('consecutive skips alert is tagged health, not history', () => {
+    const hass = makeHass({ [`sensor.${n}_consecutive_clean_skips`]: st('3') });
+    const caps = { ...defaultCaps, hasConsecutiveSkips: true };
+    expect(hasAlertForTab(hass, caps, n, 'health')).toBe(true);
+    expect(hasAlertForTab(hass, caps, n, 'history')).toBe(false);
+  });
+
+  it('maintenance due alert is tagged health', () => {
+    const hass = makeHass({ [`binary_sensor.${n}_maintenance_due`]: st('on') });
+    expect(hasAlertForTab(hass, defaultCaps, n, 'health')).toBe(true);
+  });
+
+  it('navigation quality alert is tagged health', () => {
+    const hass = makeHass({ [`sensor.${n}_nav_quality`]: st('40') });
+    expect(hasAlertForTab(hass, defaultCaps, n, 'health')).toBe(true);
+  });
+
+  it('error alert (priority 1) is tagged neither history nor health — already live in header', () => {
+    const hass = makeHass({ [`sensor.${n}_last_error_code`]: st('17', {}) });
+    expect(hasAlertForTab(hass, defaultCaps, n, 'history')).toBe(false);
+    expect(hasAlertForTab(hass, defaultCaps, n, 'health')).toBe(false);
+  });
+
+  it('false for both tabs when no alerts are active', () => {
+    const hass = makeHass();
+    expect(hasAlertForTab(hass, defaultCaps, n, 'history')).toBe(false);
+    expect(hasAlertForTab(hass, defaultCaps, n, 'health')).toBe(false);
+  });
+
+  it('a lower-priority category alert is still flagged even when a higher-priority alert of a different category is also active', () => {
+    // Regression guard for the refactor: renderAlertZone only ever shows
+    // the single highest-priority alert as banner text, but badges must
+    // reflect ALL active categories independently of which one "wins" the
+    // banner slot.
+    const hass = makeHass({
+      [`sensor.${n}_last_error_code`]: st('17', {}),               // priority 1, category 'none'
+      [`sensor.${n}_wifi_health`]: st('72', { weakest_bucket_observed: 1 }), // priority 7, category 'history'
+    });
+    const caps = { ...defaultCaps, hasWifiFloor: true };
+    expect(hasAlertForTab(hass, caps, n, 'history')).toBe(true);
   });
 });

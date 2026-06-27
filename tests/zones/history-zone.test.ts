@@ -142,11 +142,19 @@ describe('renderHistoryZone() — day detail popover', () => {
   });
 });
 
-describe('renderHistoryZone() — Wave C1 lifetime stats', () => {
+describe('renderHistoryZone() — Wave C1 lifetime stats (SC1: migrated to cleaning_analytics_30d)', () => {
+  // SC1 (integration v2.7.0): sensor.*_recent_area_30d / recent_time_30d
+  // deprecated, removed in v3.0 — consolidated into cleaning_analytics_30d
+  // (state = area m², `time_h` attribute = time in HOURS).
+  //
+  // Test data fix incidental to this migration: the old recent_time_30d
+  // sensor's native unit was MINUTES, but the pre-migration test asserted
+  // '1,247 h (30 d)' for a raw value of 1247 — i.e. it codified the
+  // pre-existing minutes-as-hours display bug. 1247 min ≈ 20.8 h is the
+  // value the same underlying 30-day window would now correctly display.
   const lifetimeStates = {
-    [`sensor.${n}_lifetime_missions`]:  st('847'),
-    [`sensor.${n}_recent_area_30d`]: st('25200'),
-    [`sensor.${n}_recent_time_30d`]:    st('1247'),
+    [`sensor.${n}_lifetime_missions`]:     st('847'),
+    [`sensor.${n}_cleaning_analytics_30d`]: st('25200', { time_h: 20.8 }),
   };
 
   it('lifetime toggle button shown when all cloud sensors present', () => {
@@ -161,7 +169,7 @@ describe('renderHistoryZone() — Wave C1 lifetime stats', () => {
   it('expanded content shown when lifetimeExpanded=true', () => {
     const html = render(lifetimeStates, { lifetimeExpanded: true });
     expect(html).toContain('847');
-    expect(html).toContain('1,247 h (30 d)');
+    expect(html).toContain('20.8 h (30 d)');
   });
 
   it('expanded content hidden when lifetimeExpanded=false', () => {
@@ -252,14 +260,18 @@ describe('renderHistoryZone() — Wave C2 dirt events', () => {
   });
 });
 
-// ── v1.3 F6a: Speed trend in summary bar ──────────────────────────────────────
-describe('renderHistoryZone() — F6a speed trend in summary bar', () => {
+// ── v1.3 F6a / SC1: Speed trend in summary bar ───────────────────────────────
+describe('renderHistoryZone() — F6a speed trend in summary bar (SC1: migrated to cleaning_performance)', () => {
   const n = 'roomba';
+
+  // SC1 (integration v2.7.0): sensor.*_cleaning_speed_trend deprecated,
+  // removed in v3.0 — trend now read from the `trend` attribute on
+  // sensor.*_cleaning_performance.
 
   it('shows "↓ Speed declining" token when trend is declining', () => {
     const hass = makeHass({
       [`sensor.${n}_clean_streak`]: st('5'),
-      [`sensor.${n}_cleaning_speed_trend`]: st('declining'),
+      [`sensor.${n}_cleaning_performance`]: st('12.4', { trend: 'declining' }),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
       { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
@@ -271,7 +283,7 @@ describe('renderHistoryZone() — F6a speed trend in summary bar', () => {
   it('does not show trend token when trend is stable', () => {
     const hass = makeHass({
       [`sensor.${n}_clean_streak`]: st('5'),
-      [`sensor.${n}_cleaning_speed_trend`]: st('stable'),
+      [`sensor.${n}_cleaning_performance`]: st('85.0', { trend: 'stable' }),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
       { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
@@ -282,12 +294,24 @@ describe('renderHistoryZone() — F6a speed trend in summary bar', () => {
 
   it('does not show trend when cap absent', () => {
     const hass = makeHass({
-      [`sensor.${n}_cleaning_speed_trend`]: st('declining'),
+      [`sensor.${n}_cleaning_performance`]: st('12.4', { trend: 'declining' }),
     });
     const html = renderHistoryZone(hass, baseConfig, defaultCaps, n,
       { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
       false);
     expect(html).not.toContain('Speed declining');
+  });
+
+  it('does not show trend when attribute is absent', () => {
+    // Entity present (hasCleaningSpeedTrend true via flag) but `trend`
+    // attribute missing — e.g. no records in the cloud window yet.
+    const hass = makeHass({
+      [`sensor.${n}_cleaning_performance`]: st('12.4'),
+    });
+    const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      false);
+    expect(html).not.toContain('Speed');
   });
 });
 
@@ -333,12 +357,12 @@ describe('renderHistoryZone() — F6b wifi sparkline', () => {
 });
 
 // ── T3: speed trend — improving surfaced, stable silent (L2) ──────────────────
-describe('renderHistoryZone() — F6a speed trend — improving and stable (L2)', () => {
+describe('renderHistoryZone() — F6a speed trend — improving and stable (L2, SC1)', () => {
   const n = 'roomba';
 
   it('shows "↑ Speed improving" when trend is improving', () => {
     const hass = makeHass({
-      [`sensor.${n}_cleaning_speed_trend`]: st('improving'),
+      [`sensor.${n}_cleaning_performance`]: st('92.0', { trend: 'improving' }),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
       { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
@@ -348,7 +372,7 @@ describe('renderHistoryZone() — F6a speed trend — improving and stable (L2)'
 
   it('shows nothing for "stable" trend — no noise when normal', () => {
     const hass = makeHass({
-      [`sensor.${n}_cleaning_speed_trend`]: st('stable'),
+      [`sensor.${n}_cleaning_performance`]: st('85.0', { trend: 'stable' }),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
       { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
@@ -585,6 +609,139 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
     );
     expect(html).toContain('rpc-coverage-img');
     expect(html).not.toContain('rpc-hazard-pin');
+  });
+
+  // ── v2.0 C7-ROOM-BOUNDS: room polygon overlay + tap-to-select ────────────
+  describe('v2.0 C7-ROOM-BOUNDS room overlay', () => {
+    const roomsAttr = {
+      Kitchen: {
+        outline: [[-200, -100], [200, -100], [200, 100], [-200, 100]] as [number, number][],
+        name: 'Kitchen', room_id: 'kitchen', icon: 'mdi:fridge', x: 0, y: 0,
+      },
+      Hallway: {
+        outline: [[300, -50], [500, -50], [500, 50], [300, 50]] as [number, number][],
+        name: 'Hallway', room_id: 'hallway', icon: 'mdi:door', x: 400, y: 0,
+      },
+    };
+    const alignedImageState = st('idle', {
+      entity_picture: '/api/image/serve/abc/512x512',
+      x_min_mm: -1000, x_max_mm: 1000, y_min_mm: -800, y_max_mm: 800,
+      rooms: roomsAttr,
+    });
+
+    it('renders room polygons and labels when caps.hasAlignment is true', () => {
+      const html = renderHistoryZone(
+        makeHass({ [`image.${n}_coverage_map`]: alignedImageState }),
+        baseConfig, { ...coverageCaps, hasAlignment: true }, n,
+        { ...emptyState, historyTab: 'coverage' }, false,
+      );
+      expect(html).toContain('rpc-room-overlay');
+      expect(html).toContain('data-room-poly="Kitchen"');
+      expect(html).toContain('data-room-poly="Hallway"');
+      expect(html).toContain('data-room-label="Kitchen"');
+    });
+
+    it('omits room overlay when caps.hasAlignment is false, even with rooms data present', () => {
+      const html = renderHistoryZone(
+        makeHass({ [`image.${n}_coverage_map`]: alignedImageState }),
+        baseConfig, { ...coverageCaps, hasAlignment: false }, n,
+        { ...emptyState, historyTab: 'coverage' }, false,
+      );
+      expect(html).not.toContain('rpc-room-overlay');
+      expect(html).not.toContain('data-room-poly');
+    });
+
+    it('marks a room as selected when present in mapSelectedRooms', () => {
+      const html = renderHistoryZone(
+        makeHass({ [`image.${n}_coverage_map`]: alignedImageState }),
+        baseConfig, { ...coverageCaps, hasAlignment: true }, n,
+        { ...emptyState, historyTab: 'coverage', mapSelectedRooms: new Set(['Kitchen']) }, false,
+      );
+      const kitchenPoly = html.match(/<polygon[^>]*data-room-poly="Kitchen"[^>]*>/)?.[0] ?? '';
+      const hallwayPoly = html.match(/<polygon[^>]*data-room-poly="Hallway"[^>]*>/)?.[0] ?? '';
+      expect(kitchenPoly).toContain('rpc-room-poly--selected');
+      expect(hallwayPoly).not.toContain('rpc-room-poly--selected');
+    });
+
+    it('omits room overlay when no extent attributes are present (graceful degradation)', () => {
+      const noExtentRoomsState = st('idle', { entity_picture: '/api/image/serve/abc/512x512', rooms: roomsAttr });
+      const html = renderHistoryZone(
+        makeHass({ [`image.${n}_coverage_map`]: noExtentRoomsState }),
+        baseConfig, { ...coverageCaps, hasAlignment: true }, n,
+        { ...emptyState, historyTab: 'coverage' }, false,
+      );
+      expect(html).not.toContain('rpc-room-overlay');
+    });
+
+    // ── region_areas_m2 (integration v2.9.1): cross-entity lookup from the
+    // CloudSmartZoneSelect entity, same location as region_icons. NOT part
+    // of the image entity's `rooms` dict — joined here by room name. ──
+    describe('region_areas_m2 area annotation', () => {
+      it('appends area to the label when region_areas_m2 has data for that room', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: alignedImageState,
+            [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen', 'Hallway'], region_areas_m2: { Kitchen: 20.0 } }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
+        expect(kitchenLabel).toContain('20.0 m²');
+      });
+
+      it('shows name only (no area suffix) when region_areas_m2 lacks data for that specific room', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: alignedImageState,
+            // Only Kitchen has an area; Hallway is absent from the dict —
+            // e.g. partial cloud data for that room.
+            [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen', 'Hallway'], region_areas_m2: { Kitchen: 20.0 } }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        const hallwayLabel = html.match(/<div[^>]*data-room-label="Hallway"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
+        expect(hallwayLabel).not.toContain('m²');
+        expect(hallwayLabel).toContain('Hallway');
+      });
+
+      it('shows name only when the select entity is entirely absent (local-only / old integration / EPHEMERAL without CloudSmartZoneSelect)', () => {
+        const html = renderHistoryZone(
+          makeHass({ [`image.${n}_coverage_map`]: alignedImageState }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain('data-room-label="Kitchen"');
+        expect(html).not.toContain('m²');
+      });
+
+      it('falls back to zone_select entity id when hasSmartZones is false', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: alignedImageState,
+            [`select.${n}_zone_select`]: st('Kitchen', { options: ['Kitchen'], region_areas_m2: { Kitchen: 15.5 } }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: false }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
+        expect(kitchenLabel).toContain('15.5 m²');
+      });
+
+      it('does not throw and shows name only when region_areas_m2 attribute is malformed (not an object)', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: alignedImageState,
+            [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen'], region_areas_m2: 'not-an-object' }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain('data-room-label="Kitchen"');
+        expect(html).not.toContain('m²');
+      });
+    });
   });
 
   it('coverage image renders without pins when extent attrs absent (R2 graceful degradation)', () => {

@@ -13,6 +13,12 @@ export interface RoomSelectorProps {
   sendError: string | null;
   /** B3: whether the settings panel is expanded */
   settingsPanelOpen: boolean;
+  /** v2.0: when false, suppresses the embedded settings panel — used by the
+   *  ⚙ tab, which renders renderSettingsPanel() separately so it isn't lost
+   *  on robots without zone capability (hasZones gates this entire function
+   *  before it would otherwise reach the settings panel). Defaults to true
+   *  to preserve pre-v2.0 callers' behaviour unchanged. */
+  includeSettingsPanel?: boolean;
 }
 
 /** Maps display chip labels → integration select option strings */
@@ -49,7 +55,7 @@ export function renderSettingsPanel(
   const n = robotName;
   const edgeCleanEntity   = hass.states[`switch.${n}_edge_clean`];
   const alwaysFinishEntity = hass.states[`switch.${n}_always_finish`];
-  const carpetBoostEntity  = hass.states[`select.${n}_carpet_boost_mode`];
+  const carpetBoostEntity  = hass.states[`select.${n}_carpet_boost_select`];
   if (!edgeCleanEntity && !alwaysFinishEntity && !carpetBoostEntity) return '';
 
   let panelHtml = '';
@@ -84,7 +90,7 @@ export function renderSettingsPanel(
           <div class="rpc-setting-item">
             <span class="rpc-setting-label">Carpet boost</span>
             <button class="rpc-setting-cycle"
-                    data-cycle-entity="select.${n}_carpet_boost_mode"
+                    data-cycle-entity="select.${n}_carpet_boost_select"
                     data-cycle-options="${esc(JSON.stringify(carpetOptions))}"
                     data-cycle-current="${esc(carpetBoostEntity.state)}">
               ${esc(carpetBoostEntity.state)} ▼
@@ -115,7 +121,7 @@ export function renderSettingsPanel(
 
 export function renderRoomSelectorZone(props: RoomSelectorProps): string {
   const { hass, config, caps, robotName, selectedRooms, passes,
-          isSending, sendError, settingsPanelOpen } = props;
+          isSending, sendError, settingsPanelOpen, includeSettingsPanel = true } = props;
 
   if (!caps.hasZones) return '';
   if (config.show_rooms === false) return '';
@@ -176,7 +182,12 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
   // ── B3: Settings panel — delegate to shared helper ──
   // Repeat-last moves to Status zone when show_rooms:false, so only render it here
   // when the rooms zone is visible.
-  const settingsHtml = renderSettingsPanel(hass, config, robotName, settingsPanelOpen);
+  // v2.0: suppressed when the ⚙ tab is rendering this section separately
+  // (includeSettingsPanel: false) to avoid duplicating the panel and to
+  // ensure it still renders for robots without zone capability.
+  const settingsHtml = includeSettingsPanel
+    ? renderSettingsPanel(hass, config, robotName, settingsPanelOpen)
+    : '';
 
   return `
     <div class="rpc-zone rpc-zone2">

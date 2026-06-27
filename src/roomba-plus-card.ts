@@ -6,14 +6,15 @@
 import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, HouseholdSummary } from './types.js';
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
-import { renderStatusZone }       from './zones/status-zone.js';
-import { renderRoomSelectorZone } from './zones/room-selector-zone.js';
+import { renderRoomSelectorZone, renderSettingsPanel } from './zones/room-selector-zone.js';
 import { renderHealthZone }       from './zones/health-zone.js';
 import { renderScheduleZone }     from './zones/schedule-zone.js';
 import { renderAlertZone }        from './zones/alert-zone.js';
 import { renderHistoryZone }      from './zones/history-zone.js';
 import { renderHouseholdZone }    from './zones/household-zone.js';
 import { CHIP_TO_OPTION, OPTION_TO_CHIP } from './zones/room-selector-zone.js';
+import { renderHeader } from './header.js';
+import { availableTabs, defaultTab, healthTabHasBadge, historyTabHasBadge, renderTabBar, TabId } from './tabs.js';
 
 // ──────────────────────────────────────────────
 // CSS
@@ -27,7 +28,12 @@ const STYLES = `
        accessible defaults that match the standard HA colour palette.
        --state-active-color / --warning-color / --error-color are defined by
        every HA theme including Bubble Card themes and the default theme.      */
-    --rpc-green:      var(--state-active-color,   #2d9c4f);
+    /* B1 fix (v2.0): fixed constant, not var(--state-active-color, ...).
+       Themes like Casa5/Bubble Card redefine --state-active-color in ways
+       that can render this token amber-ish, breaking the green/amber/red
+       health-bar invariant. Health colour semantics must never depend on
+       a theme variable that wasn't designed for this purpose. */
+    --rpc-green:      #4ade80;
     --rpc-amber:      var(--warning-color,         #d97706);
     --rpc-red:        var(--error-color,           #db4437);
     --rpc-blue:       var(--primary-color,         #2563eb);
@@ -63,7 +69,8 @@ const STYLES = `
     margin-bottom: 8px;
   }
 
-  /* ─── Zone 1 — Status ─── */
+  /* ─── v2.0 Persistent header (was Zone 1 — Status) ─── */
+  .rpc-header { padding: 0 0 12px; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.08)); margin-bottom: 4px; }
   .rpc-robot-identity { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .rpc-robot-icon { font-size: 1.1rem; }
   .rpc-robot-name { font-size: 0.9rem; font-weight: 600; color: var(--secondary-text-color, #9ca3af); }
@@ -207,6 +214,70 @@ const STYLES = `
   /* v1.3 — static bar rows (no popover / click interaction) */
   .rpc-bar-row--static { cursor: default; }
   .rpc-bar-row--static:hover { background: transparent; }
+
+  /* v2.0 C1-HEALTH — robot health score */
+  .rpc-health-score {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 8px 2px 4px;
+  }
+  .rpc-health-score--calibrating { align-items: center; }
+  .rpc-health-score-label {
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--secondary-text-color, #9ca3af);
+  }
+  .rpc-health-score-value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+  .rpc-health-score-band  { font-size: 0.75rem; font-weight: 600; }
+  .rpc-health-score-calibrating {
+    font-size: 0.82rem; color: var(--secondary-text-color, #9ca3af); font-style: italic;
+  }
+  .rpc-health-details-toggle {
+    background: none; border: none; cursor: pointer; padding: 2px 2px 8px;
+    font-size: 0.78rem; color: var(--primary-color, #2563eb);
+    font-family: inherit;
+  }
+
+  /* v2.0 C5-ANOMALY — mission anomaly banner */
+  .rpc-anomaly-banner {
+    background: color-mix(in srgb, var(--rpc-amber) 12%, transparent);
+    border-left: 3px solid var(--rpc-amber);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 0.82rem;
+    margin-bottom: 6px;
+  }
+
+  /* v2.0 C2-MAINT — maintenance calendar */
+  .rpc-maint-divider { height: 1px; background: var(--divider-color, rgba(0,0,0,.08)); margin: 8px 0 6px; }
+  .rpc-maint-header {
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--secondary-text-color, #9ca3af);
+    margin-bottom: 4px;
+  }
+  .rpc-maint-row {
+    display: flex; align-items: center; justify-content: space-between;
+    min-height: 36px; cursor: pointer; padding: 2px 2px;
+  }
+  .rpc-maint-row:hover { background: var(--secondary-background-color, rgba(0,0,0,.04)); }
+  .rpc-maint-label { font-size: 0.82rem; }
+  .rpc-maint-val   { font-size: 0.82rem; color: var(--secondary-text-color, #9ca3af); }
+  .rpc-maint-service {
+    font-family: monospace; font-size: 0.78rem; background: var(--secondary-background-color, rgba(0,0,0,.05));
+    padding: 4px 6px; border-radius: 4px; margin-top: 2px; word-break: break-all;
+  }
+
+  /* v2.0 — ⚙ tab maintenance service links */
+  .rpc-maint-link-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 2px; font-size: 0.8rem;
+  }
+  .rpc-maint-link-label   { color: var(--primary-text-color); }
+  .rpc-maint-link-service {
+    font-family: monospace; font-size: 0.72rem; color: var(--secondary-text-color, #9ca3af);
+  }
+  .rpc-maint-link-hint {
+    font-size: 0.72rem; color: var(--secondary-text-color, #9ca3af);
+    margin-top: 4px; font-style: italic;
+  }
 
   /* v1.3 — coverage "Building history…" skeleton text */
   .rpc-coverage-building {
@@ -383,9 +454,23 @@ const STYLES = `
   /* v1.3 — speed trend colour tokens in history summary bar */
   .rpc-trend-declining { color: var(--rpc-amber); font-weight: 500; }
   .rpc-trend-improving { color: var(--rpc-green); font-weight: 500; }
+  /* v2.0: heatmap promoted to full-width Map/History tabs — SVG now scales
+   * responsively instead of rendering at fixed natural size. The svg's own
+   * width/height attributes (200×NNN at the current 24px CELL constant in
+   * heatmap.ts) become the intrinsic aspect-ratio source for the viewBox;
+   * CSS width/height here override layout sizing without touching the
+   * coordinate system inside the SVG, so heatmap.ts and its fixed-geometry
+   * tests are unaffected by this purely presentational change.
+   * clamp(min, container-driven, max): min ≈ 7 cols × 8px cells (smallest
+   * touch-safe size per the v2.0 plan); max = current 200px / 24px cells
+   * (the pre-v2.0 fixed size) so wide desktop columns don't render an
+   * oversized calendar. */
   .rpc-heatmap-wrap { overflow: hidden; }
-  /* SVG has explicit width/height attrs — display:block prevents inline gap */
-  .rpc-heatmap-wrap svg { display: block; }
+  .rpc-heatmap-wrap svg {
+    display: block;
+    width: clamp(88px, 100%, 200px);
+    height: auto;
+  }
   .rpc-history-error   { font-size: 0.82rem; color: var(--secondary-text-color); padding: 8px 0; }
   .rpc-history-partial { font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 6px; }
   .rpc-problem-zone    { font-size: 0.8rem; color: var(--rpc-amber); margin-top: 8px; }
@@ -420,6 +505,29 @@ const STYLES = `
   .rpc-coverage-updated { font-size: 0.72rem; color: var(--secondary-text-color); margin-top: 4px; }
   .rpc-coverage-note    { font-size: 0.72rem; color: var(--secondary-text-color); margin-top: 4px; font-style: italic; }
 
+  /* ── v2.0 C7-ROOM-BOUNDS — room polygon overlay + tap-to-select ────────── */
+  .rpc-room-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; /* polygons opt back in individually below */
+  }
+  .rpc-room-poly {
+    fill: var(--primary-color, #2563eb); fill-opacity: 0.08;
+    stroke: var(--primary-color, #2563eb); stroke-opacity: 0.35; stroke-width: 0.4;
+    cursor: pointer; pointer-events: auto;
+  }
+  .rpc-room-poly:hover       { fill-opacity: 0.16; stroke-opacity: 0.6; }
+  .rpc-room-poly--selected   { fill-opacity: 0.28; stroke-opacity: 0.9; stroke-width: 0.6; }
+  .rpc-room-label {
+    position: absolute; transform: translate(-50%, -50%);
+    font-size: 0.7rem; padding: 1px 5px; border-radius: 8px;
+    background: var(--card-background-color, #fff); color: var(--primary-text-color);
+    box-shadow: 0 1px 2px rgba(0,0,0,.15);
+    cursor: pointer; white-space: nowrap; pointer-events: auto;
+  }
+  .rpc-room-label--selected {
+    background: var(--primary-color, #2563eb); color: #fff;
+  }
+
   /* ── v1.5 — F8 room coverage chips in day popover ───────────────────────── */
   .rpc-room-coverage {
     width: 100%; padding-left: 20px;
@@ -439,6 +547,33 @@ const STYLES = `
   .rpc-cleaned-rooms  { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 0.80rem; }
   .rpc-cleaned-chip   { background: var(--secondary-background-color, #f3f4f6); border-radius: 10px; padding: 2px 8px; }
   .rpc-demand-blocked { font-size: 0.80rem; color: var(--rpc-amber); margin-top: 6px; padding-left: 2px; }
+
+  /* ── v2.0 — header: unified spatial line (F11 + C3-PROGRESS merge), recharge line ── */
+  .rpc-spatial-line  { font-size: 0.80rem; color: var(--secondary-text-color); margin-top: 4px; padding-left: 2px; }
+  .rpc-recharge-line { font-size: 0.80rem; color: var(--rpc-amber); margin-top: 4px; padding-left: 2px; }
+
+  /* ── v2.0 — tab bar ─────────────────────────────────────────────────────── */
+  .rpc-tab-bar {
+    display: flex; gap: 2px; margin: 6px 0 4px;
+    border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.08));
+  }
+  .rpc-tab-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+    background: none; border: none; cursor: pointer; font-family: inherit;
+    padding: 8px 4px; font-size: 0.78rem; color: var(--secondary-text-color, #9ca3af);
+    position: relative; border-bottom: 2px solid transparent;
+  }
+  .rpc-tab-btn--active {
+    color: var(--primary-text-color); border-bottom-color: var(--primary-color, #2563eb);
+    font-weight: 600;
+  }
+  .rpc-tab-icon  { font-size: 0.95rem; }
+  .rpc-tab-label { white-space: nowrap; }
+  .rpc-tab-badge {
+    position: absolute; top: 4px; right: 18%;
+    width: 7px; height: 7px; border-radius: 50%; background: var(--rpc-amber);
+  }
+  .rpc-tab-panel { padding-top: 4px; }
 
   /* ── v1.6 — History zone: traversal row ─────────────────────────────────── */
   .rpc-traversal-row  { width: 100%; padding-left: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-size: 0.75rem; margin-top: 3px; color: var(--secondary-text-color); }
@@ -463,6 +598,11 @@ const STYLES = `
   .rpc-household-floors   { margin-bottom: 4px; }
   .rpc-household-floor    { display: flex; align-items: baseline; gap: 8px; font-size: 0.75rem; color: var(--secondary-text-color); padding: 2px 0; }
   .rpc-household-floor-label { font-weight: 500; }
+  /* v2.0 — household view "← Back" chip */
+  .rpc-household-back {
+    background: none; border: none; cursor: pointer; font-family: inherit;
+    color: var(--primary-color, #2563eb); font-size: 0.8rem; padding: 4px 2px 10px;
+  }
 `;
 
 // ──────────────────────────────────────────────
@@ -476,6 +616,13 @@ class RoombaPlusCard extends HTMLElement {
   private robotName = '';
   /** F3: entity ID of the currently displayed robot (may differ from config.entity in multi-robot mode) */
   private activeRobot = '';
+  // v2.0 — tab architecture
+  private activeTab: TabId | null = null;   // null until first render picks the default
+  private roomPickerOpen = false;
+  /** v2.0: robot selector dropdown also offers a "Household summary" view
+   *  that replaces the header + tabs entirely with the combined multi-robot
+   *  summary. Independent of activeRobot — does not reset on robot switch. */
+  private viewMode: 'robot' | 'household' = 'robot';
 
   // Zone 2
   private selectedRooms = new Set<string>();
@@ -496,6 +643,9 @@ class RoombaPlusCard extends HTMLElement {
   private resetting: string | null = null;
   private resetError: string | null = null;
   private legendShown = false;   // wear arrow legend shown once per session
+  // v2.0 C1-HEALTH / C2-MAINT
+  private healthDetailsExpanded = false;
+  private openMaintPopover: string | null = null;
 
   // Zone 4 schedule
   private holdTooltipVisible = false;
@@ -532,6 +682,7 @@ class RoombaPlusCard extends HTMLElement {
     if (!path.includes(this)) {
       let changed = false;
       if (this.openPopover !== null) { this.openPopover = null; changed = true; }
+      if (this.openMaintPopover !== null) { this.openMaintPopover = null; changed = true; }
       if (this.openDay !== null)     { this.openDay = null; this.dayMissions = null; this.openDaySummary = null; changed = true; }
       if (changed) this.render();
     }
@@ -665,21 +816,33 @@ class RoombaPlusCard extends HTMLElement {
       `sensor.${n}_clean_streak`,
       `sensor.${n}_completion_rate_30d`,
       `sensor.${n}_lifetime_missions`,
-      `sensor.${n}_recent_area_30d`,   // was lifetime_area pre-v2.1.2
-      `sensor.${n}_recent_time_30d`,      // was lifetime_time pre-v2.1.2
+      // SC1 (integration v2.7.0): sensor.*_recent_area_30d and
+      // sensor.*_recent_time_30d are deprecated (removed in v3.0) and no
+      // longer tracked. Both area (state) and time (time_h attribute) now
+      // come from this single consolidated sensor.
+      `sensor.${n}_cleaning_analytics_30d`,
       // v1.3 — performance & health sensors
       `sensor.${n}_battery_capacity_retention`,
       `sensor.${n}_estimated_battery_eol`,     // B2: EOL shown in popover
-      `sensor.${n}_recent_wifi_floor`,
+      // SC1 (integration v2.7.0): sensor.*_recent_wifi_floor deprecated
+      // (removed in v3.0) — replaced by sensor.*_wifi_health. Note this is
+      // not a like-for-like metric swap; see alert-zone.ts WIFI_FLOOR_MIGRATION.
+      `sensor.${n}_wifi_health`,
       `sensor.${n}_recent_coverage_pct`,
       `sensor.${n}_missions_last_30d`,          // gates coverage bar skeleton
       `sensor.${n}_average_mission_time`,       // A1: progress bar duration estimate
-      `sensor.${n}_cleaning_speed_trend`,
+      // SC1 (integration v2.7.0): sensor.*_cleaning_speed_trend deprecated
+      // (removed in v3.0) — trend now read from `trend` attribute on
+      // sensor.*_cleaning_performance (tracked above is unnecessary since
+      // it's the same entity already needed for hasCleaningSpeedTrend detection
+      // — listed explicitly here for clarity since cleaning_performance wasn't
+      // otherwise in this list before this migration).
+      `sensor.${n}_cleaning_performance`,
       `binary_sensor.${n}_consecutive_clean_skips`,
       // Status zone live metrics
       `sensor.${n}_area_cleaned_today`,         // B2: Wave A3 area-today line
       `sensor.${n}_mission_expire_time`,        // B2: recharge ETA countdown
-      // recent_area_30d and missions_last_30d already tracked above — A4 vs-usual delta uses both
+      // cleaning_analytics_30d and missions_last_30d already tracked above — A4 vs-usual delta uses both
       // v2.2+
       `image.${n}_coverage_map`,               // B2: hasCoverageImage detection
       // F3b — robot selector helper (when configured)
@@ -707,6 +870,10 @@ class RoombaPlusCard extends HTMLElement {
     this.passSettingInFlight = false;
     this.openPopover       = null;
     this.legendShown       = false;
+    this.healthDetailsExpanded = false;
+    this.openMaintPopover  = null;
+    this.activeTab          = null;   // re-pick default for the new robot's capability tier
+    this.roomPickerOpen     = false;
     this.openDay           = null;
     this.dayMissions       = null;
     this.openDaySummary    = null;
@@ -823,7 +990,26 @@ class RoombaPlusCard extends HTMLElement {
     const todaySummary = this.missionData?.find(d => d.date === todayIso) ?? null;
     const todayMissionCount = todaySummary?.total ?? null;
 
-    // Zone 5 alert debounce: render fresh, manage visibility
+    // v2.0: pick the default tab on first render / after a robot switch reset it to null.
+    if (this.activeTab === null) {
+      this.activeTab = defaultTab(this.config, caps);
+    }
+    const tabs = availableTabs(this.config, caps);
+    // Guard: if config/caps changed such that the previously active tab no
+    // longer exists (e.g. switched to a NONE-tier robot — no Map tab), fall
+    // back to the resolved default rather than rendering an empty tab panel.
+    if (!tabs.some(t => t.id === this.activeTab)) {
+      this.activeTab = defaultTab(this.config, caps);
+    }
+
+    // Alerts (v1.x Alert zone) relocate into the Health tab in v2.0 rather
+    // than occupying their own always-visible zone — most existing alerts
+    // (wifi floor, consecutive skips) are health/performance signals. This
+    // is a partial implementation of the v2.0 "alerts become tab badges"
+    // design: the alert TEXT still renders as a banner (debounced as
+    // before), but it now lives inside the Health tab instead of a
+    // dedicated top-level zone. A full per-alert-type badge split across
+    // tabs is not yet implemented.
     const freshAlert = renderAlertZone(this._hass, this.config, caps, this.robotName);
     let alertZoneHtml = freshAlert;
     if (freshAlert) {
@@ -841,36 +1027,118 @@ class RoombaPlusCard extends HTMLElement {
       alertZoneHtml = this.lastAlertHtml; // keep showing during debounce window
     }
 
-    const html = `
-      <style>${STYLES}</style>
-      <div class="rpc-card">
-        ${this.renderRobotSelectorBar()}
-        ${renderStatusZone({
-          hass: this._hass, config: this.config, caps,
-          robotName: this.robotName, loadingAction: this.loadingAction,
-          todayMissionCount,
-          missionData: this.missionData,
-          settingsPanelOpen: this.settingsPanelOpen,
-        })}
-        ${renderRoomSelectorZone({
+    const headerHtml = renderHeader({
+      hass: this._hass, config: this.config, caps,
+      robotName: this.robotName, loadingAction: this.loadingAction,
+      todayMissionCount,
+      missionData: this.missionData,
+      roomPickerOpen: this.roomPickerOpen,
+      selectedRoomCount: this.selectedRooms.size,
+    });
+
+    // v2.0: inline room picker — expands below the header when toggled via
+    // the "Rooms…" button. Reuses the existing chip-based room selector;
+    // a literal tap-to-select-on-map flow (per the full v2.0 Map tab spec)
+    // is not yet implemented — this is the chip-list fallback for all tiers.
+    const roomPickerHtml = this.roomPickerOpen
+      ? renderRoomSelectorZone({
           hass: this._hass, config: this.config, caps,
           robotName: this.robotName,
           selectedRooms: this.selectedRooms, passes: this.passes,
           isSending: this.isSendingClean, sendError: this.sendError,
-          settingsPanelOpen: this.settingsPanelOpen,
-        })}
-        ${renderHealthZone(this._hass, this.config, caps, this.robotName,
-          { openPopover: this.openPopover, resetting: this.resetting, resetError: this.resetError, legendShown: this.legendShown })}
-        ${renderScheduleZone(this._hass, this.config, caps, this.robotName,
-          { holdTooltipVisible: this.holdTooltipVisible, holdToggling: this.holdToggling })}
-        ${alertZoneHtml}
-        ${renderHistoryZone(this._hass, this.config, caps, this.robotName,
+          settingsPanelOpen: false,
+        })
+      : '';
+
+    const badges = {
+      health:  healthTabHasBadge(this._hass, caps, this.robotName),
+      history: historyTabHasBadge(this._hass, caps, this.robotName),
+    };
+    const tabBarHtml = renderTabBar(tabs, this.activeTab, badges);
+
+    let tabContentHtml = '';
+    switch (this.activeTab) {
+      case 'map':
+        // Promotes the existing F7 coverage heatmap + hazard pins to a
+        // first-class tab by forcing historyTab to 'coverage'. C7-ROOM-BOUNDS
+        // room polygon overlays render when caps.hasAlignment. Tap-to-select
+        // shares this.selectedRooms with the header "Rooms…" chip picker —
+        // selecting via map or via chips is the same pending selection.
+        tabContentHtml = renderHistoryZone(this._hass, this.config, caps, this.robotName,
           { data: this.missionData, loading: this.historyLoading, error: this.historyError,
             openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
             lifetimeExpanded: this.lifetimeExpanded,
-            historyTab: this.historyTab, hazards: this.hazards },
-          isMetric)}
+            historyTab: 'coverage', hazards: this.hazards,
+            mapSelectedRooms: this.selectedRooms },
+          isMetric);
+        break;
+      case 'history':
+        tabContentHtml = renderHistoryZone(this._hass, this.config, caps, this.robotName,
+          { data: this.missionData, loading: this.historyLoading, error: this.historyError,
+            openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
+            lifetimeExpanded: this.lifetimeExpanded,
+            // Companion mode keeps the Calendar/Coverage sub-tab toggle
+            // (handled internally by renderHistoryZone via caps.hasCoverageImage);
+            // standalone mode forces 'calendar' since Coverage lives on the Map tab.
+            historyTab: this.config.mode === 'companion' ? this.historyTab : 'calendar',
+            hazards: this.hazards },
+          isMetric);
+        break;
+      case 'health':
+        tabContentHtml = `
+          ${alertZoneHtml}
+          ${renderHealthZone(this._hass, this.config, caps, this.robotName,
+            { openPopover: this.openPopover, resetting: this.resetting, resetError: this.resetError, legendShown: this.legendShown,
+              healthDetailsExpanded: this.healthDetailsExpanded, openMaintPopover: this.openMaintPopover })}
+        `;
+        break;
+      case 'settings':
+        tabContentHtml = `
+          ${renderScheduleZone(this._hass, this.config, caps, this.robotName,
+            { holdTooltipVisible: this.holdTooltipVisible, holdToggling: this.holdToggling })}
+          <div class="rpc-settings-divider"></div>
+          ${renderSettingsPanel(this._hass, this.config, this.robotName, this.settingsPanelOpen)}
+          ${this.config.mode !== 'companion'
+            ? renderRoomSelectorZone({
+                hass: this._hass, config: this.config, caps,
+                robotName: this.robotName,
+                selectedRooms: this.selectedRooms, passes: this.passes,
+                isSending: this.isSendingClean, sendError: this.sendError,
+                settingsPanelOpen: this.settingsPanelOpen,
+                // v2.0: settings panel already rendered directly above —
+                // independent of hasZones so it isn't lost on robots with
+                // no zone capability. Suppress the embedded copy here.
+                includeSettingsPanel: false,
+              })
+            : ''}
+          ${this.renderMaintenanceLinks(caps)}
+        `;
+        break;
+    }
+
+    // v2.0: household view replaces header + tabs entirely rather than
+    // appending the household zone as a permanent footer below every tab —
+    // it's a distinct view the robot selector switches into, not a status
+    // strip that's always present.
+    const bodyHtml = this.viewMode === 'household'
+      ? `
+        <button class="rpc-household-back" data-household-back>← Back</button>
         ${renderHouseholdZone(this._hass, this.config, caps, this.householdData, isMetric)}
+      `
+      : `
+        ${headerHtml}
+        ${roomPickerHtml}
+        ${tabBarHtml}
+        <div class="rpc-tab-panel">
+          ${tabContentHtml}
+        </div>
+      `;
+
+    const html = `
+      <style>${STYLES}</style>
+      <div class="rpc-card">
+        ${this.renderRobotSelectorBar()}
+        ${bodyHtml}
       </div>
     `;
 
@@ -878,16 +1146,66 @@ class RoombaPlusCard extends HTMLElement {
     this.attachEventListeners();
   }
 
-  /** F3: Renders the robot selector dropdown bar when entities[] has 2+ entries. */
+  /**
+   * v2.0 ⚙ tab — maintenance service links. Displayed as secondary action
+   * rows with the service call name, since these are HA services (not REST
+   * API calls the card can invoke directly) — the card surfaces the
+   * service name for Developer Tools rather than wiring a button to it.
+   *
+   * Only includes services confirmed against integration source:
+   * reset_wheel_cleaning / reset_contact_cleaning / reset_bin_cleaning
+   * (IA74-MAINT, v2.7.0) and reset_battery (confirmed via card project
+   * memory). A "reset robot profile" service was referenced in an earlier
+   * card plan draft but its existence was never confirmed against source —
+   * deliberately omitted here rather than guessing at a service name.
+   */
+  private renderMaintenanceLinks(caps: import('./types.js').RobotCapabilities): string {
+    if (!caps.hasMaintenanceCalendar && !this._hass.states[`sensor.${this.robotName}_battery_capacity_retention`]) return '';
+
+    const n = this.robotName;
+    const rows: { label: string; service: string }[] = [];
+    if (this._hass.states[`sensor.${n}_wheel_last_cleaned`])   rows.push({ label: 'Wheel cleaning',   service: 'roomba_plus.reset_wheel_cleaning' });
+    if (this._hass.states[`sensor.${n}_contact_last_cleaned`]) rows.push({ label: 'Contact cleaning', service: 'roomba_plus.reset_contact_cleaning' });
+    if (this._hass.states[`sensor.${n}_bin_last_cleaned`])     rows.push({ label: 'Bin cleaning',      service: 'roomba_plus.reset_bin_cleaning' });
+    if (this._hass.states[`sensor.${n}_battery_capacity_retention`]) rows.push({ label: 'Battery baseline', service: 'roomba_plus.reset_battery' });
+
+    if (rows.length === 0) return '';
+
+    return `
+      <div class="rpc-settings-divider"></div>
+      <div class="rpc-zone-header">MAINTENANCE</div>
+      ${rows.map(r => `
+        <div class="rpc-maint-link-row">
+          <span class="rpc-maint-link-label">${r.label}</span>
+          <span class="rpc-maint-link-service">${r.service}</span>
+        </div>
+      `).join('')}
+      <div class="rpc-maint-link-hint">Trigger via Developer Tools → Services</div>
+    `;
+  }
+
+  /** F3: Renders the robot selector dropdown bar when entities[] has 2+ entries.
+   *  v2.0: also offers a "📊 Household summary" option that switches the
+   *  whole card into the combined household view (renderRobotSelectorBar
+   *  itself stays visible in that mode so the user can switch back). */
   private renderRobotSelectorBar(): string {
     const list = this.entityList();
     if (list.length < 2) return '';
     const options = list.map(id => {
       const name = this._hass.states[id]?.attributes?.['friendly_name'] as string ?? id;
-      const sel  = id === this.activeRobot ? ' selected' : '';
+      const sel  = this.viewMode === 'robot' && id === this.activeRobot ? ' selected' : '';
       return `<option value="${id}"${sel}>${name}</option>`;
     }).join('');
-    return `<div class="rpc-robot-selector"><select class="rpc-robot-select" data-robot-select>${options}</select></div>`;
+    const householdSel = this.viewMode === 'household' ? ' selected' : '';
+    return `
+      <div class="rpc-robot-selector">
+        <select class="rpc-robot-select" data-robot-select>
+          <optgroup label="My robots">${options}</optgroup>
+          <optgroup label="View">
+            <option value="__household__"${householdSel}>📊 Household summary</option>
+          </optgroup>
+        </select>
+      </div>`;
   }
 
 
@@ -900,11 +1218,18 @@ class RoombaPlusCard extends HTMLElement {
     if (robotSelect) {
       robotSelect.addEventListener('change', (e) => {
         e.stopPropagation();
-        this.switchRobot((e.target as HTMLSelectElement).value);
+        const value = (e.target as HTMLSelectElement).value;
+        if (value === '__household__') {
+          this.viewMode = 'household';
+          this.render();
+        } else {
+          this.viewMode = 'robot';
+          this.switchRobot(value);
+        }
       });
     }
 
-        card.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(btn => {
+    card.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation(); // prevent tap-outside handler from firing
         this.handleAction(btn.dataset.action!);
@@ -959,11 +1284,76 @@ class RoombaPlusCard extends HTMLElement {
       });
     });
 
+    // v2.0 — tab bar switching
+    card.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const tab = btn.dataset.tab as TabId;
+        if (tab !== this.activeTab) {
+          this.activeTab = tab;
+          this.render();
+        }
+      });
+    });
+
+    // v2.0 — household view "← Back" returns to the active robot's view
+    const householdBack = card.querySelector<HTMLButtonElement>('[data-household-back]');
+    if (householdBack) {
+      householdBack.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.viewMode = 'robot';
+        this.render();
+      });
+    }
+
+    // v2.0 C7-ROOM-BOUNDS — tap-to-select on Map tab room overlays.
+    // Shares this.selectedRooms with the header chip picker.
+    card.querySelectorAll<SVGPolygonElement | HTMLElement>('[data-room-poly], [data-room-label]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const room = (el as HTMLElement).dataset.roomPoly ?? (el as HTMLElement).dataset.roomLabel;
+        if (!room) return;
+        if (this.selectedRooms.has(room)) this.selectedRooms.delete(room);
+        else this.selectedRooms.add(room);
+        this.render();
+      });
+    });
+
     // Popover × close buttons
     card.querySelectorAll<HTMLButtonElement>('[data-close]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.openPopover = null;
+        this.render();
+      });
+    });
+
+    // v2.0 C1-HEALTH — score details expand/collapse toggle
+    card.querySelectorAll<HTMLButtonElement>('[data-health-details-toggle]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.healthDetailsExpanded = !this.healthDetailsExpanded;
+        this.render();
+      });
+    });
+
+    // v2.0 C2-MAINT — maintenance calendar rows toggle their own popover
+    card.querySelectorAll<HTMLElement>('[data-maint]').forEach(row => {
+      const toggle = (e: Event) => {
+        e.stopPropagation();
+        const key = row.dataset.maint!;
+        this.openMaintPopover = this.openMaintPopover === key ? null : key;
+        this.render();
+      };
+      row.addEventListener('click', toggle);
+      row.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); }
+      });
+    });
+    card.querySelectorAll<HTMLButtonElement>('[data-close-maint]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openMaintPopover = null;
         this.render();
       });
     });
@@ -1172,6 +1562,13 @@ class RoombaPlusCard extends HTMLElement {
       return;
     }
 
+    // ── v2.0: header "Rooms…" toggle — local UI state, no service call ──
+    if (action === 'toggle-room-picker') {
+      this.roomPickerOpen = !this.roomPickerOpen;
+      this.render();
+      return;
+    }
+
     // ── Vacuum service actions ──
     const actionMap: Record<string, [string, string]> = {
       start:       ['vacuum', 'start'],
@@ -1179,6 +1576,15 @@ class RoombaPlusCard extends HTMLElement {
       resume:      ['vacuum', 'start'],
       return_home: ['vacuum', 'return_to_base'],
       locate:      ['vacuum', 'locate'],
+      // v2.0: Paused state's third button. HA's vacuum domain has no
+      // distinct "stop" verb separate from return_to_base for most
+      // integrations — stop_cleaning / return_to_base both halt motion.
+      // roomba_plus uses the standard vacuum.stop service.
+      stop:        ['vacuum', 'stop'],
+      // v2.0: Error state's second button — re-attempts the vacuum's last
+      // commanded action via vacuum.start, which iRobot's API treats as
+      // "resume/retry" when called from an error state.
+      retry:       ['vacuum', 'start'],
     };
 
     const mapping = actionMap[action];

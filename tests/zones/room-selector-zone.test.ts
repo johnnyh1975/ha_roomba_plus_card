@@ -192,7 +192,7 @@ describe('renderRoomSelectorZone() — Wave B3 settings panel', () => {
   it('carpet boost cycle button shows current value', () => {
     const p = props({ hasZones: true }, {
       ...base,
-      [`select.${n}_carpet_boost_mode`]: st('Boost', { options: ['Auto', 'Boost', 'Off'] }),
+      [`select.${n}_carpet_boost_select`]: st('Boost', { options: ['Auto', 'Boost', 'Off'] }),
     }, { settingsPanelOpen: true });
     const html = renderRoomSelectorZone(p);
     expect(html).toContain('Boost ▼');
@@ -310,7 +310,7 @@ describe('renderSettingsPanel()', () => {
 
   it('renders carpet boost cycle button when entity present', () => {
     const hass = makeHass({
-      [`select.${n}_carpet_boost_mode`]: st('Auto', { options: ['Auto', 'Eco', 'Performance'] }),
+      [`select.${n}_carpet_boost_select`]: st('Auto', { options: ['Auto', 'Eco', 'Performance'] }),
     });
     const html = renderSettingsPanel(hass, cfg, n, true);
     expect(html).toContain('Carpet boost');
@@ -334,5 +334,29 @@ describe('renderRoomSelectorZone() — show_settings gate', () => {
       { config: { ...baseConfig, show_settings: false } },
     ));
     expect(html).not.toContain('data-settings-toggle');
+  });
+});
+
+// ── v2.0: includeSettingsPanel flag (Settings tab decoupling) ───────────────
+describe('renderRoomSelectorZone() — v2.0 includeSettingsPanel', () => {
+  it('embeds the settings panel by default (includeSettingsPanel omitted)', () => {
+    const html = renderRoomSelectorZone(props(
+      { hasZones: true, hasSmartZones: true },
+      { [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen'] }),
+        [`switch.${n}_edge_clean`]: st('on') },
+    ));
+    expect(html).toContain('data-settings-toggle');
+  });
+
+  it('suppresses the embedded settings panel when includeSettingsPanel: false', () => {
+    const html = renderRoomSelectorZone(props(
+      { hasZones: true, hasSmartZones: true },
+      { [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen'] }),
+        [`switch.${n}_edge_clean`]: st('on') },
+      { includeSettingsPanel: false },
+    ));
+    expect(html).not.toContain('data-settings-toggle');
+    // Room chips themselves must still render — only the settings panel is suppressed
+    expect(html).toContain('rpc-room-chip');
   });
 });
