@@ -396,7 +396,7 @@ export function renderHealthZone(
           <div class="rpc-bar-row" data-bar="retention" role="button" aria-expanded="${isOpen}" tabindex="0"
                aria-label="Bat. Health — ${retPct}%">
             <span class="rpc-bar-label">Bat. Health</span>
-            <span class="rpc-bar-track"><span class="rpc-bar-fill" style="width:${retPct}%;background:${colour}"></span></span>
+            <div class="rpc-bar-track"><div class="rpc-bar-fill" style="width:${retPct}%;background:${colour}"></div></div>
             <span class="rpc-bar-pct" style="color:${colour}">${retPct}%</span>
             <span class="rpc-bar-hours"></span>
           </div>
@@ -443,7 +443,7 @@ export function renderHealthZone(
             <div class="rpc-bar-row" data-bar="coverage" role="button" aria-expanded="${isOpen}" tabindex="0"
                  aria-label="Coverage ${covPct}% last mission">
               <span class="rpc-bar-label">Coverage</span>
-              <span class="rpc-bar-track"><span class="rpc-bar-fill" style="width:${covPct}%;background:${colour}"></span></span>
+              <div class="rpc-bar-track"><div class="rpc-bar-fill" style="width:${covPct}%;background:${colour}"></div></div>
               <span class="rpc-bar-pct" style="color:${colour}">${covPct}%</span>
               <span class="rpc-bar-hours">last mission</span>
             </div>

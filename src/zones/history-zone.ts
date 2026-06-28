@@ -22,14 +22,13 @@ export interface HistoryZoneState {
    *  via tap-to-select on the Map tab overlay. Undefined/omitted when this
    *  zone is rendered for the History tab (calendar) rather than Map tab. */
   mapSelectedRooms?: Set<string>;
-  /** v2.0: suppresses the internal Calendar/Coverage sub-tab toggle.
-   *  This zone is reused for BOTH the dedicated Map tab (forced
-   *  historyTab: 'coverage') and the History tab — in standalone mode
-   *  each top-level tab already IS one of these views, so the internal
-   *  toggle is redundant and, worse, lets a tap inside the "Map" tab
-   *  silently switch it to show the calendar. Only companion mode's
-   *  History tab (no separate Map tab exists there) needs this toggle. */
+  /** v2.0: suppresses the internal Calendar/Coverage sub-tab toggle. */
   suppressSubTabToggle?: boolean;
+  /** v2.0.2: when true (Map tab context), suppresses the history summary
+   *  header ("LAST 28 DAYS / completion rate") and the Stats/lifetime
+   *  footer — both belong to the History tab, not to a spatial map view.
+   *  The Map tab should show only: heatmap + legend + "Updated X ago". */
+  isMapContext?: boolean;
 }
 
 function formatArea(sqft: number, useMetric: boolean): string {
@@ -68,7 +67,7 @@ export function renderHistoryZone(
   const days = config.history_days ?? 28;
   const unit = config.area_unit ?? 'auto';
   const useMetric = unit === 'm2' || (unit === 'auto' && isMetric);
-  const { historyTab, hazards, mapSelectedRooms, suppressSubTabToggle } = state;
+  const { historyTab, hazards, mapSelectedRooms, suppressSubTabToggle, isMapContext } = state;
 
   // F11/F12: vacuum entity attributes — reflect the most recent mission.
   // last_cleaned_rooms is a live attribute; it is NOT per-mission historical data.
@@ -501,15 +500,15 @@ export function renderHistoryZone(
 
   return `
     <div class="rpc-zone rpc-zone6">
-      <div class="rpc-zone-header">LAST ${days} DAYS</div>
-      ${summaryHtml}
+      ${!isMapContext ? `<div class="rpc-zone-header">LAST ${days} DAYS</div>` : ''}
+      ${!isMapContext ? summaryHtml : ''}
       ${tabToggleHtml}
       <div class="rpc-heatmap-wrap" data-heatmap>
         ${historyTab === 'coverage' && caps.hasCoverageImage ? coveragePanelHtml : heatmapHtml}
       </div>
       ${problemHtml}
       ${popoverHtml}
-      ${lifetimeHtml}
+      ${!isMapContext ? lifetimeHtml : ''}
     </div>
   `;
 }

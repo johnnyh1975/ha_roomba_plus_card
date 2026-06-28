@@ -1112,7 +1112,8 @@ class RoombaPlusCard extends HTMLElement {
             lifetimeExpanded: this.lifetimeExpanded,
             historyTab: 'coverage', hazards: this.hazards,
             mapSelectedRooms: this.selectedRooms,
-            suppressSubTabToggle: true },
+            suppressSubTabToggle: true,
+            isMapContext: true },
           isMetric);
         break;
       case 'history':

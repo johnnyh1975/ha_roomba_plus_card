@@ -625,6 +625,41 @@ describe('renderHistoryZone() — F7 tab toggle', () => {
     });
   });
 
+  // ── v2.0.2: isMapContext — suppresses history-specific sections in Map tab ──
+  describe('v2.0.2 isMapContext', () => {
+    it('suppresses "LAST N DAYS" header in map context', () => {
+      const html = renderWithCoverage({}, { isMapContext: true });
+      expect(html).not.toContain('LAST 28 DAYS');
+    });
+
+    it('suppresses completion rate summary in map context', () => {
+      const html = render(
+        { [`sensor.${n}_completion_rate_30d`]: st('100') },
+        { isMapContext: true },
+      );
+      expect(html).not.toContain('completion rate');
+    });
+
+    it('suppresses Stats/lifetime footer in map context', () => {
+      const html = render({}, { isMapContext: true, lifetimeExpanded: false });
+      expect(html).not.toContain('rpc-lifetime-toggle');
+    });
+
+    it('shows "LAST N DAYS" header normally when isMapContext is false', () => {
+      const html = render({}, { isMapContext: false });
+      expect(html).toContain('LAST 28 DAYS');
+    });
+
+    it('shows Stats footer normally when isMapContext is false', () => {
+      // Need the lifetime_missions sensor to be present so lifetimeHtml is generated.
+      const html = render(
+        { [`sensor.${n}_lifetime_missions`]: st('425') },
+        { isMapContext: false },
+      );
+      expect(html).toContain('rpc-lifetime-toggle');
+    });
+  });
+
   it('calendar tab has active class by default', () => {
     const html = renderWithCoverage();
     // The calendar button should have 'active'; coverage should not

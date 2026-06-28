@@ -283,6 +283,25 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     expect(html).toMatch(/data-bar="retention"[\s\S]*?rpc-bar-hours/);
   });
 
+  // v2.0.2 bug fix: retention and coverage bars used <span> elements for
+  // rpc-bar-track / rpc-bar-fill. <span> is display:inline by default —
+  // the CSS rule height:100% on rpc-bar-fill has no effect on inline
+  // elements, so the green fill span had zero visible height and the bar
+  // appeared entirely gray regardless of the percentage value. Regular
+  // consumable bars correctly use <div>. Confirmed by screenshot: Battery
+  // bar showed gray at 100% while Filter/Brush showed green at ~83/95%.
+  it('retention bar fill uses <div>, not <span>, so height:100% works', () => {
+    const hass = makeHass({
+      [`sensor.${n}_battery_capacity_retention`]: st('100'),
+    });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+    });
+    // The fill must be a <div class="rpc-bar-fill">, not a <span>
+    expect(html).toContain('<div class="rpc-bar-fill"');
+    expect(html).not.toContain('<span class="rpc-bar-fill"');
+  });
+
   it('retention popover includes a "Mark as replaced" button wired to reset_battery', () => {
     const hass = makeHass({
       [`sensor.${n}_battery_capacity_retention`]: st('100'),
