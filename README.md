@@ -1,7 +1,7 @@
 # Roomba+ Card
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-2.0.2-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
+[![Version](https://img.shields.io/badge/version-2.0.4-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
 [![HACS installs](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johnnyh1975&repository=ha_roomba_plus_card&category=dashboard)
 
 The companion Lovelace card for the [`roomba_plus`](https://github.com/johnnyh1975/roomba_plus) Home Assistant integration. A persistent header shows live status and one-tap actions; four tabs — **Map**, **History**, **Health**, **⚙** — hold everything else, so the card only shows what's relevant to what you're checking right now.
