@@ -34,6 +34,11 @@ export interface HeaderProps {
    *  header button swaps from "Start full clean" / "Rooms…" to a single
    *  "Start selected rooms" action. */
   selectedRoomCount: number;
+  /** v2.1.0: entity ID of the currently displayed robot. In multi-robot mode
+   *  this differs from config.entity; the header must read state from the
+   *  active robot, not the configured default. Optional for back-compat —
+   *  falls back to config.entity when not supplied. */
+  activeRobot?: string;
 }
 
 function st(hass: HomeAssistant, entityId: string): string {
@@ -71,7 +76,9 @@ function ordinal(n: number): string {
 
 export function renderHeader(props: HeaderProps): string {
   const { hass, config, caps, robotName, loadingAction, todayMissionCount, roomPickerOpen, selectedRoomCount } = props;
-  const entityId = config.entity;
+  // v2.1.0 B1-class fix: read state from the active robot, not config.entity
+  // (which is always the first/default robot in multi-robot mode).
+  const entityId = props.activeRobot ?? config.entity;
   const vacState = (st(hass, entityId)) as VacuumState;
   const attrs = hass.states[entityId]?.attributes ?? {};
   const isMetric = hass.config?.unit_system?.length === 'm';
@@ -290,7 +297,62 @@ export function renderHeader(props: HeaderProps): string {
     }
   }
 
-  // ── v2.0: state-contextual buttons — max 2 (3 for Paused) ──
+  // ── v2.1.0 A1 — connectivity indicator ──────────────────────────────────
+  // Visible only when degraded: cloud disconnected OR MQTT stale. Invisible in
+  // the normal connected state (no chrome for the happy path).
+  // Verified against integration v3.0.0: both are binary_sensors.
+  //   binary_sensor.*_cloud_connected — ON = connected (CONNECTIVITY class)
+  //   binary_sensor.*_mqtt_stale       — ON = stale/problem (PROBLEM class)
+  let connectivityHtml = '';
+  if (caps.hasConnectivity) {
+    const cloudConnected = hass.states[`binary_sensor.${n}_cloud_connected`]?.state;
+    const mqttStale      = hass.states[`binary_sensor.${n}_mqtt_stale`]?.state;
+    const cloudDown = cloudConnected === 'off';
+    const mqttDown  = mqttStale === 'on';
+    if (cloudDown || mqttDown) {
+      const label = mqttDown ? 'Robot offline' : 'Cloud offline';
+      connectivityHtml = `<span class="rpc-connectivity rpc-connectivity-degraded" title="${esc(label)}">☁ ${esc(label)}</span>`;
+    }
+  }
+
+  // ── v2.1.0 A2 — firmware badge ──────────────────────────────────────────
+  // Shown briefly after a firmware change: the integration exposes the version
+  // string; we surface it for 24h after the entity's last_changed, then hide.
+  let firmwareHtml = '';
+  if (caps.hasFirmware) {
+    const fw = hass.states[`sensor.${n}_firmware_version`];
+    const ver = fw?.state;
+    if (ver && ver !== 'unavailable' && ver !== 'unknown') {
+      const changed = fw?.last_changed ? new Date(fw.last_changed).getTime() : 0;
+      const within24h = changed > 0 && (Date.now() - changed) < 24 * 60 * 60 * 1000;
+      if (within24h) {
+        firmwareHtml = `<span class="rpc-firmware-badge" title="Firmware updated">⬆ FW ${esc(ver)}</span>`;
+      }
+    }
+  }
+
+  // ── v2.1.0 A4 — current-room line (active mission) ───────────────────────
+  // Verified against integration v3.0.0: the room is the device_tracker's
+  // STATE (location_name), not an attribute. The state is always non-null —
+  // it returns a localized "Docked" label (en: "Docked", de: "Angedockt")
+  // when not cleaning and a localized active-fallback label (en: "Cleaning",
+  // de: "Unterwegs") when cleaning but the room is unknown. We render only a
+  // real room name, filtering those four sentinel labels.
+  //
+  // On SMART robots this delegates to the SAME resolver as mission_progress's
+  // current_room, which spatialLineHtml already shows — so we suppress A4 when
+  // the spatial line already rendered a room, to avoid a duplicate line.
+  let currentRoomHtml = '';
+  const A4_SENTINELS = new Set(['Docked', 'Angedockt', 'Cleaning', 'Unterwegs', 'unknown', 'unavailable']);
+  const spatialAlreadyShowsRoom = spatialLineHtml !== '';
+  if (caps.hasPositionTracker && !spatialAlreadyShowsRoom &&
+      (vacState === 'cleaning' || (hasMissionActive && isMissionActive))) {
+    const room = hass.states[`device_tracker.${n}_position`]?.state;
+    if (room && !A4_SENTINELS.has(room)) {
+      currentRoomHtml = `<div class="rpc-current-room">📍 ${esc(room)}</div>`;
+    }
+  }
+
   const spinnerSvg = `<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>`;
 
   const btn = (action: string, label: string, display: string): string => {
@@ -348,6 +410,8 @@ export function renderHeader(props: HeaderProps): string {
       <div class="rpc-robot-identity">
         <span class="rpc-robot-icon">${robotIcon}</span>
         <span class="rpc-robot-name">${friendlyName}</span>
+        ${firmwareHtml}
+        ${connectivityHtml}
       </div>
       <div class="rpc-state-row">
         <span class="rpc-state-dot rpc-state-${vacState}">${stateDot}</span>
@@ -357,6 +421,7 @@ export function renderHeader(props: HeaderProps): string {
       ${errorHtml}
       ${progressHtml}
       ${spatialLineHtml}
+      ${currentRoomHtml}
       ${rechargeLineHtml}
       ${metricsHtml}
       ${dockedHtml}

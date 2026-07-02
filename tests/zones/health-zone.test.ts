@@ -12,7 +12,7 @@ function render(
 ) {
   const healthState: HealthZoneState = {
     openPopover: null, resetting: null, resetError: null, legendShown: false,
-    healthDetailsExpanded: false, openMaintPopover: null,
+    healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     ...stateOpts,
   };
   return renderHealthZone(makeHass(states), baseConfig, caps, n, healthState);
@@ -573,7 +573,7 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
 describe('renderHealthZone() — F14 energy row', () => {
   const baseHealthState: HealthZoneState = {
     openPopover: null, resetting: null, resetError: null, legendShown: false,
-    healthDetailsExpanded: false, openMaintPopover: null,
+    healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
   };
 
   it('energy row renders when hasEnergyConsumption and entity present', () => {
@@ -717,30 +717,124 @@ describe('renderHealthZone() — v2.0 C2-MAINT maintenance calendar', () => {
 });
 
 // ── v2.0 C5-ANOMALY: mission anomaly banner ──────────────────────────────────
-// CONFIRMED INTEGRATION GAP: last_mission_result has no extra_state_attributes
-// at all in integration v2.8.6 — these tests document the intended behaviour
-// once the integration ships consecutive_anomalous (L3-FIX). They construct
-// the attribute directly since no current integration version produces it.
-describe('renderHealthZone() — v2.0 C5-ANOMALY banner (blocked on integration L3-FIX)', () => {
-  it('shows banner when consecutive_anomalous >= 2', () => {
+// Active against integration 3.0.0: dedicated sensor
+// `sensor.*_consecutive_mission_anomalies` whose STATE is the count. Threshold
+// ≥3 per the integration author's intent. Sensor is disabled-by-default, so the
+// entity may be absent — that yields no banner.
+describe('renderHealthZone() — C5-ANOMALY banner (integration 3.0.0)', () => {
+  it('shows banner when consecutive count >= 3', () => {
     const html = render({
-      [`sensor.${n}_last_mission_result`]: st('completed', { consecutive_anomalous: 2 }),
+      [`sensor.${n}_consecutive_mission_anomalies`]: st('3'),
     });
     expect(html).toContain('rpc-anomaly-banner');
-    expect(html).toContain('Last 2 missions were anomalous');
+    expect(html).toContain('Last 3 missions were anomalous');
   });
 
-  it('does not show banner when consecutive_anomalous is 1', () => {
+  it('shows banner with the actual count (e.g. 5)', () => {
     const html = render({
-      [`sensor.${n}_last_mission_result`]: st('completed', { consecutive_anomalous: 1 }),
+      [`sensor.${n}_consecutive_mission_anomalies`]: st('5'),
+    });
+    expect(html).toContain('Last 5 missions were anomalous');
+  });
+
+  it('does not show banner at count 2 (coincidence, below threshold)', () => {
+    const html = render({
+      [`sensor.${n}_consecutive_mission_anomalies`]: st('2'),
     });
     expect(html).not.toContain('rpc-anomaly-banner');
   });
 
-  it('does not show banner when attribute is absent (current integration reality)', () => {
+  it('does not show banner when the sensor is absent (disabled by default)', () => {
     const html = render({
       [`sensor.${n}_last_mission_result`]: st('completed'),
     });
     expect(html).not.toContain('rpc-anomaly-banner');
+  });
+
+  it('does not show banner for a non-numeric state (unavailable/unknown)', () => {
+    const html = render({
+      [`sensor.${n}_consecutive_mission_anomalies`]: st('unavailable'),
+    });
+    expect(html).not.toContain('rpc-anomaly-banner');
+  });
+});
+
+// ── A1 (v2.1.0): navigation health detail ────────────────────────────────────
+describe('renderHealthZone() — A1 navigation health', () => {
+  const navState: HealthZoneState = {
+    openPopover: null, resetting: null, resetError: null, legendShown: false,
+    healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
+  };
+  const navCaps = { ...defaultCaps, hasNavStats: true };
+
+  function renderNav(states: Record<string, ReturnType<typeof st>>, stateOpts: Partial<HealthZoneState> = {}) {
+    return renderHealthZone(makeHass(states), baseConfig, navCaps, n, { ...navState, ...stateOpts });
+  }
+
+  it('absent when hasNavStats is false', () => {
+    const html = renderHealthZone(
+      makeHass({ [`sensor.${n}_nav_panics`]: st('3') }),
+      baseConfig, defaultCaps, n, navState,
+    );
+    expect(html).not.toContain('rpc-nav-health');
+  });
+
+  it('shows the navigation score with ampel colour', () => {
+    const html = renderNav({
+      [`sensor.${n}_nav_quality`]: st('85'),
+      [`sensor.${n}_nav_panics`]: st('0'),
+    });
+    expect(html).toContain('rpc-nav-health');
+    expect(html).toContain('NAVIGATION');
+    expect(html).toContain('85');
+    expect(html).toContain('--rpc-green'); // 85 → good
+  });
+
+  it('factors are hidden when collapsed', () => {
+    const html = renderNav({
+      [`sensor.${n}_nav_quality`]: st('85'),
+      [`sensor.${n}_nav_panics`]: st('4'),
+    }, { navDetailsExpanded: false });
+    expect(html).not.toContain('rpc-nav-factors');
+    expect(html).toContain('Details ▼');
+  });
+
+  it('factors are shown when expanded (panics, landmark quality, good landmarks)', () => {
+    const html = renderNav({
+      [`sensor.${n}_nav_quality`]: st('55'),
+      [`sensor.${n}_nav_panics`]: st('4'),
+      [`sensor.${n}_nav_landmark_quality`]: st('72'),
+      [`sensor.${n}_nav_good_landmarks`]: st('11'),
+    }, { navDetailsExpanded: true });
+    expect(html).toContain('rpc-nav-factors');
+    expect(html).toContain('Panic events');
+    expect(html).toContain('Landmark quality');
+    expect(html).toContain('Good landmarks');
+    expect(html).toContain('--rpc-red'); // 55 → needs attention
+  });
+
+  it('does NOT render nav_orientations (deliberately omitted)', () => {
+    const html = renderNav({
+      [`sensor.${n}_nav_quality`]: st('85'),
+      [`sensor.${n}_nav_panics`]: st('1'),
+    }, { navDetailsExpanded: true });
+    expect(html).not.toContain('rientation');
+  });
+
+  it('omits a factor whose sensor is unavailable', () => {
+    const html = renderNav({
+      [`sensor.${n}_nav_panics`]: st('2'),
+      [`sensor.${n}_nav_landmark_quality`]: st('unavailable'),
+    }, { navDetailsExpanded: true });
+    expect(html).toContain('Panic events');
+    expect(html).not.toContain('Landmark quality');
+  });
+
+  it('shows — for the score when nav_quality is unavailable but factors exist', () => {
+    const html = renderNav({
+      [`sensor.${n}_nav_panics`]: st('3'),
+    });
+    expect(html).toContain('rpc-nav-health');
+    expect(html).toContain('rpc-nav-score--na');
   });
 });

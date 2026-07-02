@@ -177,3 +177,162 @@ describe('renderHeader() — v2.0 recharge-aware line', () => {
     expect(html).not.toContain('rpc-recharge-line');
   });
 });
+
+// ── v2.1.0 A1 — connectivity indicator ──────────────────────────────────────
+describe('renderHeader() — A1 connectivity indicator', () => {
+  const caps = { ...defaultCaps, hasConnectivity: true };
+
+  it('hidden when cloud connected and MQTT fresh', () => {
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      'binary_sensor.roomba_cloud_connected': st('on'),
+      'binary_sensor.roomba_mqtt_stale': st('off'),
+    }, { caps });
+    expect(html).not.toContain('rpc-connectivity-degraded');
+  });
+
+  it('shows Cloud offline when cloud disconnected', () => {
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      'binary_sensor.roomba_cloud_connected': st('off'),
+      'binary_sensor.roomba_mqtt_stale': st('off'),
+    }, { caps });
+    expect(html).toContain('rpc-connectivity-degraded');
+    expect(html).toContain('Cloud offline');
+  });
+
+  it('shows Robot offline when MQTT stale (takes priority over cloud label)', () => {
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      'binary_sensor.roomba_cloud_connected': st('off'),
+      'binary_sensor.roomba_mqtt_stale': st('on'),
+    }, { caps });
+    expect(html).toContain('Robot offline');
+  });
+
+  it('absent entirely when hasConnectivity is false', () => {
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      'binary_sensor.roomba_cloud_connected': st('off'),
+    }, { caps: defaultCaps });
+    expect(html).not.toContain('rpc-connectivity');
+  });
+});
+
+// ── v2.1.0 A2 — firmware badge ───────────────────────────────────────────────
+describe('renderHeader() — A2 firmware badge', () => {
+  const caps = { ...defaultCaps, hasFirmware: true };
+
+  it('shows badge when firmware changed within 24h', () => {
+    const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h ago
+    const fw = { ...st('22.52.10'), last_changed: recent };
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      'sensor.roomba_firmware_version': fw,
+    }, { caps });
+    expect(html).toContain('rpc-firmware-badge');
+    expect(html).toContain('22.52.10');
+  });
+
+  it('hides badge when firmware change older than 24h', () => {
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const fw = { ...st('22.52.10'), last_changed: old };
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      'sensor.roomba_firmware_version': fw,
+    }, { caps });
+    expect(html).not.toContain('rpc-firmware-badge');
+  });
+
+  it('hides badge when version unavailable', () => {
+    const fw = { ...st('unavailable'), last_changed: new Date().toISOString() };
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      'sensor.roomba_firmware_version': fw,
+    }, { caps });
+    expect(html).not.toContain('rpc-firmware-badge');
+  });
+});
+
+// ── v2.1.0 A4 — current-room line ────────────────────────────────────────────
+describe('renderHeader() — A4 current-room line', () => {
+  // hasPositionTracker on, mission-progress sensor OFF so spatialLine doesn't
+  // pre-empt A4 (on SMART the two share a resolver; A4 suppresses when spatial
+  // already shows a room).
+  const caps = { ...defaultCaps, hasPositionTracker: true };
+
+  it('shows room name (device_tracker state) during cleaning', () => {
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      'device_tracker.roomba_position': st('Kitchen'),
+    }, { caps });
+    expect(html).toContain('rpc-current-room');
+    expect(html).toContain('Kitchen');
+  });
+
+  it('hidden when docked (no active mission)', () => {
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      'device_tracker.roomba_position': st('Docked'),
+    }, { caps });
+    expect(html).not.toContain('rpc-current-room');
+  });
+
+  it('hidden when state is the localized Docked sentinel', () => {
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      'device_tracker.roomba_position': st('Docked'),
+    }, { caps });
+    expect(html).not.toContain('rpc-current-room');
+  });
+
+  it('hidden when state is the active-fallback sentinel (Cleaning/Unterwegs)', () => {
+    const htmlEn = render({
+      'vacuum.roomba': st('cleaning'),
+      'device_tracker.roomba_position': st('Cleaning'),
+    }, { caps });
+    expect(htmlEn).not.toContain('rpc-current-room');
+    const htmlDe = render({
+      'vacuum.roomba': st('cleaning'),
+      'device_tracker.roomba_position': st('Unterwegs'),
+    }, { caps });
+    expect(htmlDe).not.toContain('rpc-current-room');
+  });
+
+  it('suppressed when spatial line already shows the room (SMART)', () => {
+    const smartCaps = { ...caps, hasMissionProgressSensor: true };
+    const mp = { ...st('42'), attributes: { current_room: 'Kitchen' } };
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      'sensor.roomba_mission_progress': mp,
+      'device_tracker.roomba_position': st('Kitchen'),
+    }, { caps: smartCaps });
+    // Spatial line shows Kitchen; A4 must not add a duplicate current-room line.
+    expect(html).not.toContain('rpc-current-room');
+  });
+
+  it('absent when hasPositionTracker false', () => {
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      'device_tracker.roomba_position': st('Kitchen'),
+    }, { caps: defaultCaps });
+    expect(html).not.toContain('rpc-current-room');
+  });
+});
+
+// ── v2.1.0 — header reads active robot, not config.entity ────────────────────
+describe('renderHeader() — multi-robot active entity', () => {
+  it('reads state from activeRobot when provided', () => {
+    const html = render(
+      {
+        'vacuum.roomba': st('docked'),
+        'vacuum.roomba_upstairs': st('cleaning'),
+      },
+      { activeRobot: 'vacuum.roomba_upstairs', robotName: 'roomba_upstairs' },
+    );
+    // Active robot is cleaning → Pause button present; if it read config.entity
+    // (docked) it would show Start instead.
+    expect(html).toContain('Pause');
+    expect(html).not.toContain('Start full clean');
+  });
+});

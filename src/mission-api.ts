@@ -39,6 +39,12 @@ export class MissionApiClient {
     return resp.json();
   }
 
+  /** v2.1.0 A5: public accessor for the resolved config_entry_id, used by the
+   *  card to filter roomba_plus_mission_completed events to this robot. */
+  async getEntryId(): Promise<string> {
+    return this.resolveEntryId();
+  }
+
   private async resolveEntryId(): Promise<string> {
     if (this.entryId) return this.entryId;
     const result = await this.hass.callWS({

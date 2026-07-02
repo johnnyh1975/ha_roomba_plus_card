@@ -103,6 +103,12 @@ export interface RobotCapabilities {
    *  draft (robot_health) against v2.8.6 source. Distinct from the unrelated
    *  sensor.*_integration_health (INTEG-HEALTH) — never conflate the two. */
   hasRobotHealthScore: boolean;
+  /** A1 (v2.1.0) — navigation diagnostic detail. True when the detail nav
+   *  sensors are present (nav_panics or nav_landmark_quality). These are
+   *  DIAGNOSTIC + disabled-by-default in the integration, so absent unless the
+   *  user enabled them. nav_quality alone does NOT set this — it's already used
+   *  for the alert banner and a score-only view adds nothing. */
+  hasNavStats: boolean;
   /** Any of sensor.*_wheel_last_cleaned / _contact_last_cleaned /
    *  _bin_last_cleaned present (IA74-MAINT, v2.7.0). */
   hasMaintenanceCalendar: boolean;
@@ -112,11 +118,23 @@ export interface RobotCapabilities {
   /** Non-empty `rooms` dict on image.*_coverage_map. NOT a confidence
    *  threshold check — the integration only populates `rooms` once its own
    *  internal alignment confidence is ≥ 0.70, so presence alone is sufficient.
-   *  No `alignment_confidence` attribute exists anywhere to read instead. */
+   *  (The image entity carries no alignment_confidence attribute; that figure
+   *  lives on cloud-source mission records instead — see MissionRecord. */
   hasAlignment: boolean;
   /** button.*_fav_* (any present) — FAVORITES, fully shipped in the
    *  integration but with no home in the card before v2.0. */
   hasFavorites: boolean;
+
+  // ── v2.1.0 — header indicators (integration v2.8.x) ───────────────────────
+  /** binary_sensor.*_cloud_connected and/or sensor.*_mqtt_stale present.
+   *  A1: gates the "☁ Offline" connectivity indicator. Either entity being
+   *  present is enough to attempt the indicator; display logic reads both. */
+  hasConnectivity: boolean;
+  /** sensor.*_firmware_version present. A2: gates the firmware badge. */
+  hasFirmware: boolean;
+  /** device_tracker.*_position present (carries room_estimate attribute).
+   *  A4: gates the current-room header line during active SMART missions. */
+  hasPositionTracker: boolean;
 }
 
 /** Per-mission record from GET …/mission_history?format=records (integration ≥ v2.0) */
@@ -223,6 +241,15 @@ export interface HomeAssistant {
   fetchWithAuth(url: string, init?: RequestInit): Promise<Response>;
   language: string;
   config: { unit_system: { length: string } };
+  /** v2.1.0 A5: WebSocket connection for event subscriptions. Optional —
+   *  absent in some test harnesses and very old HA frontends; the card falls
+   *  back to the mission_active state-transition trigger when missing. */
+  connection?: {
+    subscribeMessage<T>(
+      callback: (message: T) => void,
+      subscribeMessage: { type: string; event_type?: string },
+    ): Promise<() => Promise<void>>;
+  };
 }
 
 export interface HAState {

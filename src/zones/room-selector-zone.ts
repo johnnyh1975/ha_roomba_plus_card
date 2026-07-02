@@ -39,7 +39,7 @@ export { CHIP_TO_OPTION, OPTION_TO_CHIP };
 
 /**
  * F3b: Render the settings panel (edge clean, always finish, carpet boost).
- * Exported so status-zone can render it when show_rooms:false + show_settings:true.
+ * Exported so the ⚙ Settings tab (header.ts / main card) can render it.
  * Returns '' when no settings entities exist or show_settings is explicitly false.
  */
 export function renderSettingsPanel(

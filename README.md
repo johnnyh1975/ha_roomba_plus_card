@@ -1,7 +1,7 @@
 # Roomba+ Card
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-2.0.4-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
+[![Version](https://img.shields.io/badge/version-2.0-blue.svg)](https://github.com/johnnyh1975/ha_roomba_plus_card/releases)
 [![HACS installs](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johnnyh1975&repository=ha_roomba_plus_card&category=dashboard)
 
 The companion Lovelace card for the [`roomba_plus`](https://github.com/johnnyh1975/roomba_plus) Home Assistant integration. A persistent header shows live status and one-tap actions; four tabs — **Map**, **History**, **Health**, **⚙** — hold everything else, so the card only shows what's relevant to what you're checking right now.
@@ -48,7 +48,7 @@ That's it. The card auto-discovers all companion sensors and adapts to your robo
 
 ## Layout
 
-**Persistent header** — always visible, regardless of which tab is open. Shows live state (Docked / Cleaning / Paused / Error / Recharging) and at most two action buttons (three while Paused) — never a static row of every possible action. While cleaning on a SMART robot, the current room and percentage complete appear inline. Tapping **Rooms…** expands a chip-based room picker beneath the header; selecting any rooms swaps the header's action button to **Start N selected rooms**.
+**Persistent header** — always visible, regardless of which tab is open. Shows live state (Docked / Cleaning / Paused / Error / Recharging) and at most two action buttons (three while Paused) — never a static row of every possible action. While cleaning on a SMART robot, the current room and percentage complete appear inline. Tapping **Rooms…** expands a chip-based room picker beneath the header; selecting any rooms swaps the header's action button to **Start N selected rooms**. A small connectivity badge (☁ Robot/Cloud offline) appears beside the robot name only when the cloud or local MQTT link is degraded, and a firmware badge (⬆ FW) appears for 24 hours after a firmware change.
 
 **Map tab** *(SMART and EPHEMERAL robots, standalone mode only)* — the GridStore coverage heatmap with hazard pins (stuck spots, robot-learned obstacles, keep-out zones). On SMART robots with a calibrated map, room boundaries overlay the heatmap — tap a room to select it for a targeted clean, sharing the same selection as the header's room picker. Room labels show the area too when available (e.g. "Kitchen / 20.0 m²", integration ≥ 2.9.1) — and just the name when it isn't, with no error either way. EPHEMERAL robots (e.g. the 980) get the heatmap and hazard pins without named room boundaries, plus an automatically-sharpening floor outline once a few missions have run.
 
@@ -56,7 +56,7 @@ That's it. The card auto-discovers all companion sensors and adapts to your robo
 
 **Health tab** — a single 0–100 robot health score (when the integration supports it) with a colour band, collapsed by default; tap **Show details** for the individual filter/brush/battery/tank bars underneath. A wheel/contact/bin maintenance calendar sits below that. The tab icon gets a small badge dot whenever the score drops below 60, a maintenance sensor is over 90 days old, or any of the existing alert conditions (filter/brush wear, navigation quality, consecutive skipped cleans) are active.
 
-**⚙ tab** — schedule + presence intelligence, the settings panel (edge clean / always finish / carpet boost), room targeting (standalone mode), and maintenance service-call references for Developer Tools.
+**⚙ tab** — schedule + presence intelligence, the settings panel (edge clean / always finish / carpet boost), room targeting (standalone mode), your iRobot-app favourite routines as one-tap buttons (auto-discovered; best with integration ≥ 3.0.0), and maintenance service-call references for Developer Tools.
 
 **History tab badge** — lights up specifically for a WiFi signal dead-zone detected during the last mission; this is intentionally narrower than the Health badge so a connectivity issue doesn't get buried among performance alerts.
 
@@ -219,6 +219,10 @@ show_history: true
 # lives in the ⚙ tab, independent of room-targeting capability.
 # show_settings: true   # deprecated v2.0 — use mode: companion instead
 
+# Favourites: no option needed. iRobot-app favourite routines are
+# auto-discovered and shown as one-tap buttons in the ⚙ tab.
+# (Best with integration ≥ 3.0.0 — see Known limitations.)
+
 # History
 history_days: 28        # 7 | 14 | 28
 show_lifetime: true     # collapsible lifetime stats footer
@@ -289,6 +293,10 @@ Features that say "cloud" require iRobot cloud credentials configured in the int
 
 **Door markers and zone overlays on EPHEMERAL robots** — Not yet available. The integration detects zone divisions for EPHEMERAL robots internally but doesn't currently expose them in a form the card can draw. This is on the integration's roadmap; the card's overlay mechanism (already used for SMART room boundaries) will support it without any card-side changes once the integration adds it.
 
+**Favourites depend on the default entity-id naming** — Favourite buttons are discovered by their entity-id pattern (`button.<robot>_fav_<id>`). This is the same assumption the card already makes for every other robot entity (passes, repeat-mission, etc.), so renaming your vacuum entity's slug by hand would hide favourites along with those other controls. With integration ≥ 3.0.0 the default naming is stable and locale-independent; on older integrations the entity-ids derive from the user-chosen routine name and may not be discovered at all.
+
+**The anomaly banner and navigation health need their sensors enabled** — Both the mission-anomaly banner and the navigation-health panel read sensors the integration ships **disabled by default** (`consecutive_mission_anomalies` for the banner; `nav_panics` / `nav_landmark_quality` / `nav_good_landmarks` for navigation health, all integration ≥ 3.0.0). Until you enable them in Home Assistant (Settings → Devices → your robot → the disabled entities), the card simply shows nothing in those spots — that's expected, not a fault. The anomaly banner additionally only appears once three consecutive missions have been flagged anomalous (two can be coincidence; three are a pattern).
+
 ---
 
 ## Development
@@ -296,7 +304,7 @@ Features that say "cloud" require iRobot cloud credentials configured in the int
 ```bash
 npm install
 npm run build   # → dist/roomba-plus-card.js
-npm test        # 439 tests
+npm test        # 500 tests
 ```
 
 ---

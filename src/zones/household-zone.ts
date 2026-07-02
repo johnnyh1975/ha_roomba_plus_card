@@ -15,7 +15,7 @@ export function renderHouseholdZone(
 ): string {
   if ((config.entities?.length ?? 0) < 2 || !data) return '';
 
-  const unit       = (config as Record<string, unknown>).area_unit as string ?? 'auto';
+  const unit       = config.area_unit ?? 'auto';
   const useMetric  = unit === 'm2' || (unit === 'auto' && isMetric);
 
   function fmtArea(sqft: number | null): string {

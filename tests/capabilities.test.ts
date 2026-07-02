@@ -222,4 +222,17 @@ describe('detectCapabilities() — v1.6 entity flags', () => {
     const hass = makeHass({ [`sensor.${n}_optimal_clean_window`]: st('2026-06-12T10:30:00Z') });
     expect(detectCapabilities(hass, n, baseConfig, null).hasOptimalWindow).toBe(true);
   });
+
+  // A1 (v2.1.0) — navigation health detail
+  it('hasNavStats false when no detail nav sensors present', () =>
+    expect(detectCapabilities(makeHass(), n, baseConfig).hasNavStats).toBe(false));
+
+  it('hasNavStats false when only nav_quality present (used for alert, not the detail)', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_nav_quality`]: st('85') }), n, baseConfig).hasNavStats).toBe(false));
+
+  it('hasNavStats true when nav_panics present', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_nav_panics`]: st('3') }), n, baseConfig).hasNavStats).toBe(true));
+
+  it('hasNavStats true when nav_landmark_quality present', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_nav_landmark_quality`]: st('72') }), n, baseConfig).hasNavStats).toBe(true));
 });

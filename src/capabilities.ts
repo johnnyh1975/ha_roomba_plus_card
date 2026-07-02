@@ -71,12 +71,14 @@ export function detectCapabilities(
 
     // ── v2.0 — integration v2.7.0–v2.8.6 ─────────────────────────────────────
     hasRobotHealthScore:    e('robot_health_score'),
+    hasNavStats:            e('nav_panics') || e('nav_landmark_quality'),
     hasMaintenanceCalendar: e('wheel_last_cleaned') || e('contact_last_cleaned') || e('bin_last_cleaned'),
     hasMissionProgressSensor: e('mission_progress'),
     // hasAlignment: non-empty `rooms` dict on image.*_coverage_map. The
     // integration only populates this once its own internal alignment
     // confidence is >= 0.70 — no threshold check needed here, presence alone
-    // is sufficient. No `alignment_confidence` attribute exists to read.
+    // is sufficient. (The image entity has no alignment_confidence attribute;
+    // that value is carried on cloud-source mission records — see history-zone.)
     hasAlignment: (() => {
       const rooms = hass.states[`image.${name}_coverage_map`]?.attributes?.rooms;
       return !!rooms && typeof rooms === 'object' && Object.keys(rooms).length > 0;
@@ -85,5 +87,16 @@ export function detectCapabilities(
     // arbitrary per-user iRobot routine identifiers, so this scans all
     // entity_ids for the prefix rather than checking a single fixed key.
     hasFavorites: Object.keys(hass.states).some(id => id.startsWith(`button.${name}_fav_`)),
+
+    // ── v2.1.0 — header indicators ───────────────────────────────────────────
+    // A1: connectivity. Both are binary_sensors (verified vs integration
+    // v3.0.0). Either present is enough to surface the indicator; the header
+    // reads both states to decide visibility.
+    hasConnectivity: b('cloud_connected') || b('mqtt_stale'),
+    // A2: firmware badge.
+    hasFirmware: e('firmware_version'),
+    // A4: position tracker carrying room_estimate (SMART). device_tracker
+    // domain, so checked directly rather than via the sensor helper.
+    hasPositionTracker: !!hass.states[`device_tracker.${name}_position`],
   };
 }

@@ -27,6 +27,8 @@ export interface HealthZoneState {
   healthDetailsExpanded: boolean;
   /** v2.0 C2-MAINT: which maintenance calendar row's info popover is open. */
   openMaintPopover: string | null;
+  /** A1 (v2.1.0): navigation health detail expanded. Session-only. */
+  navDetailsExpanded: boolean;
 }
 
 function pct(remaining: number, threshold: number): number {
@@ -139,19 +141,23 @@ function renderHealthScore(
 
 // ── v2.0 C5-ANOMALY — mission anomaly banner ─────────────────────────────────
 //
-// CONFIRMED INTEGRATION GAP (v2.8.6 source audit): last_mission_result has
-// NO extra_state_attributes at all — neither `anomalous` nor
-// `consecutive_anomalous` is exposed on any sensor. MissionStore's
-// consecutive_anomalous property exists only internally, consumed
-// exclusively by robot_health_score's own Signal 4 computation. This
-// feature is BLOCKED until the integration adds these attributes (L3-FIX,
-// flagged for integration v3.0). The function below is written against
-// the planned shape so it activates automatically once the attributes
-// ship — it does not need to be revisited, only the integration does.
+// Activated against integration 3.0.0: a dedicated sensor
+// `sensor.*_consecutive_mission_anomalies` exposes MissionStore's internal
+// `consecutive_anomalous` count as its STATE (a MEASUREMENT number), not as an
+// attribute on last_mission_result (the old, never-shipped shape this code
+// previously assumed).
+//
+// Threshold is ≥3, per the integration author's explicit intent ("two
+// consecutive anomalies can be coincidence; three are a pattern").
+//
+// Caveat: the sensor is entity_registry_enabled_default=False — disabled until
+// the user enables it. When disabled the entity is absent and this returns ''
+// (no banner), which is the correct graceful behaviour.
 function renderAnomalyBanner(hass: HomeAssistant, n: string): string {
-  const entity = hass.states[`sensor.${n}_last_mission_result`];
-  const consecutive = entity?.attributes?.consecutive_anomalous;
-  if (typeof consecutive !== 'number' || consecutive < 2) return '';
+  const entity = hass.states[`sensor.${n}_consecutive_mission_anomalies`];
+  if (!entity) return '';
+  const consecutive = Number(entity.state);
+  if (!Number.isFinite(consecutive) || consecutive < 3) return '';
 
   return `
     <div class="rpc-anomaly-banner" role="alert">
@@ -160,9 +166,78 @@ function renderAnomalyBanner(hass: HomeAssistant, n: string): string {
   `;
 }
 
-// ── v2.0 C2-MAINT — maintenance calendar ─────────────────────────────────────
+// ── A1 (v2.1.0) — Navigation health detail ───────────────────────────────────
 //
-// Three TIMESTAMP sensors from IA74-MAINT (integration v2.7.0).
+// Verified against integration 3.0.0. All five nav_* sensors are DIAGNOSTIC and
+// disabled-by-default, so this whole element is absent unless the user enables
+// them (gated on caps.hasNavStats = nav_panics OR nav_landmark_quality present).
+//
+// Design (signed off): the nav_quality score gets the same 0-100 ampel as the
+// robot health score (it shares the 80/60 thresholds). The contributing factors
+// — panics, landmark quality, good landmarks — are shown as honest labelled raw
+// values, NOT graded ampels, because the good/bad thresholds for aMtrack etc.
+// are not reliably known. nav_orientations is deliberately omitted (a counter
+// with no actionable user interpretation). Collapsed by default.
+function renderNavHealth(
+  hass: HomeAssistant,
+  caps: RobotCapabilities,
+  n: string,
+  expanded: boolean,
+): string {
+  if (!caps.hasNavStats) return '';
+
+  const numOrNull = (key: string): number | null => {
+    const e = hass.states[`sensor.${n}_${key}`];
+    if (!e || e.state === 'unknown' || e.state === 'unavailable') return null;
+    const v = Number(e.state);
+    return Number.isFinite(v) ? v : null;
+  };
+
+  const score     = numOrNull('nav_quality');
+  const panics    = numOrNull('nav_panics');
+  const landmarkQ = numOrNull('nav_landmark_quality');
+  const goodLmks  = numOrNull('nav_good_landmarks');
+
+  // If nothing resolved (all unavailable), render nothing.
+  if (score === null && panics === null && landmarkQ === null && goodLmks === null) return '';
+
+  const scoreHtml = score !== null
+    ? `<span class="rpc-nav-score-value" style="color:${healthScoreColour(score)}">${Math.round(score)}</span><span class="rpc-nav-score-max">/100</span>`
+    : `<span class="rpc-nav-score-value rpc-nav-score--na">—</span>`;
+
+  const factors: string[] = [];
+  if (panics !== null) {
+    factors.push(`<div class="rpc-nav-factor" title="How often navigation failed and the robot had to recover">
+        <span class="rpc-nav-factor-label">Panic events</span>
+        <span class="rpc-nav-factor-value">${panics}</span>
+      </div>`);
+  }
+  if (landmarkQ !== null) {
+    factors.push(`<div class="rpc-nav-factor" title="Match-tracking quality of visual landmarks (higher is better)">
+        <span class="rpc-nav-factor-label">Landmark quality</span>
+        <span class="rpc-nav-factor-value">${landmarkQ}</span>
+      </div>`);
+  }
+  if (goodLmks !== null) {
+    factors.push(`<div class="rpc-nav-factor" title="Number of reliable visual landmarks the robot is tracking">
+        <span class="rpc-nav-factor-label">Good landmarks</span>
+        <span class="rpc-nav-factor-value">${goodLmks}</span>
+      </div>`);
+  }
+
+  return `
+    <div class="rpc-nav-health">
+      <div class="rpc-nav-header">
+        <span class="rpc-nav-label">NAVIGATION</span>
+        <span class="rpc-nav-score">${scoreHtml}</span>
+        <button class="rpc-nav-toggle" data-nav-details-toggle aria-expanded="${expanded}">
+          ${expanded ? 'Hide ▲' : 'Details ▼'}
+        </button>
+      </div>
+      ${expanded && factors.length > 0 ? `<div class="rpc-nav-factors">${factors.join('')}</div>` : ''}
+    </div>
+  `;
+}
 // "Never recorded" when a sensor is unavailable (no reset_* service call
 // yet) — distinct from the entity being entirely absent (which is handled
 // by hasMaintenanceCalendar gating the whole section).
@@ -314,6 +389,10 @@ export function renderHealthZone(
   // the early-return guard below — it's independent of bars/score/maintenance.
   const anomalyHtml = renderAnomalyBanner(hass, n);
 
+  // A1 (v2.1.0): navigation health detail — independent of bars/score, like the
+  // anomaly banner. Must be accounted for in the empty-tab guard below.
+  const navHealthHtml = renderNavHealth(hass, caps, n, state.navDetailsExpanded);
+
   // v2.0: do NOT early-return when bars are empty — the health score (C1),
   // maintenance calendar (C2), and anomaly banner (C5) are independent of
   // the consumable bars and must still render if any is present, even on a
@@ -330,7 +409,7 @@ export function renderHealthZone(
   // fixture exposed that retention-only data already produced an empty
   // render even before today's changes.
   if (bars.length === 0 && !caps.hasRobotHealthScore && !caps.hasMaintenanceCalendar
-      && !anomalyHtml && !caps.hasBatteryRetention && !caps.hasCoveragePct) return '';
+      && !anomalyHtml && !navHealthHtml && !caps.hasBatteryRetention && !caps.hasCoveragePct) return '';
 
   const barsHtml = bars.map(bar => renderBar(bar, hass, n, state)).join('');
 
@@ -520,6 +599,7 @@ export function renderHealthZone(
         ${mopConfigHtml}
       `}
       ${renderMaintenanceCalendar(hass, caps, n, state)}
+      ${navHealthHtml}
     </div>
   `;
 }

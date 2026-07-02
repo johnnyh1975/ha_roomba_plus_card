@@ -7,15 +7,18 @@ import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, Hou
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
 import { timeSince } from './utils.js';
-import { renderRoomSelectorZone, renderSettingsPanel } from './zones/room-selector-zone.js';
-import { renderHealthZone }       from './zones/health-zone.js';
-import { renderScheduleZone }     from './zones/schedule-zone.js';
+import { renderRoomSelectorZone } from './zones/room-selector-zone.js';
 import { renderAlertZone }        from './zones/alert-zone.js';
-import { renderHistoryZone }      from './zones/history-zone.js';
 import { renderHouseholdZone }    from './zones/household-zone.js';
 import { CHIP_TO_OPTION, OPTION_TO_CHIP } from './zones/room-selector-zone.js';
 import { renderHeader } from './header.js';
 import { availableTabs, defaultTab, healthTabHasBadge, historyTabHasBadge, renderTabBar, TabId } from './tabs.js';
+import { resolveClick, resolveKeydownTarget, ClickActionKey } from './actions-resolver.js';
+import { buildConfigFormSchema } from './config-form.js';
+import { shouldReloadForEvent } from './mission-events.js';
+import { renderTabContent } from './tab-content.js';
+import { isPureClickKey, clickReducer, ClickState, ClickPayload } from './click-reducers.js';
+import { planAction } from './action-plan.js';
 
 // ──────────────────────────────────────────────
 // CSS
@@ -227,6 +230,22 @@ const STYLES = `
     letter-spacing: 0.05em; color: var(--secondary-text-color, #9ca3af);
   }
   .rpc-health-score-value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+  /* A1 — navigation health detail */
+  .rpc-nav-health { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--divider-color, rgba(0,0,0,.08)); }
+  .rpc-nav-header { display: flex; align-items: center; gap: 8px; }
+  .rpc-nav-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; color: var(--secondary-text-color); }
+  .rpc-nav-score { display: flex; align-items: baseline; gap: 1px; }
+  .rpc-nav-score-value { font-size: 1.1rem; font-weight: 700; line-height: 1; }
+  .rpc-nav-score-max { font-size: 0.7rem; color: var(--secondary-text-color); }
+  .rpc-nav-score--na { color: var(--secondary-text-color); }
+  .rpc-nav-toggle {
+    margin-left: auto; font-size: 0.72rem; background: none; border: none;
+    color: var(--primary-color); cursor: pointer; padding: 2px 4px;
+  }
+  .rpc-nav-factors { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .rpc-nav-factor { display: flex; justify-content: space-between; font-size: 0.8rem; }
+  .rpc-nav-factor-label { color: var(--secondary-text-color); }
+  .rpc-nav-factor-value { font-weight: 600; font-variant-numeric: tabular-nums; }
   .rpc-health-score-band  { font-size: 0.75rem; font-weight: 600; }
   .rpc-health-score-calibrating {
     font-size: 0.82rem; color: var(--secondary-text-color, #9ca3af); font-style: italic;
@@ -408,6 +427,21 @@ const STYLES = `
 
   /* B3 — Settings panel */
   .rpc-settings-divider { height: 1px; background: var(--divider-color, rgba(0,0,0,.08)); margin: 10px 0 0; }
+  /* A3 — Favourites row */
+  .rpc-fav-section { margin-top: 8px; }
+  .rpc-fav-label {
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--secondary-text-color); margin: 6px 0 6px;
+  }
+  .rpc-fav-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .rpc-fav-btn {
+    font-size: 0.8rem; padding: 6px 12px; border-radius: 16px;
+    border: 1px solid var(--divider-color, rgba(0,0,0,.12));
+    background: var(--card-background-color, #fff);
+    color: var(--primary-text-color); cursor: pointer;
+  }
+  .rpc-fav-btn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+  .rpc-fav-btn:active { transform: scale(0.97); }
   .rpc-settings-row {
     display: flex; align-items: center; gap: 6px; width: 100%;
     background: none; border: none; cursor: pointer; font-family: inherit;
@@ -560,6 +594,21 @@ const STYLES = `
   /* ── v2.0 — header: unified spatial line (F11 + C3-PROGRESS merge), recharge line ── */
   .rpc-spatial-line  { font-size: 0.80rem; color: var(--secondary-text-color); margin-top: 4px; padding-left: 2px; }
   .rpc-recharge-line { font-size: 0.80rem; color: var(--rpc-amber); margin-top: 4px; padding-left: 2px; }
+  /* v2.1.0 A4 — current-room line */
+  .rpc-current-room  { font-size: 0.80rem; color: var(--secondary-text-color); margin-top: 4px; padding-left: 2px; }
+  /* v2.1.0 A1 — connectivity indicator (only rendered when degraded) */
+  .rpc-connectivity-degraded {
+    font-size: 0.68rem; font-weight: 600; color: var(--rpc-amber);
+    border: 1px solid var(--rpc-amber); border-radius: 4px;
+    padding: 1px 5px; margin-left: 6px; white-space: nowrap;
+  }
+  /* v2.1.0 A2 — firmware badge (24h after a firmware change) */
+  .rpc-firmware-badge {
+    font-size: 0.68rem; font-weight: 600;
+    color: var(--rpc-green, #4caf50);
+    border: 1px solid var(--rpc-green, #4caf50); border-radius: 4px;
+    padding: 1px 5px; margin-left: 6px; white-space: nowrap;
+  }
 
   /* ── v2.0 — tab bar ─────────────────────────────────────────────────────── */
   .rpc-tab-bar {
@@ -625,6 +674,9 @@ class RoombaPlusCard extends HTMLElement {
   private robotName = '';
   /** F3: entity ID of the currently displayed robot (may differ from config.entity in multi-robot mode) */
   private activeRobot = '';
+  // v2.1.0 A5 — mission-completed event subscription
+  private missionEventUnsub: (() => Promise<void>) | null = null;
+  private missionEventSubscribing = false;
   // v2.0 — tab architecture
   private activeTab: TabId | null = null;   // null until first render picks the default
   private roomPickerOpen = false;
@@ -654,6 +706,7 @@ class RoombaPlusCard extends HTMLElement {
   private legendShown = false;   // wear arrow legend shown once per session
   // v2.0 C1-HEALTH / C2-MAINT
   private healthDetailsExpanded = false;
+  private navDetailsExpanded = false;  // A1 (v2.1.0): navigation health detail expanded
   private openMaintPopover: string | null = null;
 
   // Zone 4 schedule
@@ -704,13 +757,38 @@ class RoombaPlusCard extends HTMLElement {
 
   connectedCallback() {
     document.addEventListener('click', this.handleOutsideClick);
+    // B3 (v2.1.0): delegated listeners on the persistent ShadowRoot. Registered
+    // once here; they survive every innerHTML rebuild of .rpc-card, so render()
+    // no longer re-attaches per-element handlers.
+    this.root.addEventListener('click', this.handleDelegatedClick);
+    this.root.addEventListener('change', this.handleDelegatedChange);
+    this.root.addEventListener('keydown', this.handleDelegatedKeydown);
   }
 
   disconnectedCallback() {
     document.removeEventListener('click', this.handleOutsideClick);
-    // Clear all pending timers
+    this.root.removeEventListener('click', this.handleDelegatedClick);
+    this.root.removeEventListener('change', this.handleDelegatedChange);
+    this.root.removeEventListener('keydown', this.handleDelegatedKeydown);
+    // v2.1.0 A5: tear down the mission-completed subscription
+    if (this.missionEventUnsub) {
+      this.missionEventUnsub().catch(() => { /* ignore teardown errors */ });
+      this.missionEventUnsub = null;
+    }
+    this.missionEventSubscribing = false;
+    this.clearAllTimers();
+  }
+
+  /** B7 (v2.1.0): single source of truth for timer cleanup. Both
+   *  disconnectedCallback and the robot-switch reset call this, so a newly
+   *  added timer only needs to be listed here once — no risk of one call site
+   *  being forgotten. Named fields are retained (several are read back
+   *  individually elsewhere); this only de-duplicates teardown. */
+  private clearAllTimers(): void {
     [this.locateTimer, this.actionResetTimer, this.cleanTimeoutTimer,
      this.holdTooltipTimer, this.alertCollapseTimer].forEach(t => { if (t !== null) clearTimeout(t); });
+    this.locateTimer = this.actionResetTimer = this.cleanTimeoutTimer = null;
+    this.holdTooltipTimer = this.alertCollapseTimer = null;
   }
 
   setConfig(config: CardConfig) {
@@ -766,7 +844,7 @@ class RoombaPlusCard extends HTMLElement {
       }
       this.prevMissionActive = missionActiveState;
     } else {
-      const vacState = hass.states[this.config.entity]?.state ?? '';
+      const vacState = hass.states[this.activeRobot]?.state ?? '';
       if (this.prevVacuumState === 'cleaning' && vacState === 'docked') {
         this.loadHistory();
       }
@@ -782,6 +860,10 @@ class RoombaPlusCard extends HTMLElement {
     } else {
       this.apiClient.updateHass(hass);
     }
+
+    // v2.1.0 A5: subscribe to roomba_plus_mission_completed for prompt history
+    // reload. Lazy (first hass with a connection), idempotent, multi-robot-safe.
+    this.maybeSubscribeMissionEvents();
 
     // Render guard: skip full re-render when no relevant entity changed.
     // Always render on first call (prev is undefined) or when a relevant entity changed.
@@ -815,6 +897,9 @@ class RoombaPlusCard extends HTMLElement {
       `sensor.${n}_mop_behavior`,             // B2: Braava mop behavior
       `sensor.${n}_clean_base_status`,
       `sensor.${n}_nav_quality`,
+      `sensor.${n}_nav_panics`,             // A1: navigation health detail
+      `sensor.${n}_nav_landmark_quality`,   // A1
+      `sensor.${n}_nav_good_landmarks`,     // A1
       `sensor.${n}_next_likely_clean_window`,
       `sensor.${n}_presence_clean_opportunities_7d`,
       `sensor.${n}_presence_clean_utilisation_7d`,
@@ -871,7 +956,8 @@ class RoombaPlusCard extends HTMLElement {
       `sensor.${n}_bin_last_cleaned`,           // C2-MAINT
       `sensor.${n}_battery_last_replaced`,      // C2-MAINT (battery row)
       `sensor.${n}_mission_progress`,           // C3-PROGRESS
-      `sensor.${n}_last_mission_result`,        // C5-ANOMALY (inactive pending integration L3-FIX, tracked for when it activates)
+      `sensor.${n}_last_mission_result`,
+      `sensor.${n}_consecutive_mission_anomalies`,  // C5-ANOMALY (active, integration 3.0.0; disabled-by-default sensor)
       `select.${n}_carpet_boost_select`,        // Settings panel
       `switch.${n}_edge_clean`,                 // Settings panel
       `switch.${n}_always_finish`,              // Settings panel
@@ -879,6 +965,12 @@ class RoombaPlusCard extends HTMLElement {
       // Pre-existing gap, not v2.0-specific, fixed alongside the above
       // since it was found during the same audit:
       `sensor.${n}_optimal_clean_window`,       // F15 (⚙ tab schedule)
+
+      // ── v2.1.0 — header indicators ───────────────────────────────────────
+      `binary_sensor.${n}_cloud_connected`,     // A1: connectivity indicator
+      `binary_sensor.${n}_mqtt_stale`,          // A1: connectivity indicator
+      `sensor.${n}_firmware_version`,           // A2: firmware badge
+      `device_tracker.${n}_position`,           // A4: current-room line (room_estimate attr)
 
       // F3b — robot selector helper (when configured)
       ...(this.config.robot_selector_helper ? [this.config.robot_selector_helper] : []),
@@ -921,8 +1013,7 @@ class RoombaPlusCard extends HTMLElement {
     this.prevMissionActive = '';
     this.alertsVisible     = false;
     this.lastAlertHtml     = '';
-    [this.locateTimer, this.actionResetTimer, this.cleanTimeoutTimer,
-     this.holdTooltipTimer, this.alertCollapseTimer].forEach(t => { if (t !== null) clearTimeout(t); });
+    this.clearAllTimers();
   }
 
   /** F3: Switch active robot, reset state, trigger history reload, write helper. */
@@ -952,6 +1043,55 @@ class RoombaPlusCard extends HTMLElement {
         // Log so developers can diagnose mismatched helper type or permissions.
         console.warn('roomba-plus-card: robot_selector_helper write failed', err);
       }
+    }
+  }
+
+  /**
+   * v2.1.0 A5 — subscribe to the integration's roomba_plus_mission_completed
+   * event so history reloads promptly at mission end, instead of relying solely
+   * on the binary_sensor.*_mission_active on→off transition (which only fires
+   * if the card happens to be rendered and processing hass updates at that
+   * instant). The state-transition trigger remains as a fallback and for
+   * environments without a WS connection.
+   *
+   * - Lazy: runs on the first hass that exposes a connection.
+   * - Idempotent: a subscribing flag + unsub handle prevent double-subscribe.
+   * - Multi-robot-safe: filters events by entry_id against this robot's own
+   *   resolved config_entry_id, so one robot's completion never reloads
+   *   another's history.
+   */
+  private maybeSubscribeMissionEvents(): void {
+    if (this.missionEventUnsub || this.missionEventSubscribing) return;
+    const conn = this._hass?.connection;
+    if (!conn || !this.apiClient) return;
+
+    this.missionEventSubscribing = true;
+    conn.subscribeMessage<{ data?: { entry_id?: string } }>(
+      (msg) => { this.onMissionCompletedEvent(msg?.data?.entry_id); },
+      { type: 'subscribe_events', event_type: 'roomba_plus_mission_completed' },
+    ).then((unsub) => {
+      this.missionEventUnsub = unsub;
+      this.missionEventSubscribing = false;
+    }).catch(() => {
+      // Subscription failed (old HA, permissions) — fall back to the
+      // mission_active transition trigger silently.
+      this.missionEventSubscribing = false;
+    });
+  }
+
+  /** Handle a roomba_plus_mission_completed event; reload only when it belongs
+   *  to the robot this card is currently showing. */
+  private async onMissionCompletedEvent(entryId?: string): Promise<void> {
+    if (!this.apiClient) return;
+    // Resolve our own entry_id (cached after first call) and compare.
+    let myEntryId: string | null = null;
+    try {
+      myEntryId = await this.apiClient.getEntryId();
+    } catch {
+      myEntryId = null;
+    }
+    if (shouldReloadForEvent(myEntryId, entryId)) {
+      this.loadHistory();
     }
   }
 
@@ -1069,6 +1209,7 @@ class RoombaPlusCard extends HTMLElement {
       missionData: this.missionData,
       roomPickerOpen: this.roomPickerOpen,
       selectedRoomCount: this.selectedRooms.size,
+      activeRobot: this.activeRobot,
     });
 
     // v2.0: inline room picker — expands below the header when toggled via
@@ -1091,77 +1232,21 @@ class RoombaPlusCard extends HTMLElement {
     };
     const tabBarHtml = renderTabBar(tabs, this.activeTab, badges);
 
-    let tabContentHtml = '';
-    switch (this.activeTab) {
-      case 'map':
-        // Promotes the existing F7 coverage heatmap + hazard pins to a
-        // first-class tab by forcing historyTab to 'coverage'. C7-ROOM-BOUNDS
-        // room polygon overlays render when caps.hasAlignment. Tap-to-select
-        // shares this.selectedRooms with the header "Rooms…" chip picker —
-        // selecting via map or via chips is the same pending selection.
-        //
-        // suppressSubTabToggle: true — fixed after screenshot review found
-        // the internal Calendar/Coverage pill toggle rendering inside this
-        // tab, which is wrong: this tab IS the coverage view at the
-        // top-level tab bar already. Without suppression, tapping
-        // "Calendar" here silently swapped the Map tab's content to the
-        // calendar heatmap with no way back except switching tabs and back.
-        tabContentHtml = renderHistoryZone(this._hass, this.config, caps, this.robotName,
-          { data: this.missionData, loading: this.historyLoading, error: this.historyError,
-            openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
-            lifetimeExpanded: this.lifetimeExpanded,
-            historyTab: 'coverage', hazards: this.hazards,
-            mapSelectedRooms: this.selectedRooms,
-            suppressSubTabToggle: true,
-            isMapContext: true },
-          isMetric);
-        break;
-      case 'history':
-        tabContentHtml = renderHistoryZone(this._hass, this.config, caps, this.robotName,
-          { data: this.missionData, loading: this.historyLoading, error: this.historyError,
-            openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
-            lifetimeExpanded: this.lifetimeExpanded,
-            // Companion mode keeps the Calendar/Coverage sub-tab toggle —
-            // it's the only mode where this History tab needs to reach the
-            // coverage view, since no separate Map tab exists there.
-            // Standalone mode forces 'calendar' AND suppresses the toggle,
-            // since Coverage already has its own top-level Map tab.
-            historyTab: this.config.mode === 'companion' ? this.historyTab : 'calendar',
-            hazards: this.hazards,
-            suppressSubTabToggle: this.config.mode !== 'companion' },
-          isMetric);
-        break;
-      case 'health':
-        tabContentHtml = `
-          ${alertZoneHtml}
-          ${renderHealthZone(this._hass, this.config, caps, this.robotName,
-            { openPopover: this.openPopover, resetting: this.resetting, resetError: this.resetError, legendShown: this.legendShown,
-              healthDetailsExpanded: this.healthDetailsExpanded, openMaintPopover: this.openMaintPopover })}
-        `;
-        break;
-      case 'settings':
-        tabContentHtml = `
-          ${renderScheduleZone(this._hass, this.config, caps, this.robotName,
-            { holdTooltipVisible: this.holdTooltipVisible, holdToggling: this.holdToggling })}
-          <div class="rpc-settings-divider"></div>
-          ${renderSettingsPanel(this._hass, this.config, this.robotName, this.settingsPanelOpen)}
-          ${this.config.mode !== 'companion'
-            ? renderRoomSelectorZone({
-                hass: this._hass, config: this.config, caps,
-                robotName: this.robotName,
-                selectedRooms: this.selectedRooms, passes: this.passes,
-                isSending: this.isSendingClean, sendError: this.sendError,
-                settingsPanelOpen: this.settingsPanelOpen,
-                // v2.0: settings panel already rendered directly above —
-                // independent of hasZones so it isn't lost on robots with
-                // no zone capability. Suppress the embedded copy here.
-                includeSettingsPanel: false,
-              })
-            : ''}
-          ${this.renderMaintenanceLinks(caps)}
-        `;
-        break;
-    }
+    const tabContentHtml = renderTabContent(this.activeTab, {
+      hass: this._hass, config: this.config, caps, robotName: this.robotName, isMetric,
+      missionData: this.missionData, historyLoading: this.historyLoading, historyError: this.historyError,
+      openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
+      lifetimeExpanded: this.lifetimeExpanded, historyTab: this.historyTab, hazards: this.hazards,
+      selectedRooms: this.selectedRooms,
+      openPopover: this.openPopover, resetting: this.resetting, resetError: this.resetError,
+      legendShown: this.legendShown, healthDetailsExpanded: this.healthDetailsExpanded,
+      openMaintPopover: this.openMaintPopover, navDetailsExpanded: this.navDetailsExpanded,
+      holdTooltipVisible: this.holdTooltipVisible, holdToggling: this.holdToggling,
+      settingsPanelOpen: this.settingsPanelOpen, isSendingClean: this.isSendingClean,
+      sendError: this.sendError, passes: this.passes,
+      maintenanceLinksHtml: this.renderMaintenanceLinks(caps),
+      alertZoneHtml,
+    });
 
     // v2.0: household view replaces header + tabs entirely rather than
     // appending the household zone as a permanent footer below every tab —
@@ -1190,7 +1275,8 @@ class RoombaPlusCard extends HTMLElement {
     `;
 
     this.root.innerHTML = html;
-    this.attachEventListeners();
+    // B3 (v2.1.0): no per-render listener re-attach — delegated handlers on
+    // this.root (registered in connectedCallback) cover all interactions.
   }
 
   /**
@@ -1278,182 +1364,133 @@ class RoombaPlusCard extends HTMLElement {
   }
 
 
-  private attachEventListeners() {
-    const card = this.root.querySelector('.rpc-card')!;
+  // ─────────────────────────────────────────────────────────────────────────
+  // B3 (v2.1.0) — Delegated event handling.
+  //
+  // Three listeners on this.root (registered once in connectedCallback) replace
+  // the former ~22 per-element listener groups that were re-attached on every
+  // render. resolveClick()/resolveKeydownTarget() (pure, unit-tested in
+  // tests/delegation.test.ts) map a clicked element to an action key; the
+  // switch below carries the original handler bodies verbatim.
+  //
+  // Outside-click closing is handled separately by handleOutsideClick on
+  // document, which uses composedPath().includes(this) — it does not depend on
+  // propagation being stopped, so the per-handler stopPropagation calls are no
+  // longer needed. One stopPropagation at the top guards against nested
+  // re-dispatch within the shadow root.
+  // ─────────────────────────────────────────────────────────────────────────
 
-    // Quick actions (Zone 1) + clean/repeat (Zone 2)
-    // F3: Robot selector dropdown
-    const robotSelect = card.querySelector<HTMLSelectElement>('[data-robot-select]');
-    if (robotSelect) {
-      robotSelect.addEventListener('change', (e) => {
-        e.stopPropagation();
-        const value = (e.target as HTMLSelectElement).value;
-        if (value === '__household__') {
-          this.viewMode = 'household';
-          this.render();
-        } else {
-          this.viewMode = 'robot';
-          this.switchRobot(value);
+  private readonly handleDelegatedClick = (e: Event): void => {
+    const target = e.target as Element | null;
+    const hit = resolveClick(target);
+    if (!hit) return;
+    e.stopPropagation();
+    this.dispatchClick(hit.key, hit.el);
+  };
+
+  private readonly handleDelegatedChange = (e: Event): void => {
+    const el = (e.target as Element | null)?.closest('[data-robot-select]') as HTMLSelectElement | null;
+    if (!el) return;
+    e.stopPropagation();
+    const value = el.value;
+    if (value === '__household__') {
+      this.viewMode = 'household';
+      this.render();
+    } else {
+      this.viewMode = 'robot';
+      this.switchRobot(value);
+    }
+  };
+
+  private readonly handleDelegatedKeydown = (e: Event): void => {
+    const ke = e as KeyboardEvent;
+    if (ke.key !== 'Enter' && ke.key !== ' ') return;
+    const hit = resolveKeydownTarget(e.target as Element | null);
+    if (!hit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.dispatchClick(hit.key, hit.el);
+  };
+
+  /** Run the action body for a resolved click/keydown target. */
+  private dispatchClick(key: ClickActionKey, el: Element): void {
+    const ds = (el as HTMLElement).dataset;
+
+    // R2: pure UI-state cases go through the tested reducer; the shell computes
+    // the two impure inputs (wear-legend presence, day summary/missions) and
+    // applies the returned patch, then renders once.
+    if (isPureClickKey(key)) {
+      const payload: ClickPayload = {
+        room: ds.room ?? ds.roomPoly ?? ds.roomLabel,
+        tab: ds.tab,
+        bar: ds.bar,
+        maint: ds.maint,
+        historyTab: ds.historyTab as 'calendar' | 'coverage' | undefined,
+      };
+      if (key === 'heatmap-cell') {
+        const date = (el as HTMLElement).getAttribute('data-date')!;
+        payload.date = date;
+        if (this.openDay !== date) {
+          payload.daySummaryForDate = this.missionData?.find(d => d.date === date) ?? null;
+          payload.dayMissionsForDate = this.buildDayMissions(date);
         }
-      });
+      }
+      const patch = clickReducer(key, this as unknown as ClickState, payload);
+      Object.assign(this, patch);
+      this.render();
+      // 'bar' legend-shown is decided AFTER render, against the freshly-drawn
+      // DOM — the legend element only exists once the popover is open. Matches
+      // the original dispatchClick timing (render → then query → then flip).
+      if (key === 'bar' && !this.legendShown && this.root.querySelector('[data-wear-legend]')) {
+        this.legendShown = true;
+      }
+      return;
     }
 
-    card.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation(); // prevent tap-outside handler from firing
-        this.handleAction(btn.dataset.action!);
-      });
-    });
+    // Effectful cases — service calls / async — stay imperative.
+    switch (key) {
+      case 'action':
+        this.handleAction(ds.action!);
+        return;
 
-    // Room chips
-    card.querySelectorAll<HTMLButtonElement>('[data-room]').forEach(chip => {
-      chip.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const room = chip.dataset.room!;
-        this.selectedRooms.has(room) ? this.selectedRooms.delete(room) : this.selectedRooms.add(room);
-        this.render();
-      });
-    });
-
-    // Pass chips — update local state + call select.select_option immediately
-    card.querySelectorAll<HTMLButtonElement>('[data-pass]').forEach(chip => {
-      chip.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const chipLabel = chip.dataset.pass!;
-        const option    = chip.dataset.passOption!;
+      case 'pass': {
+        const chipLabel = ds.pass!;
+        const option    = ds.passOption!;
         this.passes = chipLabel;
         this.render();
         const selectId = `select.${this.robotName}_cleaning_passes`;
         if (this._hass.states[selectId]) {
           this.passSettingInFlight = true;
-          try {
-            await this._hass.callService('select', 'select_option', { entity_id: selectId, option });
-          } catch { /* non-fatal */ } finally {
-            this.passSettingInFlight = false;
-          }
+          this._hass.callService('select', 'select_option', { entity_id: selectId, option })
+            .catch(() => { /* non-fatal */ })
+            .finally(() => { this.passSettingInFlight = false; });
         }
-      });
-    });
+        return;
+      }
 
-    // Health bar rows — toggle popover; mark wear legend seen on first open
-    card.querySelectorAll<HTMLElement>('[data-bar]').forEach(row => {
-      const toggle = (e: Event) => {
-        e.stopPropagation();
-        const key = row.dataset.bar!;
-        this.openPopover = this.openPopover === key ? null : key;
-        this.resetError  = null;
-        this.render();
-        if (!this.legendShown && this.root.querySelector('[data-wear-legend]')) {
-          this.legendShown = true;
-        }
-      };
-      row.addEventListener('click', toggle);
-      row.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); }
-      });
-    });
-
-    // v2.0 — tab bar switching
-    card.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const tab = btn.dataset.tab as TabId;
-        if (tab !== this.activeTab) {
-          this.activeTab = tab;
-          this.render();
-        }
-      });
-    });
-
-    // v2.0 — household view "← Back" returns to the active robot's view
-    const householdBack = card.querySelector<HTMLButtonElement>('[data-household-back]');
-    if (householdBack) {
-      householdBack.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.viewMode = 'robot';
-        this.render();
-      });
-    }
-
-    // v2.0 C7-ROOM-BOUNDS — tap-to-select on Map tab room overlays.
-    // Shares this.selectedRooms with the header chip picker.
-    card.querySelectorAll<SVGPolygonElement | HTMLElement>('[data-room-poly], [data-room-label]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const room = (el as HTMLElement).dataset.roomPoly ?? (el as HTMLElement).dataset.roomLabel;
-        if (!room) return;
-        if (this.selectedRooms.has(room)) this.selectedRooms.delete(room);
-        else this.selectedRooms.add(room);
-        this.render();
-      });
-    });
-
-    // Popover × close buttons
-    card.querySelectorAll<HTMLButtonElement>('[data-close]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.openPopover = null;
-        this.render();
-      });
-    });
-
-    // v2.0 C1-HEALTH — score details expand/collapse toggle
-    card.querySelectorAll<HTMLButtonElement>('[data-health-details-toggle]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.healthDetailsExpanded = !this.healthDetailsExpanded;
-        this.render();
-      });
-    });
-
-    // v2.0 C2-MAINT — maintenance calendar rows toggle their own popover
-    card.querySelectorAll<HTMLElement>('[data-maint]').forEach(row => {
-      const toggle = (e: Event) => {
-        e.stopPropagation();
-        const key = row.dataset.maint!;
-        this.openMaintPopover = this.openMaintPopover === key ? null : key;
-        this.render();
-      };
-      row.addEventListener('click', toggle);
-      row.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); }
-      });
-    });
-    card.querySelectorAll<HTMLButtonElement>('[data-close-maint]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.openMaintPopover = null;
-        this.render();
-      });
-    });
-
-    // "Mark as replaced" reset buttons
-    card.querySelectorAll<HTMLButtonElement>('[data-reset]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const key     = btn.dataset.reset!;
-        const service = btn.dataset.service!;
+      case 'reset': {
+        const key     = ds.reset!;
+        const service = ds.service!;
         this.resetting  = key;
         this.resetError = null;
         this.render();
-        try {
-          await this._hass.callService('roomba_plus', service, { entity_id: this.config.entity });
-          await new Promise(r => setTimeout(r, 800)); // brief delay so sensor state refreshes
-          this.openPopover = null;
-        } catch {
-          this.resetError = key;
-        } finally {
-          this.resetting = null;
-          this.render();
-        }
-      });
-    });
+        (async () => {
+          try {
+            await this._hass.callService('roomba_plus', service, { entity_id: this.activeRobot });
+            await new Promise(r => setTimeout(r, 800)); // brief delay so sensor state refreshes
+            this.openPopover = null;
+          } catch {
+            this.resetError = key;
+          } finally {
+            this.resetting = null;
+            this.render();
+          }
+        })();
+        return;
+      }
 
-    // Hold badge
-    card.querySelectorAll<HTMLButtonElement>('[data-hold-action]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (btn.dataset.holdAction === 'tooltip') {
+      case 'hold-action': {
+        if (ds.holdAction === 'tooltip') {
           this.holdTooltipVisible = true;
           this.render();
           if (this.holdTooltipTimer !== null) clearTimeout(this.holdTooltipTimer);
@@ -1467,103 +1504,50 @@ class RoombaPlusCard extends HTMLElement {
           const isOn     = this._hass.states[switchId]?.state === 'on';
           this.holdToggling = true;
           this.render();
-          try {
-            await this._hass.callService('switch', isOn ? 'turn_off' : 'turn_on', { entity_id: switchId });
-          } finally {
-            this.holdToggling = false;
-            this.render();
-          }
+          this._hass.callService('switch', isOn ? 'turn_off' : 'turn_on', { entity_id: switchId })
+            .catch(() => { /* non-fatal */ })
+            .finally(() => { this.holdToggling = false; this.render(); });
         }
-      });
-    });
+        return;
+      }
 
-    // Heatmap cell click (event delegation on the SVG container)
-    const heatmapWrap = card.querySelector('[data-heatmap]');
-    if (heatmapWrap) {
-      heatmapWrap.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const cell = (e.target as Element).closest('[data-date]') as SVGElement | null;
-        if (!cell) return;
-        const date = cell.getAttribute('data-date')!;
-        if (this.openDay === date) {
-          this.openDay = null; this.dayMissions = null; this.openDaySummary = null;
-        } else {
-          this.openDay         = date;
-          this.openDaySummary  = this.missionData?.find(d => d.date === date) ?? null;
-          this.dayMissions     = this.buildDayMissions(date);
-        }
-        this.render();
-      });
-    }
-
-    // Day popover × close
-    card.querySelectorAll<HTMLButtonElement>('[data-close-day]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.openDay = null; this.dayMissions = null; this.openDaySummary = null;
-        this.render();
-      });
-    });
-
-    // B3 — Settings panel toggle
-    card.querySelectorAll<HTMLElement>('[data-settings-toggle]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.settingsPanelOpen = !this.settingsPanelOpen;
-        this.render();
-      });
-    });
-
-    // B3 — Switch toggles (edge_clean, always_finish)
-    card.querySelectorAll<HTMLButtonElement>('[data-switch-entity]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const entityId = btn.dataset.switchEntity!;
+      case 'switch-entity': {
+        const entityId = ds.switchEntity!;
         const isOn     = this._hass.states[entityId]?.state === 'on';
-        try {
-          await this._hass.callService('switch', isOn ? 'turn_off' : 'turn_on', { entity_id: entityId });
-        } catch { /* non-fatal */ }
-      });
-    });
+        this._hass.callService('switch', isOn ? 'turn_off' : 'turn_on', { entity_id: entityId })
+          .catch(() => { /* non-fatal */ });
+        return;
+      }
 
-    // B3 — Carpet boost cycle button
-    card.querySelectorAll<HTMLButtonElement>('[data-cycle-entity]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const entityId = btn.dataset.cycleEntity!;
-        const options  = JSON.parse(btn.dataset.cycleOptions ?? '[]') as string[];
-        const current  = btn.dataset.cycleCurrent ?? '';
+      case 'cycle-entity': {
+        const entityId = ds.cycleEntity!;
+        // B6 (v2.1.0): defensive parse — malformed data-cycle-options must not
+        // throw the whole handler.
+        let options: string[] = [];
+        try {
+          options = JSON.parse(ds.cycleOptions ?? '[]') as string[];
+        } catch {
+          options = [];
+        }
+        const current  = ds.cycleCurrent ?? '';
         const idx      = options.indexOf(current);
         const next     = options.length > 0 ? options[(idx + 1) % options.length] : null;
         if (next) {
-          try {
-            await this._hass.callService('select', 'select_option', { entity_id: entityId, option: next });
-          } catch { /* non-fatal */ }
+          this._hass.callService('select', 'select_option', { entity_id: entityId, option: next })
+            .catch(() => { /* non-fatal */ });
         }
-      });
-    });
+        return;
+      }
 
-    // C1 — Lifetime stats expand/collapse
-    card.querySelectorAll<HTMLElement>('[data-lifetime-toggle]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.lifetimeExpanded = !this.lifetimeExpanded;
-        this.render();
-      });
-    });
-
-    // F7 — History zone tab toggle (Calendar / Coverage)
-    card.querySelectorAll<HTMLElement>('[data-history-tab]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.historyTab = (btn as HTMLElement).dataset.historyTab as 'calendar' | 'coverage';
-        // Close day popover on tab switch — tabs and popover are mutually exclusive
-        // (the popover renders below the heatmap wrap; on the coverage tab it would
-        // appear below the image with no visual connection to its source cell)
-        this.openDay = null; this.dayMissions = null; this.openDaySummary = null;
-        this.render();
-      });
-    });
+      case 'fav-entity': {
+        // A3 (v2.1.0): favourite routines — stateless button.press. No local
+        // state to flip; fire-and-forget with non-fatal error handling.
+        const entityId = ds.favEntity!;
+        this._hass.callService('button', 'press', { entity_id: entityId })
+          .catch(() => { /* non-fatal */ });
+        return;
+      }
+    }
   }
 
   /** Derive per-mission records for the day detail popover */
@@ -1577,93 +1561,83 @@ class RoombaPlusCard extends HTMLElement {
   }
 
   private async handleAction(action: string) {
-    const { entity } = this.config;
+    // R3: pure classification → named imperative runner. Bodies below are the
+    // verbatim original handleAction branches.
+    const plan = planAction(action);
+    switch (plan.kind) {
+      case 'toggle-room-picker':
+        // header "Rooms…" toggle — local UI state, no service call
+        this.roomPickerOpen = !this.roomPickerOpen;
+        this.render();
+        return;
+      case 'clean-selected': return this.runCleanSelected();
+      case 'repeat-last':    return this.runRepeatLast();
+      case 'vacuum':         return this.runVacuumAction(plan.domain, plan.service, plan.action, plan.pulse);
+      case 'noop':           return;
+    }
+  }
+
+  /** Clean the currently selected rooms (verbatim from original handleAction). */
+  private async runCleanSelected(): Promise<void> {
+    const entity = this.activeRobot;
     const n = this.robotName;
 
-    // ── Clean selected rooms ──
-    if (action === 'clean-selected') {
-      this.isSendingClean = true;
-      this.sendError      = null;
+    this.isSendingClean = true;
+    this.sendError      = null;
+    this.render();
+
+    const rooms = Array.from(this.selectedRooms);
+
+    // Safety 8s timeout
+    this.cleanTimeoutTimer = setTimeout(() => {
+      this.isSendingClean    = false;
+      this.sendError         = 'Start command may not have been received — check the iRobot app';
+      this.cleanTimeoutTimer = null;
       this.render();
+    }, 8000);
 
-      const rooms = Array.from(this.selectedRooms);
-
-      // Safety 8s timeout
-      this.cleanTimeoutTimer = setTimeout(() => {
-        this.isSendingClean    = false;
-        this.sendError         = 'Start command may not have been received — check the iRobot app';
-        this.cleanTimeoutTimer = null;
-        this.render();
-      }, 8000);
-
-      try {
-        // Set cleaning passes via select entity first (spec: "Tapping calls select.select_option")
-        const passesId = `select.${n}_cleaning_passes`;
-        if (this.passes !== 'Auto' && this._hass.states[passesId]) {
-          await this._hass.callService('select', 'select_option', {
-            entity_id: passesId,
-            option: CHIP_TO_OPTION[this.passes] ?? this.passes,
-          });
-        }
-        await this._hass.callService('roomba_plus', 'clean_room', {
-          entity_id: entity,
-          room_name: rooms,
-          ordered:   false,
+    try {
+      // Set cleaning passes via select entity first (spec: "Tapping calls select.select_option")
+      const passesId = `select.${n}_cleaning_passes`;
+      if (this.passes !== 'Auto' && this._hass.states[passesId]) {
+        await this._hass.callService('select', 'select_option', {
+          entity_id: passesId,
+          option: CHIP_TO_OPTION[this.passes] ?? this.passes,
         });
-        clearTimeout(this.cleanTimeoutTimer!);
-        this.cleanTimeoutTimer = null;
-        this.selectedRooms.clear();
-        this.isSendingClean = false;
-      } catch {
-        if (this.cleanTimeoutTimer !== null) { clearTimeout(this.cleanTimeoutTimer); this.cleanTimeoutTimer = null; }
-        this.isSendingClean = false;
-        this.sendError      = 'Start command may not have been received — check the iRobot app';
       }
-      this.render();
-      return;
+      await this._hass.callService('roomba_plus', 'clean_room', {
+        entity_id: entity,
+        room_name: rooms,
+        ordered:   false,
+      });
+      clearTimeout(this.cleanTimeoutTimer!);
+      this.cleanTimeoutTimer = null;
+      this.selectedRooms.clear();
+      this.isSendingClean = false;
+    } catch {
+      if (this.cleanTimeoutTimer !== null) { clearTimeout(this.cleanTimeoutTimer); this.cleanTimeoutTimer = null; }
+      this.isSendingClean = false;
+      this.sendError      = 'Start command may not have been received — check the iRobot app';
     }
+    this.render();
+  }
 
-    // ── Repeat last ──
-    if (action === 'repeat-last') {
-      try {
-        await this._hass.callService('button', 'press', { entity_id: `button.${n}_repeat_mission` });
-      } catch { /* silent */ }
-      return;
-    }
+  /** Repeat the last mission (verbatim from original handleAction). */
+  private async runRepeatLast(): Promise<void> {
+    const n = this.robotName;
+    try {
+      await this._hass.callService('button', 'press', { entity_id: `button.${n}_repeat_mission` });
+    } catch { /* silent */ }
+  }
 
-    // ── v2.0: header "Rooms…" toggle — local UI state, no service call ──
-    if (action === 'toggle-room-picker') {
-      this.roomPickerOpen = !this.roomPickerOpen;
-      this.render();
-      return;
-    }
-
-    // ── Vacuum service actions ──
-    const actionMap: Record<string, [string, string]> = {
-      start:       ['vacuum', 'start'],
-      pause:       ['vacuum', 'pause'],
-      resume:      ['vacuum', 'start'],
-      return_home: ['vacuum', 'return_to_base'],
-      locate:      ['vacuum', 'locate'],
-      // v2.0: Paused state's third button. HA's vacuum domain has no
-      // distinct "stop" verb separate from return_to_base for most
-      // integrations — stop_cleaning / return_to_base both halt motion.
-      // roomba_plus uses the standard vacuum.stop service.
-      stop:        ['vacuum', 'stop'],
-      // v2.0: Error state's second button — re-attempts the vacuum's last
-      // commanded action via vacuum.start, which iRobot's API treats as
-      // "resume/retry" when called from an error state.
-      retry:       ['vacuum', 'start'],
-    };
-
-    const mapping = actionMap[action];
-    if (!mapping) return;
-    const [domain, service] = mapping;
+  /** Run a vacuum-domain action with the original loading/timer discipline. */
+  private async runVacuumAction(domain: string, service: string, action: string, pulse: boolean): Promise<void> {
+    const entity = this.activeRobot;
 
     this.loadingAction = action;
     this.render();
 
-    if (action === 'locate') {
+    if (pulse) {
       // Locate: pulse for exactly 2 seconds regardless of service call timing
       this.locateTimer = setTimeout(() => {
         this.loadingAction = null;
@@ -1709,58 +1683,8 @@ class RoombaPlusCard extends HTMLElement {
    * Covers the most commonly changed options; advanced options remain YAML-only.
    */
   static getConfigForm() {
-    return {
-      schema: [
-        {
-          name: 'entity',
-          label: 'Robot vacuum',
-          required: true,
-          selector: { entity: { domain: 'vacuum' } },
-        },
-        {
-          name: 'entities',
-          label: 'Multiple robots (overrides single robot above)',
-          selector: { entity: { domain: 'vacuum', multiple: true } },
-        },
-        {
-          name: 'area_unit',
-          label: 'Area unit',
-          selector: { select: { options: ['auto', 'sqft', 'm2'], mode: 'dropdown' } },
-        },
-        {
-          name: 'history_days',
-          label: 'History window',
-          selector: {
-            select: {
-              options: [
-                { value: 7,  label: '7 days'  },
-                { value: 14, label: '14 days' },
-                { value: 28, label: '28 days' },
-              ],
-              mode: 'dropdown',
-            },
-          },
-        },
-        {
-          name: 'presence_entities',
-          label: 'Presence sensors (person.* entities)',
-          selector: { entity: { domain: 'person', multiple: true } },
-        },
-        { name: 'show_rooms',       label: 'Show room selector zone',         selector: { boolean: {} } },
-        { name: 'show_settings',    label: 'Show settings panel',             selector: { boolean: {} } },
-        { name: 'show_health',      label: 'Show health zone',                selector: { boolean: {} } },
-        { name: 'show_schedule',    label: 'Show schedule & presence zone',   selector: { boolean: {} } },
-        { name: 'show_alerts',      label: 'Show alerts zone',                selector: { boolean: {} } },
-        { name: 'show_history',     label: 'Show history zone',               selector: { boolean: {} } },
-        { name: 'show_lifetime',    label: 'Show lifetime stats',             selector: { boolean: {} } },
-        { name: 'show_dirt_events', label: 'Show dirt events in day detail',  selector: { boolean: {} } },
-        {
-          name: 'robot_selector_helper',
-          label: 'Robot selector helper (input_text or input_select — for xiaomi card sync)',
-          selector: { entity: { domain: ['input_text', 'input_select'] } },
-        },
-      ],
-    };
+    // B4 (v2.1.0): schema lives in ./config-form.ts (pure, unit-tested).
+    return { schema: buildConfigFormSchema() };
   }
 
   static getStubConfig() { return { entity: 'vacuum.roomba' }; }

@@ -44,6 +44,9 @@ function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?
     `sensor.${n}_mop_behavior`,
     `sensor.${n}_clean_base_status`,
     `sensor.${n}_nav_quality`,
+    `sensor.${n}_nav_panics`,
+    `sensor.${n}_nav_landmark_quality`,
+    `sensor.${n}_nav_good_landmarks`,
     `sensor.${n}_next_likely_clean_window`,
     `sensor.${n}_presence_clean_opportunities_7d`,
     `sensor.${n}_presence_clean_utilisation_7d`,
@@ -81,10 +84,16 @@ function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?
     `sensor.${n}_battery_last_replaced`,
     `sensor.${n}_mission_progress`,
     `sensor.${n}_last_mission_result`,
+    `sensor.${n}_consecutive_mission_anomalies`,
     `select.${n}_carpet_boost_select`,
     `switch.${n}_edge_clean`,
     `switch.${n}_always_finish`,
     `sensor.${n}_optimal_clean_window`,
+    // v2.1.0 — header indicators
+    `binary_sensor.${n}_cloud_connected`,
+    `binary_sensor.${n}_mqtt_stale`,
+    `sensor.${n}_firmware_version`,
+    `device_tracker.${n}_position`,
     ...(helperEntity ? [helperEntity] : []),
   ];
 }
@@ -164,8 +173,17 @@ describe('relevantEntityIds() — B2: previously missing entity IDs now watched'
   it('watches mission_progress (C3-PROGRESS)', () =>
     expect(has(`sensor.${n}_mission_progress`)).toBe(true));
 
-  it('watches last_mission_result (C5-ANOMALY, inactive pending integration)', () =>
+  it('watches last_mission_result (C5-ANOMALY)', () =>
     expect(has(`sensor.${n}_last_mission_result`)).toBe(true));
+
+  it('watches consecutive_mission_anomalies (C5-ANOMALY active, 3.0.0)', () =>
+    expect(has(`sensor.${n}_consecutive_mission_anomalies`)).toBe(true));
+
+  it('watches nav detail sensors (A1 navigation health)', () => {
+    expect(has(`sensor.${n}_nav_panics`)).toBe(true);
+    expect(has(`sensor.${n}_nav_landmark_quality`)).toBe(true);
+    expect(has(`sensor.${n}_nav_good_landmarks`)).toBe(true);
+  });
 
   it('watches carpet_boost_select, edge_clean, always_finish (Settings panel)', () => {
     expect(has(`select.${n}_carpet_boost_select`)).toBe(true);
@@ -175,6 +193,19 @@ describe('relevantEntityIds() — B2: previously missing entity IDs now watched'
 
   it('watches optimal_clean_window (F15, pre-existing gap fixed alongside)', () =>
     expect(has(`sensor.${n}_optimal_clean_window`)).toBe(true));
+
+  // ── v2.1.0 header indicators — added with A1/A2/A4 ──
+  it('watches cloud_connected (A1 connectivity)', () =>
+    expect(has(`binary_sensor.${n}_cloud_connected`)).toBe(true));
+
+  it('watches mqtt_stale (A1 connectivity)', () =>
+    expect(has(`binary_sensor.${n}_mqtt_stale`)).toBe(true));
+
+  it('watches firmware_version (A2 firmware badge)', () =>
+    expect(has(`sensor.${n}_firmware_version`)).toBe(true));
+
+  it('watches device_tracker position (A4 current-room line)', () =>
+    expect(has(`device_tracker.${n}_position`)).toBe(true));
 });
 
 describe('relevantEntityIds() — robot_selector_helper', () => {
