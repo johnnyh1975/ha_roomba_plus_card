@@ -115,12 +115,30 @@ export interface RobotCapabilities {
   /** sensor.*_mission_progress (MP1, v2.6.0+). Also carries mission_duration_min
    *  and recharge_min attributes (v2.8.6). */
   hasMissionProgressSensor: boolean;
-  /** Non-empty `rooms` dict on image.*_coverage_map. NOT a confidence
-   *  threshold check — the integration only populates `rooms` once its own
-   *  internal alignment confidence is ≥ 0.70, so presence alone is sufficient.
+  /** Non-empty `rooms` dict on image.*_map. NOT a confidence threshold
+   *  check — the integration only populates `rooms` once its own internal
+   *  alignment confidence is ≥ 0.70, so presence alone is sufficient.
    *  (The image entity carries no alignment_confidence attribute; that figure
-   *  lives on cloud-source mission records instead — see MissionRecord. */
+   *  lives on cloud-source mission records instead — see MissionRecord.)
+   *
+   *  v2.3.0 CORRECTION: this previously read image.*_coverage_map, which
+   *  is actually RoombaCoverageImage — an unrelated GridStore EMA-diagnostic
+   *  heatmap with NO rooms/calibration_points attribute at all (verified
+   *  against source). The entity that carries rooms/calibration_points is
+   *  RoombaMapImage (image.*_map). This means hasAlignment likely evaluated
+   *  false for every installation prior to this fix — the C7-ROOM-BOUNDS
+   *  room-overlay feature (built in v2.0.0) may never have rendered. */
   hasAlignment: boolean;
+  /** v2.3.0 ZONE-OVERLAY — non-empty `zones` array on image.*_map.
+   *  Aligned-mode gate (same as hasAlignment): the integration withholds
+   *  zones/door_markers/furniture_candidates entirely outside aligned mode,
+   *  since pose-space overlay data would be spatially wrong against a
+   *  UMF-space fallback render. */
+  hasZoneOverlays: boolean;
+  /** v2.3.0 ZONE-OVERLAY — non-empty `door_markers` array on image.*_map. */
+  hasDoorMarkers: boolean;
+  /** v2.3.0 F24 — non-empty `furniture_candidates` array on image.*_map. */
+  hasFurnitureShadows: boolean;
   /** button.*_fav_* (any present) — FAVORITES, fully shipped in the
    *  integration but with no home in the card before v2.0. */
   hasFavorites: boolean;
@@ -135,6 +153,19 @@ export interface RobotCapabilities {
   /** device_tracker.*_position present (carries room_estimate attribute).
    *  A4: gates the current-room header line during active SMART missions. */
   hasPositionTracker: boolean;
+
+  // ── v2.3.0 — Rooms-Overdue widget (integration v3.3.0 ROOM-SCHED) ─────────
+  /** sensor.*_rooms_overdue present. SMART + cloud only — the integration
+   *  only creates this entity when map_capability === 'smart' and a cloud
+   *  coordinator is configured (room data source is cloud-enriched
+   *  timeline.finEvents). Not a diagnostic — enabled by default. */
+  hasRoomsOverdue: boolean;
+  /** v2.3.0 — dirt/sensor correlation (integration v3.3.0 CROSS-CORR).
+   *  sensor.*_dirt_weather_correlation present. Opt-in: only registered
+   *  when the user has configured correlation entities in the integration
+   *  options AND cloud is available (dirt field is cloud-enriched).
+   *  Diagnostic category. */
+  hasDirtCorrelation: boolean;
 }
 
 /** Per-mission record from GET …/mission_history?format=records (integration ≥ v2.0) */
@@ -163,6 +194,12 @@ export interface MissionRecord {
   /** Spatial alignment confidence 0–1; shown as footnote when < 0.85.
    *  Present from integration v2.3+ (UmfAligner). null on v2.2. */
   alignment_confidence?: number;
+  /** v2.2.0 F4 — lifetime mission counter, the key for the path-replay
+   *  endpoint. Shipped by integration 3.2.1 in both unified converters
+   *  (verified against source); ≤ 3.2.0 omits it. Local-source records are
+   *  null until backfill_from_cloud() enrichment. The card gates the Route
+   *  button on non-null presence. */
+  n_mssn?: number | null;
 }
 
 /** Per-room coverage fractions within a MissionRecord (v2.2+).
@@ -184,10 +221,104 @@ export interface HazardRecord {
   bearing_deg: number;            // 0–359, compass from dock
   distance_mm: number;            // Euclidean distance from dock in mm
   source: 'stuck_events' | 'robot_learned' | 'keepout';
+  /** v2.3.0 F22 — GridStore.stuck_pattern()'s dominant weekday, present on
+   *  every pin (all sources), null when not applicable or no pattern found.
+   *  Python datetime.weekday() convention: 0=Monday ... 6=Sunday (verified
+   *  against integration source, image.py's stuck_wh computation — NOT the
+   *  JS Date.getDay() convention of 0=Sunday). Confirmed accepted gap: only
+   *  populated once stuck_pattern()'s own threshold (8 stucks, higher than
+   *  hotspots()'s pin-eligibility threshold of 3) is met — pins with
+   *  stuck_count 3–7 always carry null here, by design, not a bug. */
+  dominant_weekday: number | null;
+  /** v2.3.0 F22 — dominant hour of day, 0–23, local time. Same
+   *  null-until-threshold-8 rule as dominant_weekday. */
+  dominant_hour: number | null;
 }
 
-/** Daily summary from GET /api/roomba_plus/{id}/mission_history */
-export interface DaySummary {
+/** v2.3.0 ZONE-OVERLAY — one entry of the `zones` array on image.*_map
+ *  (aligned mode only). Pose-space mm, already transformed via
+ *  aligner.umf_to_pose() server-side — no further conversion needed.
+ *  Discriminated on `type`: 'observed' carries a single point (robot-
+ *  detected obstacle centroid); 'keepout' carries a polygon. */
+export type ZoneEntry =
+  | { type: 'observed'; x: number; y: number }
+  | { type: 'keepout'; polygon: [number, number][] };
+
+/** v2.3.0 ZONE-OVERLAY — one entry of the `door_markers` array on
+ *  image.*_map (aligned mode only). Pose-space mm, exposed as-is —
+ *  NOT transformed via umf_to_pose() (collected directly from local pose
+ *  data, never through UMF; verified against source). */
+export interface DoorMarkerEntry {
+  id: string;
+  cx: number;
+  cy: number;
+  label: string;
+  mission_count: number;
+}
+
+/** v2.3.0 F24 — one entry of the `furniture_candidates` array on
+ *  image.*_map (aligned mode only). Pose-space mm (same _cell_to_mm
+ *  family as GridStore.hotspots(), verified against source) — no `cell`
+ *  key on the wire despite GridStore.furniture_candidates()'s internal
+ *  shape carrying one; the image entity strips it down to x_mm/y_mm only. */
+export interface FurnitureCandidate {
+  x_mm: number;
+  y_mm: number;
+}
+
+/** v2.2.0 F1 — GET /api/roomba_plus/{id}/mission/{mission_id}/explain
+ *  (integration ≥ 3.2.0 ANOMALY-EXPLAIN). anomaly_reason is a machine key
+ *  (e.g. 'obstacle_or_blockage'); recommended_action is server-composed
+ *  English prose. is_anomalous=false is a valid, meaningful answer. */
+export interface MissionExplain {
+  mission_id: string;
+  is_anomalous: boolean;
+  anomaly_reason: string | null;
+  robot_lifted: boolean;
+  error_code: number | null;
+  recommended_action: string | null;
+}
+
+/** v2.2.0 F4 — GET /api/roomba_plus/{id}/mission/{n_mssn}/path
+ *  (integration ≥ 3.2.0 MISSION-REPLAY). Room-granular reconstruction from
+ *  archived room_visits — deliberately NOT pixel pose tracking. */
+export interface MissionPath {
+  nMssn: number;
+  path: { room: string; time: string }[];
+}
+
+/** v2.3.0 MISSION-MAP — GET /api/roomba_plus/{id}/missions/{record_id}/map.json
+ *  (integration ≥ 3.3.0 MISSION-MAP). Coordinate space is UMF-space mm for
+ *  BOTH coverage_mm and rooms — this is a different space from the live
+ *  image.*_map entity's pose-space `rooms` attribute (which has
+ *  umf_to_pose() already applied server-side). Do not mix the two: this
+ *  payload is self-contained and must be rendered with its own bounding
+ *  box, not against the live map's transform. coverage_poly is present in
+ *  the wire shape but intentionally unused by the card in v1 — the
+ *  integration does not convert it to mm (only `coverage` is), so it would
+ *  need its own ×1000 conversion before use; deferred until a future
+ *  version wants a filled-boundary look instead of a coverage dot cloud. */
+export interface MissionMapPayload {
+  record_id: string;
+  mission_id: string | null;
+  nmssn: number | null;
+  pmap_id: string | null;
+  pmapv_id: string | null;
+  point_area_m: number[];
+  coverage_mm: [number, number][];
+  rooms: Record<string, [number, number][]>;
+}
+
+/** v2.3.0 MISSION-MAP fetch outcome. Three-way, not boolean-error like
+ *  MissionExplain/MissionPath: the integration's 404 ("no coverage layer
+ *  for this mission" — the known-open lewis/i-series case) is a real,
+ *  calm answer and must read differently from a 409/502 transport failure. */
+export type MissionMapResult =
+  | { status: 'ok'; data: MissionMapPayload }
+  | { status: 'absent' }   // 404 — no map for this mission (honest absence)
+  | { status: 'error' };   // 409 / 502 / network — genuine failure
+
+/** Daily summary from GET /api/roomba_plus/{id}/mission_history */export interface DaySummary {
   date: string;           // ISO date "2025-05-14"
   total: number;
   completed: number;

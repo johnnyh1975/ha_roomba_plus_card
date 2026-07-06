@@ -127,16 +127,70 @@ function renderHealthScore(
   const colour = healthScoreColour(score);
   const band   = healthScoreBand(score);
 
+  // v2.2.0 F2 (PLAIN-STATUS, integration ≥ 3.1.0) — the integration derives
+  // a plain-language status_text/recommendation from the score breakdown's
+  // weakest signal, ALREADY LOCALISED server-side (7 languages, keyed off
+  // HA's configured language). The card displays, never interprets —
+  // presence-based gating, absent attrs on ≤ 3.0.x simply render nothing.
+  const statusText = entity.attributes?.status_text as string | undefined;
+  const recommendation = entity.attributes?.recommendation as string | null | undefined;
+  const plainStatusHtml = statusText
+    ? `<div class="rpc-health-plain-status">${esc(statusText)}${
+        recommendation ? `<div class="rpc-health-recommendation">${esc(recommendation)}</div>` : ''
+      }</div>`
+    : '';
+
   return `
     <div class="rpc-health-score" aria-label="Robot health ${score} out of 100, ${band}">
       <span class="rpc-health-score-label">ROBOT HEALTH</span>
       <span class="rpc-health-score-value" style="color:${colour}">${score}</span>
       <span class="rpc-health-score-band" style="color:${colour}">● ${band}</span>
+      ${renderHealthTrend(hass, n)}
     </div>
+    ${plainStatusHtml}
     <button class="rpc-health-details-toggle" data-health-details-toggle aria-expanded="${expanded}">
       ${expanded ? 'Hide details ▲' : 'Show details ▼'}
     </button>
   `;
+}
+
+// ── v2.2.0 F3 — health score trend (integration ≥ 3.2.0, L10) ────────────────
+//
+// sensor.*_health_score_trend classifies the recent trend against the robot's
+// OWN learned baseline (self-calibration, same philosophy as L9-BATTERY):
+// state is 'improving' | 'stable' | 'declining', or unknown while the 44-day
+// baseline is still building. The v3.2.0 UX fix exposes `days_until_ready`
+// precisely so the learning period is visible instead of a silent blank —
+// this renders that countdown. Calibration-state invariant applies: unknown
+// state is NEVER shown as zero or as an error.
+//
+// Scope note: layout_change_detected's missions_until_first_ready countdown
+// was deliberately NOT given an always-visible line here — a permanent
+// "learning…" row for a feature most users never triggered is noise. Layout
+// change surfaces as an alert when it actually fires (alert-zone.ts).
+function renderHealthTrend(hass: HomeAssistant, n: string): string {
+  const trend = hass.states[`sensor.${n}_health_score_trend`];
+  if (!trend) return '';
+
+  if (trend.state === 'improving' || trend.state === 'stable' || trend.state === 'declining') {
+    const map = {
+      improving: { icon: '↗', colour: 'var(--rpc-green, #4ade80)', label: 'improving' },
+      stable:    { icon: '→', colour: 'var(--secondary-text-color)', label: 'stable' },
+      declining: { icon: '↘', colour: '#d97706', label: 'declining' },
+    } as const;
+    const t = map[trend.state];
+    return `<span class="rpc-health-trend" style="color:${t.colour}" aria-label="Health trend: ${t.label}">${t.icon} ${t.label}</span>`;
+  }
+
+  // Calibrating — show the countdown the integration exposes for exactly
+  // this purpose. days_until_ready is the TREND baseline's readiness (44-day
+  // horizon), distinct from the score's own calibration; only rendered here,
+  // attached to the trend, never mixed into the score's calibrating text.
+  const daysLeft = trend.attributes?.days_until_ready;
+  if (typeof daysLeft === 'number' && daysLeft > 0) {
+    return `<span class="rpc-health-trend rpc-health-trend--calibrating">trend in ~${daysLeft}d</span>`;
+  }
+  return '';
 }
 
 // ── v2.0 C5-ANOMALY — mission anomaly banner ─────────────────────────────────
@@ -292,6 +346,190 @@ function renderMaintenanceCalendar(
   `;
 }
 
+// ── v2.2.0 A3 — dock health rollup (Clean Base / charging dock) ──────────────
+//
+// Four sensors, mixed gating: dock_tank_level is enabled by default
+// (filter_fn: dock.tankLvl present — Clean Base with water tank only);
+// dock_knockoffs / dock_charge_aborts / dock_contact_chatters are
+// entity_registry_enabled_default=False diagnostics (bbchg counters,
+// integration DOCK-HEALTH v2.8.0). Presence-gated per C5 precedent — the
+// section renders whatever subset exists, and renders nothing at all
+// (including for the 980, which has no Clean Base) when none do.
+function renderDockHealth(hass: HomeAssistant, n: string): string {
+  const read = (id: string): number | null => {
+    const e = hass.states[id];
+    if (!e || e.state === 'unknown' || e.state === 'unavailable') return null;
+    const v = parseFloat(e.state);
+    return isNaN(v) ? null : v;
+  };
+  const tank      = read(`sensor.${n}_dock_tank_level`);
+  const knockoffs = read(`sensor.${n}_dock_knockoffs`);
+  const aborts    = read(`sensor.${n}_dock_charge_aborts`);
+  const chatters  = read(`sensor.${n}_dock_contact_chatters`);
+
+  if (tank === null && knockoffs === null && aborts === null && chatters === null) return '';
+
+  const tankHtml = tank !== null
+    ? `<div class="rpc-dock-tank">Tank level ${Math.round(tank)}%</div>`
+    : '';
+  const counterParts = [
+    knockoffs !== null ? `${knockoffs.toLocaleString()} knockoffs` : '',
+    aborts    !== null ? `${aborts.toLocaleString()} charge aborts` : '',
+    chatters  !== null ? `${chatters.toLocaleString()} contact chatters` : '',
+  ].filter(Boolean);
+  const countersHtml = counterParts.length
+    ? `<div class="rpc-dock-counters">${counterParts.join(' · ')} <span class="rpc-dock-lifetime-note">(lifetime)</span></div>`
+    : '';
+
+  return `
+    <div class="rpc-health-divider"></div>
+    <div class="rpc-dock-health">
+      <div class="rpc-dock-label">DOCK</div>
+      ${tankHtml}
+      ${countersHtml}
+    </div>
+  `;
+}
+
+// ── v2.3.0 — Rooms-Overdue widget (integration v3.3.0 ROOM-SCHED) ────────────
+//
+// Reads sensor.*_rooms_overdue directly (state = overdue count, attributes
+// carry the per-room merged rule result — see MissionStore.rooms_overdue_merged
+// in the integration). Zero overdue is a real, calm answer ("All rooms in
+// rhythm") and is shown, not hidden — distinct from DOCK's "render nothing"
+// rule, which is for genuinely absent data, not a meaningful zero value.
+// v1 deliberately does not surface the configured/learned source distinction
+// per room (adds visual noise for a difference most users won't act on
+// differently) — revisit if field feedback wants it.
+function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: string, state: HealthZoneState): string {
+  if (!caps.hasRoomsOverdue) return '';
+
+  const entity = hass.states[`sensor.${n}_rooms_overdue`];
+  if (!entity) return '';
+  // Bug-hunt round 1: an unavailable/unknown sensor must not read as "0
+  // overdue" — HA clears attributes on unavailable entities, and this
+  // function has no way to distinguish that from a genuine empty
+  // overdue_rooms list without this explicit check. Matches the
+  // established unavailable/unknown guard pattern used throughout this
+  // file (renderDockHealth, maintenance calendar, health score).
+  if (entity.state === 'unknown' || entity.state === 'unavailable') return '';
+
+  const attrs = entity.attributes ?? {};
+  const rooms = (attrs['rooms'] ?? {}) as Record<string, {
+    days_since_last: number; expected_interval_days: number | null;
+    source: string; status: string; overdue_factor: number | null;
+  }>;
+  const overdueRooms = Array.isArray(attrs['overdue_rooms']) ? attrs['overdue_rooms'] as string[] : [];
+  const dailySuggested = Array.isArray(attrs['daily_suggested']) ? attrs['daily_suggested'] as string[] : [];
+
+  let bodyHtml: string;
+  if (overdueRooms.length === 0) {
+    bodyHtml = `<div class="rpc-rooms-overdue-row rpc-rooms-overdue-row--muted">All rooms in rhythm</div>`;
+  } else {
+    // overdue_rooms arrives pre-sorted worst-first (overdue_factor desc) —
+    // rendered in that order as-is, not re-sorted here.
+    bodyHtml = overdueRooms.map(name => {
+      const info = rooms[name];
+      if (!info) return '';   // defensive: name in overdue_rooms but missing from rooms dict
+      const days = Math.round(info.days_since_last);
+      const expected = info.expected_interval_days != null ? Math.round(info.expected_interval_days) : null;
+      const expectedStr = expected != null ? ` (expected ~${expected}d)` : '';
+      return `<div class="rpc-rooms-overdue-row">${esc(name)} — ${days}d since last clean${expectedStr}</div>`;
+    }).join('');
+  }
+
+  const dailyHtml = dailySuggested.length > 0
+    ? `<div class="rpc-rooms-overdue-daily">${dailySuggested.map(esc).join(', ')} could use daily cleaning</div>`
+    : '';
+
+  // v2.3.0 — "Clean overdue" trigger. Reuses the existing generic
+  // data-reset/data-service mechanism (dispatchClick's 'reset' case) rather
+  // than adding a bespoke click case: that handler already calls any
+  // roomba_plus.* service with entity_id: activeRobot and tracks
+  // loading/error by a string key. Hidden entirely when nothing is
+  // overdue — the service itself no-ops safely, but showing an action
+  // button for "nothing to do" is poor UX, not a safety concern.
+  const isCleaning = state.resetting === 'overdue-clean';
+  const cleanBtnHtml = overdueRooms.length > 0 ? `
+    <button class="rpc-btn rpc-btn-secondary rpc-rooms-overdue-btn${isCleaning ? ' rpc-btn-loading' : ''}"
+            data-reset="overdue-clean" data-service="clean_overdue_rooms"
+            ${isCleaning ? 'disabled' : ''}>
+      ${isCleaning ? '<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>' : 'Clean overdue'}
+    </button>
+    ${state.resetError === 'overdue-clean' ? `<div class="rpc-send-error">Couldn't start — try again</div>` : ''}
+  ` : '';
+
+  return `
+    <div class="rpc-health-divider"></div>
+    <div class="rpc-rooms-overdue">
+      <div class="rpc-dock-label">ROOMS</div>
+      ${bodyHtml}
+      ${dailyHtml}
+      ${cleanBtnHtml}
+    </div>
+  `;
+}
+
+// ── v2.3.0 — Dirt/sensor correlation widget (integration v3.3.0 CROSS-CORR) ──
+//
+// Reads sensor.*_dirt_weather_correlation directly. State is the strongest
+// passing Pearson r (|r| > 0.3, n >= 30) or unknown/null below that. The
+// integration supplies no interpretive prose for this sensor (unlike F2's
+// plain-language health status) — only raw r/n per configured entity — so
+// the card shows the numbers as-is rather than inventing directional
+// language ("collects more dirt when X is high") it can't fully justify
+// from a bare correlation coefficient alone. That framing is deliberately
+// left to the integration's own Repair Issue, a separate HA-native surface.
+function renderDirtCorrelation(hass: HomeAssistant, caps: RobotCapabilities, n: string): string {
+  if (!caps.hasDirtCorrelation) return '';
+
+  const entity = hass.states[`sensor.${n}_dirt_weather_correlation`];
+  if (!entity) return '';
+  // Bug-hunt round 1 (self-correction): unlike rooms_overdue, this
+  // sensor's native_value legitimately returns None — HA state "unknown"
+  // — whenever nothing passes the correlation threshold yet. That's the
+  // NORMAL, expected "still collecting data" case this function's
+  // progress display exists for, not a broken/unavailable entity. Only
+  // 'unavailable' (verified against source: RoombaDirtCorrelationSensor
+  // always returns a real int/float or None, never anything HA would
+  // report as unavailable except a genuinely dead entity) means hide.
+  if (entity.state === 'unavailable') return '';
+
+  const attrs = entity.attributes ?? {};
+  const byEntity = (attrs['by_entity'] ?? {}) as Record<string, { r: number | null; n: number }>;
+  const strongestEntity = (attrs['strongest_entity'] ?? null) as string | null;
+
+  const friendlyName = (eid: string): string =>
+    (hass.states[eid]?.attributes?.friendly_name as string | undefined) ?? eid;
+
+  let bodyHtml: string;
+  const strongestInfo = strongestEntity ? byEntity[strongestEntity] : undefined;
+  if (strongestEntity && strongestInfo?.r != null) {
+    bodyHtml = `<div class="rpc-dirt-corr-row">Strongest link: ${esc(friendlyName(strongestEntity))} (r = ${strongestInfo.r.toFixed(2)})</div>`;
+  } else {
+    const entries = Object.entries(byEntity);
+    if (entries.length === 0) {
+      bodyHtml = `<div class="rpc-dirt-corr-row rpc-dirt-corr-row--muted">Collecting data…</div>`;
+    } else {
+      // v3.3.0 CROSS-CORR — _CORR_MIN_SAMPLES threshold (verified against
+      // source): correlation is only computed from 30 samples onwards;
+      // below that, show progress toward it rather than nothing.
+      bodyHtml = entries.map(([eid, info]) => {
+        const nCount = typeof info?.n === 'number' ? info.n : 0;
+        return `<div class="rpc-dirt-corr-row rpc-dirt-corr-row--muted">${esc(friendlyName(eid))}: ${nCount}/30 missions</div>`;
+      }).join('');
+    }
+  }
+
+  return `
+    <div class="rpc-health-divider"></div>
+    <div class="rpc-dirt-corr">
+      <div class="rpc-dock-label">DIRT CORRELATION</div>
+      ${bodyHtml}
+    </div>
+  `;
+}
+
 export function renderHealthZone(
   hass: HomeAssistant,
   config: CardConfig,
@@ -397,6 +635,34 @@ export function renderHealthZone(
   // maintenance calendar (C2), and anomaly banner (C5) are independent of
   // the consumable bars and must still render if any is present, even on a
   // robot with zero filter/brush/battery sensors detected.
+  // v2.2.0 B1 — resolved-error info line. The persistent
+  // sensor.*_last_error_code keeps its value after an error is cleared (by
+  // design, paired with last_error_at). The Health tab's alert banner is now
+  // gated on the vacuum entity's ACTIVE error (alert-zone.ts); a resolved
+  // error renders here as a single muted line instead, so the history stays
+  // visible without alarm styling.
+  let lastErrorHtml = '';
+  {
+    const vacuumEntity = hass.states[`vacuum.${n}`];
+    const activeError  = !!vacuumEntity
+      && (vacuumEntity.state === 'error' || !!vacuumEntity.attributes?.error_code);
+    const errSensor = hass.states[`sensor.${n}_last_error_code`];
+    if (!activeError
+        && errSensor
+        && errSensor.state !== '0'
+        && errSensor.state !== ''
+        && errSensor.state !== 'unknown'
+        && errSensor.state !== 'unavailable') {
+      const label = esc((errSensor.attributes.label as string) ?? `Error ${errSensor.state}`);
+      const atState = hass.states[`sensor.${n}_last_error_at`]?.state;
+      const ago = (atState && atState !== 'unknown' && atState !== 'unavailable')
+        ? timeSince(atState, hass.language)
+        : '';
+      lastErrorHtml = `
+        <div class="rpc-last-error-info">Last error: ${label}${ago ? ` · ${esc(ago)} (resolved)` : ' (resolved)'}</div>
+      `;
+    }
+  }
   // v2.0.2 bug fix: this guard already accounted for the health score,
   // maintenance calendar, and anomaly banner (v2.0 additions, fixed
   // earlier) but never accounted for the battery retention bar or
@@ -408,8 +674,18 @@ export function renderHealthZone(
   // the retention bar and writing a minimal test fixture for it — the
   // fixture exposed that retention-only data already produced an empty
   // render even before today's changes.
+  // v2.2.0 A3 — computed before the guard: a dock section alone is real content.
+  const dockHealthHtml = renderDockHealth(hass, n);
+  // v2.3.0 — same reasoning: rooms-overdue alone is real content too.
+  const roomsOverdueHtml = renderRoomsOverdue(hass, caps, n, state);
+  // v2.3.0 — same reasoning: dirt-correlation alone is real content too.
+  const dirtCorrelationHtml = renderDirtCorrelation(hass, caps, n);
+
+  // v2.2.0 B1: lastErrorHtml added — a resolved-error line is real content.
+  // v2.2.0 A3: dockHealthHtml likewise.
   if (bars.length === 0 && !caps.hasRobotHealthScore && !caps.hasMaintenanceCalendar
-      && !anomalyHtml && !navHealthHtml && !caps.hasBatteryRetention && !caps.hasCoveragePct) return '';
+      && !anomalyHtml && !navHealthHtml && !caps.hasBatteryRetention && !caps.hasCoveragePct
+      && !lastErrorHtml && !dockHealthHtml && !roomsOverdueHtml && !dirtCorrelationHtml) return '';
 
   const barsHtml = bars.map(bar => renderBar(bar, hass, n, state)).join('');
 
@@ -591,12 +867,16 @@ export function renderHealthZone(
     <div class="rpc-zone rpc-zone3">
       <div class="rpc-zone-header">HEALTH</div>
       ${anomalyHtml}
+      ${lastErrorHtml}
       ${renderHealthScore(hass, caps, n, state.healthDetailsExpanded)}
       ${caps.hasRobotHealthScore && !state.healthDetailsExpanded ? '' : `
         ${barsHtml}
         ${retentionHtml}
         ${energyHtml}
         ${mopConfigHtml}
+        ${dockHealthHtml}
+        ${roomsOverdueHtml}
+        ${dirtCorrelationHtml}
       `}
       ${renderMaintenanceCalendar(hass, caps, n, state)}
       ${navHealthHtml}

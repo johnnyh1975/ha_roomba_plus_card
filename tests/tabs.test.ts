@@ -80,6 +80,22 @@ describe('healthTabHasBadge()', () => {
     expect(healthTabHasBadge(hass, defaultCaps, n)).toBe(false);
   });
 
+  // ── v2.3.0: Rooms-Overdue badge ──────────────────────────────────────────
+  it('true when rooms_overdue count > 0', () => {
+    const hass = makeHass({ [`sensor.${n}_rooms_overdue`]: st('2') });
+    expect(healthTabHasBadge(hass, { ...defaultCaps, hasRoomsOverdue: true }, n)).toBe(true);
+  });
+
+  it('false when rooms_overdue count is 0', () => {
+    const hass = makeHass({ [`sensor.${n}_rooms_overdue`]: st('0') });
+    expect(healthTabHasBadge(hass, { ...defaultCaps, hasRoomsOverdue: true }, n)).toBe(false);
+  });
+
+  it('false when hasRoomsOverdue capability absent, even with a nonzero-looking entity', () => {
+    const hass = makeHass({ [`sensor.${n}_rooms_overdue`]: st('2') });
+    expect(healthTabHasBadge(hass, defaultCaps, n)).toBe(false);
+  });
+
   // ── v2.0: alert category integration (shared source of truth with alert-zone.ts) ──
   it('true when consecutive_clean_skips alert is active (category: health)', () => {
     const hass = makeHass({ [`sensor.${n}_consecutive_clean_skips`]: st('2') });

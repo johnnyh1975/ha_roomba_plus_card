@@ -14,27 +14,82 @@ describe('renderAlertZone()', () => {
     expect(render()).toBe(''));
 
   it('returns empty string when show_alerts: false even with error', () => {
-    const states = { [`sensor.${n}_last_error_code`]: st('2', { description: 'Stuck', action: 'Move it' }) };
+    const states = {
+      [`vacuum.${n}`]:                  st('error', { error_code: 2 }),
+      [`sensor.${n}_last_error_code`]:  st('2', { description: 'Stuck', action: 'Move it' }),
+    };
     expect(render(states, defaultCaps, { ...baseConfig, show_alerts: false })).toBe('');
   });
 
-  // ── Priority 1 — error ──────────────────────────
-  it('renders alert when error sensor state is non-zero', () => {
-    const html = render({ [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck', description: 'The brush roll is jammed.', action: 'Clear hair' }) });
+  // ── Priority 1 — error (v2.2.0 B1: gated on ACTIVE vacuum error) ──
+  it('renders alert when vacuum has an active error and sensor is non-zero', () => {
+    const html = render({
+      [`vacuum.${n}`]:                 st('error', { error_code: 2 }),
+      [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck', description: 'The brush roll is jammed.', action: 'Clear hair' }),
+    });
     expect(html).toContain('Error: Brush stuck');
     expect(html).toContain('Clear hair');
   });
 
+  it('B1: NO alert from persistent last_error_code alone (resolved error)', () => {
+    // Field report: brush-jam banner stayed for a week after the jam was
+    // cleared. last_error_code is persistent by design — without an active
+    // error on the vacuum entity, no banner.
+    const html = render({
+      [`vacuum.${n}`]:                 st('docked', {}),
+      [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck' }),
+    });
+    expect(html).toBe('');
+  });
+
+  it('B1: no alert when vacuum entity is absent entirely', () =>
+    expect(render({ [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck' }) })).toBe(''));
+
+  it('B1: active via error_code attribute even when vacuum state is not "error" (e.g. paused)', () => {
+    const html = render({
+      [`vacuum.${n}`]:                 st('paused', { error_code: 15 }),
+      [`sensor.${n}_last_error_code`]: st('15', { label: 'Reboot required' }),
+    });
+    expect(html).toContain('Error: Reboot required');
+  });
+
+  it('B1: falls back to vacuum error attributes when sensor is unusable', () => {
+    const html = render({
+      [`vacuum.${n}`]:                 st('error', { error_code: 7, error: 'Wheel problem' }),
+      [`sensor.${n}_last_error_code`]: st('unknown'),
+    });
+    expect(html).toContain('Error: Wheel problem');
+  });
+
+  it('B1: fallback without error message uses the code', () => {
+    const html = render({ [`vacuum.${n}`]: st('error', { error_code: 7 }) });
+    expect(html).toContain('Error: Error 7');
+  });
+
   it('no alert when error sensor state is "0"', () =>
-    expect(render({ [`sensor.${n}_last_error_code`]: st('0') })).toBe(''));
+    expect(render({
+      [`vacuum.${n}`]:                 st('docked', {}),
+      [`sensor.${n}_last_error_code`]: st('0'),
+    })).toBe(''));
 
   it('no alert when error sensor state is empty string', () =>
-    expect(render({ [`sensor.${n}_last_error_code`]: st('') })).toBe(''));
+    expect(render({
+      [`vacuum.${n}`]:                 st('docked', {}),
+      [`sensor.${n}_last_error_code`]: st(''),
+    })).toBe(''));
 
   it('escapes XSS in error label', () => {
-    const html = render({ [`sensor.${n}_last_error_code`]: st('1', { label: '<img onerror=x>' }) });
+    const html = render({
+      [`vacuum.${n}`]:                 st('error', { error_code: 1 }),
+      [`sensor.${n}_last_error_code`]: st('1', { label: '<img onerror=x>' }),
+    });
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
+  });
+
+  it('escapes XSS in vacuum fallback error message', () => {
+    const html = render({ [`vacuum.${n}`]: st('error', { error_code: 1, error: '<script>x</script>' }) });
+    expect(html).not.toContain('<script>');
   });
 
   // ── Priority 2 — maintenance ────────────────────
@@ -71,6 +126,7 @@ describe('renderAlertZone()', () => {
   // ── Priority ordering ───────────────────────────
   it('error (P1) takes priority over maintenance (P2)', () => {
     const html = render({
+      [`vacuum.${n}`]:                        st('error', { error_code: 2 }),
       [`sensor.${n}_last_error_code`]:        st('2', { description: 'Error desc' }),
       [`binary_sensor.${n}_maintenance_due`]: st('on'),
     });
@@ -249,20 +305,29 @@ describe('renderAlertZone() — error sensor unknown state (B5)', () => {
   });
 
   it('shows label as alert title when state is a real error code', () => {
-    const html = render({ [`sensor.${n}_last_error_code`]: st('17', { label: 'Path blocked', description: 'An obstacle is blocking the path.', action: 'Clear the path.' }) });
+    const html = render({
+      [`vacuum.${n}`]:                 st('error', { error_code: 17 }),
+      [`sensor.${n}_last_error_code`]: st('17', { label: 'Path blocked', description: 'An obstacle is blocking the path.', action: 'Clear the path.' }),
+    });
     expect(html).toContain('Error: Path blocked');
     expect(html).toContain('An obstacle is blocking the path.');
     expect(html).toContain('Clear the path.');
   });
 
   it('falls back to "Error N" when label attribute absent', () => {
-    const html = render({ [`sensor.${n}_last_error_code`]: st('99', {}) });
+    const html = render({
+      [`vacuum.${n}`]:                 st('error', { error_code: 99 }),
+      [`sensor.${n}_last_error_code`]: st('99', {}),
+    });
     expect(html).toContain('Error: Error 99');
     expect(html).not.toContain('Robot error');
   });
 
   it('never shows "Robot error" fallback', () => {
-    const html = render({ [`sensor.${n}_last_error_code`]: st('17', {}) });
+    const html = render({
+      [`vacuum.${n}`]:                 st('error', { error_code: 17 }),
+      [`sensor.${n}_last_error_code`]: st('17', {}),
+    });
     expect(html).not.toContain('Robot error');
   });
 });
@@ -316,5 +381,40 @@ describe('hasAlertForTab() — category tagging shared with renderAlertZone()', 
     });
     const caps = { ...defaultCaps, hasWifiFloor: true };
     expect(hasAlertForTab(hass, caps, n, 'history')).toBe(true);
+  });
+});
+
+describe('renderAlertZone() — v2.2.0 F3b layout change alert', () => {
+  it('shows alert when layout_change_detected is on', () => {
+    const html = render({ [`binary_sensor.${n}_layout_change_detected`]: st('on') });
+    expect(html).toContain('Room layout may have changed');
+  });
+
+  it('no alert when off or absent', () => {
+    expect(render({ [`binary_sensor.${n}_layout_change_detected`]: st('off') })).toBe('');
+    expect(render({})).toBe('');
+  });
+
+  it('is tagged health for the tab badge', () => {
+    const hass = makeHass({ [`binary_sensor.${n}_layout_change_detected`]: st('on') });
+    expect(hasAlertForTab(hass, defaultCaps, n, 'health')).toBe(true);
+    expect(hasAlertForTab(hass, defaultCaps, n, 'history')).toBe(false);
+  });
+
+  it('lower priority than consecutive skips (P6)', () => {
+    const html = render({
+      [`binary_sensor.${n}_layout_change_detected`]: st('on'),
+      [`sensor.${n}_consecutive_clean_skips`]:       st('3'),
+    }, { ...defaultCaps, hasConsecutiveSkips: true });
+    expect(html).toContain('blocked from cleaning');
+    expect(html).not.toContain('Room layout');
+  });
+});
+
+describe('renderAlertZone() — v2.2.0 R1 degenerate active-error fallback', () => {
+  it('vacuum state error with no code and no message → generic header wording, never "Error: Error"', () => {
+    const html = render({ [`vacuum.${n}`]: st('error', {}) });
+    expect(html).toContain('Robot error — check the iRobot app');
+    expect(html).not.toContain('Error: Error');
   });
 });

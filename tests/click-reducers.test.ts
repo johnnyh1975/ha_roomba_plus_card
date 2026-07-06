@@ -24,6 +24,9 @@ function baseState(over: Partial<ClickState> = {}): ClickState {
     openDay: null,
     dayMissions: null,
     openDaySummary: null,
+    openExplain: null,
+    openReplay: null,
+    openMissionMap: null,
     ...over,
   };
 }
@@ -147,6 +150,47 @@ describe('heatmap-cell', () => {
 describe('close-day', () => {
   it('clears all day-popover state', () => {
     const patch = clickReducer('close-day', baseState({ openDay: '2026-06-01', dayMissions: [{}], openDaySummary: {} }));
-    expect(patch).toEqual({ openDay: null, dayMissions: null, openDaySummary: null });
+    expect(patch).toEqual({ openDay: null, dayMissions: null, openDaySummary: null, openExplain: null, openReplay: null, openMissionMap: null });
+  });
+});
+
+describe('v2.2.0 F1 — openExplain lifecycle in day reducers', () => {
+  it('close-day clears openExplain', () => {
+    const patch = clickReducer('close-day', baseState({ openDay: '2026-06-26', openExplain: { missionId: 'm2', data: null } }));
+    expect(patch.openExplain).toBeNull();
+  });
+
+  it('heatmap-cell (open new day) clears openExplain', () => {
+    const patch = clickReducer('heatmap-cell',
+      baseState({ openDay: '2026-06-25', openExplain: { missionId: 'm2', data: null } }),
+      { date: '2026-06-26' });
+    expect(patch.openExplain).toBeNull();
+  });
+
+  it('heatmap-cell (toggle same day closed) clears openExplain', () => {
+    const patch = clickReducer('heatmap-cell',
+      baseState({ openDay: '2026-06-26', openExplain: { missionId: 'm2', data: null } }),
+      { date: '2026-06-26' });
+    expect(patch.openExplain).toBeNull();
+  });
+
+  it('history-tab switch clears openExplain', () => {
+    const patch = clickReducer('history-tab',
+      baseState({ openExplain: { missionId: 'm2', data: null } }),
+      { historyTab: 'coverage' });
+    expect(patch.openExplain).toBeNull();
+  });
+});
+
+describe('v2.2.0 F4 — openReplay lifecycle', () => {
+  it('close-day clears openReplay', () => {
+    const patch = clickReducer('close-day', baseState({ openDay: '2026-06-26', openReplay: { nMssn: 425, data: null } }));
+    expect(patch.openReplay).toBeNull();
+  });
+  it('heatmap-cell clears openReplay', () => {
+    const patch = clickReducer('heatmap-cell',
+      baseState({ openDay: '2026-06-25', openReplay: { nMssn: 425, data: null } }),
+      { date: '2026-06-26' });
+    expect(patch.openReplay).toBeNull();
   });
 });

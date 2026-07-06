@@ -162,14 +162,14 @@ describe('detectCapabilities() — hasLifetimeArea (A4 / SC1)', () => {
   });
 
   it('hasLifetimeArea true when cleaning_analytics_30d entity present', () => {
-    const hass = makeHass({ [`sensor.${n}_cleaning_analytics_30d`]: '12345' });
+    const hass = makeHass({ [`sensor.${n}_cleaning_analytics_30d`]: st('12345') });
     const caps = detectCapabilities(hass, n, baseConfig, null);
     expect(caps.hasLifetimeArea).toBe(true);
   });
 
   it('hasLifetimeArea false when deprecated recent_area_30d entity present (regression guard)', () => {
     // Confirms the deprecated SC1 slug no longer triggers the flag.
-    const hass = makeHass({ [`sensor.${n}_recent_area_30d`]: '12345' });
+    const hass = makeHass({ [`sensor.${n}_recent_area_30d`]: st('12345') });
     const caps = detectCapabilities(hass, n, baseConfig, null);
     expect(caps.hasLifetimeArea).toBe(false);
   });
@@ -235,4 +235,67 @@ describe('detectCapabilities() — v1.6 entity flags', () => {
 
   it('hasNavStats true when nav_landmark_quality present', () =>
     expect(detectCapabilities(makeHass({ [`sensor.${n}_nav_landmark_quality`]: st('72') }), n, baseConfig).hasNavStats).toBe(true));
+
+  // v2.3.0 — Rooms-Overdue widget
+  it('hasRoomsOverdue false when sensor absent', () =>
+    expect(detectCapabilities(makeHass(), n, baseConfig).hasRoomsOverdue).toBe(false));
+
+  it('hasRoomsOverdue true when sensor present', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_rooms_overdue`]: st('2') }), n, baseConfig).hasRoomsOverdue).toBe(true));
+});
+
+describe('detectCapabilities() — v2.3.0 CORRECTION: hasAlignment reads image.*_map', () => {
+  it('false when image.*_map is absent entirely', () =>
+    expect(detectCapabilities(makeHass(), n, baseConfig).hasAlignment).toBe(false));
+
+  it('false when image.*_map exists but has no rooms attribute', () =>
+    expect(detectCapabilities(makeHass({ [`image.${n}_map`]: st('idle', {}) }), n, baseConfig).hasAlignment).toBe(false));
+
+  it('false when rooms is an empty object', () =>
+    expect(detectCapabilities(makeHass({ [`image.${n}_map`]: st('idle', { rooms: {} }) }), n, baseConfig).hasAlignment).toBe(false));
+
+  it('true when image.*_map has a non-empty rooms dict', () =>
+    expect(detectCapabilities(makeHass({
+      [`image.${n}_map`]: st('idle', { rooms: { Kitchen: { outline: [[0, 0]], name: 'Kitchen', room_id: 'kitchen', icon: '', x: 0, y: 0 } } }),
+    }), n, baseConfig).hasAlignment).toBe(true));
+
+  it('regression guard: rooms on image.*_coverage_map does NOT set hasAlignment (that entity never carries rooms in production)', () =>
+    expect(detectCapabilities(makeHass({
+      [`image.${n}_coverage_map`]: st('idle', { rooms: { Kitchen: { outline: [[0, 0]], name: 'Kitchen', room_id: 'kitchen', icon: '', x: 0, y: 0 } } }),
+    }), n, baseConfig).hasAlignment).toBe(false));
+});
+
+describe('detectCapabilities() — v2.3.0 ZONE-OVERLAY / F24', () => {
+  it('hasZoneOverlays false when image.*_map has no zones', () =>
+    expect(detectCapabilities(makeHass({ [`image.${n}_map`]: st('idle', {}) }), n, baseConfig).hasZoneOverlays).toBe(false));
+
+  it('hasZoneOverlays true when zones is a non-empty array', () =>
+    expect(detectCapabilities(makeHass({
+      [`image.${n}_map`]: st('idle', { zones: [{ type: 'observed', x: 100, y: 200 }] }),
+    }), n, baseConfig).hasZoneOverlays).toBe(true));
+
+  it('hasDoorMarkers true when door_markers is a non-empty array', () =>
+    expect(detectCapabilities(makeHass({
+      [`image.${n}_map`]: st('idle', { door_markers: [{ id: 'dm_1', cx: 0, cy: 0, label: 'Door', mission_count: 3 }] }),
+    }), n, baseConfig).hasDoorMarkers).toBe(true));
+
+  it('hasFurnitureShadows true when furniture_candidates is a non-empty array', () =>
+    expect(detectCapabilities(makeHass({
+      [`image.${n}_map`]: st('idle', { furniture_candidates: [{ x_mm: 100, y_mm: 200 }] }),
+    }), n, baseConfig).hasFurnitureShadows).toBe(true));
+
+  it('all three false when image.*_map is absent entirely', () => {
+    const caps = detectCapabilities(makeHass(), n, baseConfig);
+    expect(caps.hasZoneOverlays).toBe(false);
+    expect(caps.hasDoorMarkers).toBe(false);
+    expect(caps.hasFurnitureShadows).toBe(false);
+  });
+});
+
+describe('detectCapabilities() — v2.3.0 dirt/sensor correlation', () => {
+  it('hasDirtCorrelation false when sensor absent', () =>
+    expect(detectCapabilities(makeHass(), n, baseConfig).hasDirtCorrelation).toBe(false));
+
+  it('hasDirtCorrelation true when sensor present', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_dirt_weather_correlation`]: st('0.61') }), n, baseConfig).hasDirtCorrelation).toBe(true));
 });

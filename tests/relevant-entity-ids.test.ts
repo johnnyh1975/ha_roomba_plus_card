@@ -31,7 +31,7 @@ function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?
     activeRobot,
     `sensor.${n}_last_error_code`,
     `sensor.${n}_last_error_zone`,
-    `sensor.${n}_mission_phase`,
+    `sensor.${n}_phase`,               // v2.2.0 R1 fix: replica had drifted — production watches `_phase`, not `_mission_phase`
     `binary_sensor.${n}_mission_active`,
     `binary_sensor.${n}_maintenance_due`,
     `sensor.${n}_readiness`,
@@ -75,6 +75,7 @@ function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?
     `sensor.${n}_mission_count_30d`,
     `binary_sensor.${n}_demand_clean_blocked`,
     `image.${n}_coverage_map`,
+    `image.${n}_map`,
     // v2.0.1: kept in sync with the production list after a render-guard
     // gap was found — these v2.0 entities were missing from both places.
     `sensor.${n}_robot_health_score`,
@@ -94,6 +95,19 @@ function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?
     `binary_sensor.${n}_mqtt_stale`,
     `sensor.${n}_firmware_version`,
     `device_tracker.${n}_position`,
+    // v2.2.0 — B1/F3/A2/A3 additions
+    `sensor.${n}_last_error_at`,
+    `sensor.${n}_health_score_trend`,
+    `binary_sensor.${n}_layout_change_detected`,
+    `sensor.${n}_optical_dirt_detections`,
+    `sensor.${n}_piezo_dirt_detections`,
+    `sensor.${n}_scrubs_count`,
+    `sensor.${n}_dock_tank_level`,
+    `sensor.${n}_dock_knockoffs`,
+    `sensor.${n}_dock_charge_aborts`,
+    `sensor.${n}_dock_contact_chatters`,
+    `sensor.${n}_rooms_overdue`,       // v2.3.0 ROOM-SCHED
+    `sensor.${n}_dirt_weather_correlation`, // v2.3.0 CROSS-CORR
     ...(helperEntity ? [helperEntity] : []),
   ];
 }
@@ -154,6 +168,9 @@ describe('relevantEntityIds() — B2: previously missing entity IDs now watched'
 
   it('watches image coverage_map (hasCoverageImage cap detection)', () =>
     expect(has(`image.${n}_coverage_map`)).toBe(true));
+
+  it('watches image map (v2.3.0: hasAlignment/rooms/zones/door_markers/furniture_candidates)', () =>
+    expect(has(`image.${n}_map`)).toBe(true));
 
   // ── v2.0.1 bug fix: render-guard gap found while fixing the missing
   // battery_last_replaced display — none of these v2.0 entities were
@@ -218,4 +235,30 @@ describe('relevantEntityIds() — robot_selector_helper', () => {
     const ids = relevantEntityIds(n, entity);
     expect(ids.some(id => id.startsWith('input_text.'))).toBe(false);
   });
+});
+
+describe('relevantEntityIds() — v2.2.0 additions watched', () => {
+  const ids = relevantEntityIds('roomba', 'vacuum.roomba');
+  for (const id of [
+    'sensor.roomba_last_error_at',
+    'sensor.roomba_health_score_trend',
+    'binary_sensor.roomba_layout_change_detected',
+    'sensor.roomba_optical_dirt_detections',
+    'sensor.roomba_piezo_dirt_detections',
+    'sensor.roomba_scrubs_count',
+    'sensor.roomba_dock_tank_level',
+    'sensor.roomba_dock_knockoffs',
+    'sensor.roomba_dock_charge_aborts',
+    'sensor.roomba_dock_contact_chatters',
+  ]) {
+    it(`watches ${id}`, () => expect(ids).toContain(id));
+  }
+});
+
+describe('relevantEntityIds() — v2.3.0 additions watched', () => {
+  const ids = relevantEntityIds('roomba', 'vacuum.roomba');
+  it('watches sensor.roomba_rooms_overdue', () =>
+    expect(ids).toContain('sensor.roomba_rooms_overdue'));
+  it('watches sensor.roomba_dirt_weather_correlation', () =>
+    expect(ids).toContain('sensor.roomba_dirt_weather_correlation'));
 });

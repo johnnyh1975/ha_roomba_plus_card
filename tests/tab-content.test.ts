@@ -21,6 +21,7 @@ function ctx(overrides: Partial<TabContentContext> = {}): TabContentContext {
     isMetric: false,
     missionData: null, historyLoading: false, historyError: null,
     openDay: null, dayMissions: null, openDaySummary: null,
+    openExplain: null, openReplay: null, openMissionMap: null,
     lifetimeExpanded: false, historyTab: 'calendar', hazards: [],
     selectedRooms: new Set<string>(),
     openPopover: null, resetting: null, resetError: null,

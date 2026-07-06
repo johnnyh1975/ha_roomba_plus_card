@@ -35,7 +35,10 @@ export type ClickActionKey =
   | 'cycle-entity'
   | 'lifetime-toggle'
   | 'history-tab'
-  | 'fav-entity';
+  | 'fav-entity'
+  | 'explain'
+  | 'replay'
+  | 'map';
 
 /**
  * Priority-ordered selector → key table. The FIRST selector that the clicked
@@ -66,6 +69,9 @@ export const CLICK_PRIORITY: ReadonlyArray<readonly [string, ClickActionKey]> = 
   ['[data-lifetime-toggle]', 'lifetime-toggle'],
   ['[data-history-tab]', 'history-tab'],
   ['[data-fav-entity]', 'fav-entity'],
+  ['[data-explain]', 'explain'],   // v2.2.0 F1 — before nothing: mission rows have no other data-attr ancestors
+  ['[data-replay]', 'replay'],     // v2.2.0 F4
+  ['[data-map]', 'map'],           // v2.3.0 MISSION-MAP
 ];
 
 export interface ResolvedClick {

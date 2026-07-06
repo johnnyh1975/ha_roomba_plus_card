@@ -21,7 +21,7 @@ function render(
 describe('renderHealthZone() — visibility', () => {
   it('returns empty string when show_health: false', () => {
     const html = renderHealthZone(makeHass(), { ...baseConfig, show_health: false }, defaultCaps, n,
-      { openPopover: null, resetting: null, resetError: null, legendShown: false });
+      { openPopover: null, resetting: null, resetError: null, legendShown: false, healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false });
     expect(html).toBe('');
   });
 
@@ -49,7 +49,7 @@ describe('renderHealthZone() — filter bar', () => {
     const html = render(
       { [`sensor.${n}_filter_remaining_hours`]: st('43', { threshold_hours: 200 }) },
       defaultCaps,
-      { openPopover: 'filter', resetting: null, resetError: null, legendShown: false },
+      { openPopover: 'filter', resetting: null, resetError: null, legendShown: false, healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false },
     );
     expect(html).toContain('Mark as replaced');
     expect(html).toContain('reset_filter');
@@ -84,7 +84,7 @@ describe('renderHealthZone() — battery', () => {
     // No battery sensor, but vacuum entity has battery_level attribute
     const hass = makeHass({ 'vacuum.roomba': st('docked', { battery_level: 72 }) });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps }, n,
-      { openPopover: null, resetting: null, resetError: null, legendShown: false });
+      { openPopover: null, resetting: null, resetError: null, legendShown: false, healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false });
     expect(html).toContain('Battery');
     expect(html).toContain('72%');
   });
@@ -92,7 +92,7 @@ describe('renderHealthZone() — battery', () => {
   it('battery fallback popover renders (entity not null)', () => {
     const hass = makeHass({ 'vacuum.roomba': st('docked', { battery_level: 72 }) });
     const html = renderHealthZone(hass, baseConfig, defaultCaps, n,
-      { openPopover: 'battery', resetting: null, resetError: null, legendShown: false });
+      { openPopover: 'battery', resetting: null, resetError: null, legendShown: false, healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false });
     expect(html).toContain('rpc-popover');
   });
 });
@@ -203,7 +203,7 @@ describe('renderHealthZone() — popover', () => {
     const html = render(
       { [`sensor.${n}_filter_remaining_hours`]: st('50', { threshold_hours: 200 }) },
       defaultCaps,
-      { openPopover: 'filter', resetting: 'filter', resetError: null, legendShown: false },
+      { openPopover: 'filter', resetting: 'filter', resetError: null, legendShown: false, healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false },
     );
     expect(html).toContain('disabled');
     expect(html).toContain('rpc-spinner');
@@ -221,6 +221,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('Health');
     expect(html).toContain('82%');
@@ -234,6 +235,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true, hasBatteryEol: true }, n, {
       openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('~42 days remaining');
   });
@@ -246,6 +248,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true, hasBatteryEol: true }, n, {
       openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('end of life');
   });
@@ -256,6 +259,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, defaultCaps, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).not.toContain('data-bar="retention"');
   });
@@ -268,6 +272,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('247 charge cycles');
   });
@@ -279,6 +284,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toMatch(/data-bar="retention"[\s\S]*?rpc-bar-hours/);
   });
@@ -296,6 +302,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     // The fill must be a <div class="rpc-bar-fill">, not a <span>
     expect(html).toContain('<div class="rpc-bar-fill"');
@@ -308,6 +315,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('Mark as replaced');
     expect(html).toContain('data-reset="retention"');
@@ -320,6 +328,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: 'retention', resetting: 'retention', resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('rpc-btn-loading');
     expect(html).toContain('disabled');
@@ -332,6 +341,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: 'retention', resetting: null, resetError: 'retention', legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('Reset failed');
   });
@@ -347,6 +357,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).not.toBe('');
     expect(html).toContain('data-bar="retention"');
@@ -358,6 +369,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).not.toBe('');
   });
@@ -370,6 +382,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).not.toContain('247 charge cycles');
   });
@@ -386,6 +399,7 @@ describe('renderHealthZone() — A6 mop pad bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasPad: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('Pad');
     expect(html).toContain('60%');    // 18/30 = 60%
@@ -398,6 +412,7 @@ describe('renderHealthZone() — A6 mop pad bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasPad: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).not.toContain('data-bar="pad"');
   });
@@ -415,6 +430,7 @@ describe('renderHealthZone() — F6a coverage pct bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('78%');
     expect(html).toContain('last mission');
@@ -429,6 +445,7 @@ describe('renderHealthZone() — F6a coverage pct bar', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('Building history');
     expect(html).not.toContain('last mission');
@@ -447,6 +464,7 @@ describe('renderHealthZone() — F6a coverage bar skeleton fallback (L1)', () =>
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('Building history');
     expect(html).not.toContain('last mission');
@@ -460,6 +478,7 @@ describe('renderHealthZone() — F6a coverage bar skeleton fallback (L1)', () =>
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('last mission');
     expect(html).toContain('data-bar="coverage"');
@@ -478,6 +497,7 @@ describe('renderHealthZone() — F6a retention popover close button (B1)', () =>
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: 'retention', resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('data-close="retention"');
     expect(html).not.toContain('data-bar-close');
@@ -497,6 +517,7 @@ describe('renderHealthZone() — B4 orphaned separator regression', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).not.toContain('rpc-health-battery-sep');
   });
@@ -508,6 +529,7 @@ describe('renderHealthZone() — B4 orphaned separator regression', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).not.toContain('rpc-health-battery-sep');
   });
@@ -519,6 +541,7 @@ describe('renderHealthZone() — B4 orphaned separator regression', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasBatteryRetention: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('rpc-health-battery-sep');
   });
@@ -536,6 +559,7 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('data-bar="coverage"');
     expect(html).toContain('role="button"');
@@ -549,6 +573,7 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: 'coverage', resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('Floor Coverage');
     expect(html).toContain('72% of floor area');
@@ -563,6 +588,7 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('100%');
     expect(html).not.toContain('103%');
@@ -836,5 +862,432 @@ describe('renderHealthZone() — A1 navigation health', () => {
     });
     expect(html).toContain('rpc-nav-health');
     expect(html).toContain('rpc-nav-score--na');
+  });
+});
+
+describe('renderHealthZone() — v2.2.0 B1 resolved-error info line', () => {
+  it('shows muted "Last error" line when error is resolved (no active vacuum error)', () => {
+    const html = render({
+      [`vacuum.${n}`]:                 st('docked', {}),
+      [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck' }),
+      [`sensor.${n}_last_error_at`]:   st(new Date(Date.now() - 6 * 86400000).toISOString()),
+    });
+    expect(html).toContain('rpc-last-error-info');
+    expect(html).toContain('Last error: Brush stuck');
+    expect(html).toContain('(resolved)');
+    expect(html).toMatch(/6 days ago|6d ago/);
+  });
+
+  it('omits the info line while the error is still ACTIVE (banner owns it)', () => {
+    const html = render({
+      [`vacuum.${n}`]:                 st('error', { error_code: 2 }),
+      [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck' }),
+    });
+    expect(html).not.toContain('rpc-last-error-info');
+  });
+
+  it('omits the info line when no error was ever recorded', () => {
+    const html = render({
+      [`vacuum.${n}`]:                 st('docked', {}),
+      [`sensor.${n}_last_error_code`]: st('0'),
+    });
+    expect(html).not.toContain('rpc-last-error-info');
+  });
+
+  it('renders without timestamp when last_error_at is unavailable', () => {
+    const html = render({
+      [`vacuum.${n}`]:                 st('docked', {}),
+      [`sensor.${n}_last_error_code`]: st('9', { label: 'Cliff sensor' }),
+      [`sensor.${n}_last_error_at`]:   st('unavailable'),
+    });
+    expect(html).toContain('Last error: Cliff sensor (resolved)');
+  });
+
+  it('falls back to "Error N" label and escapes XSS', () => {
+    const html = render({
+      [`vacuum.${n}`]:                 st('docked', {}),
+      [`sensor.${n}_last_error_code`]: st('5', { label: '<b>x</b>' }),
+    });
+    expect(html).not.toContain('<b>x</b>');
+    expect(html).toContain('&lt;b&gt;');
+  });
+});
+
+describe('renderHealthZone() — v2.2.0 F2 plain status (PLAIN-STATUS, integration ≥ 3.1.0)', () => {
+  const capsScore = { ...defaultCaps, hasRobotHealthScore: true };
+
+  it('renders status_text and recommendation from score attributes', () => {
+    const html = render({
+      [`sensor.${n}_robot_health_score`]: st('72', {
+        status_text: 'Akkuleistung lässt nach',
+        recommendation: 'Akkuzustand im Blick behalten.',
+      }),
+    }, capsScore);
+    expect(html).toContain('rpc-health-plain-status');
+    expect(html).toContain('Akkuleistung lässt nach');
+    expect(html).toContain('Akkuzustand im Blick behalten.');
+  });
+
+  it('renders status_text without recommendation when recommendation is null (healthy)', () => {
+    const html = render({
+      [`sensor.${n}_robot_health_score`]: st('95', {
+        status_text: 'Robot is in good condition',
+        recommendation: null,
+      }),
+    }, capsScore);
+    expect(html).toContain('Robot is in good condition');
+    expect(html).not.toContain('rpc-health-recommendation');
+  });
+
+  it('renders nothing extra on integration ≤ 3.0.x (attrs absent)', () => {
+    const html = render({ [`sensor.${n}_robot_health_score`]: st('82') }, capsScore);
+    expect(html).not.toContain('rpc-health-plain-status');
+  });
+
+  it('escapes HTML in status_text', () => {
+    const html = render({
+      [`sensor.${n}_robot_health_score`]: st('50', { status_text: '<b>x</b>' }),
+    }, capsScore);
+    expect(html).not.toContain('<b>x</b>');
+  });
+});
+
+describe('renderHealthZone() — v2.2.0 F3 health score trend (integration ≥ 3.2.0)', () => {
+  const capsScore = { ...defaultCaps, hasRobotHealthScore: true };
+  const score = { [`sensor.${n}_robot_health_score`]: st('82') };
+
+  it('shows improving trend with up arrow', () => {
+    const html = render({ ...score, [`sensor.${n}_health_score_trend`]: st('improving') }, capsScore);
+    expect(html).toContain('rpc-health-trend');
+    expect(html).toContain('↗ improving');
+  });
+
+  it('shows declining trend in amber', () => {
+    const html = render({ ...score, [`sensor.${n}_health_score_trend`]: st('declining') }, capsScore);
+    expect(html).toContain('↘ declining');
+    expect(html).toContain('#d97706');
+  });
+
+  it('shows stable trend', () => {
+    const html = render({ ...score, [`sensor.${n}_health_score_trend`]: st('stable') }, capsScore);
+    expect(html).toContain('→ stable');
+  });
+
+  it('calibrating trend shows countdown, never zero or error (calibration-state invariant)', () => {
+    const html = render({
+      ...score,
+      [`sensor.${n}_health_score_trend`]: st('unknown', { days_until_ready: 31, days_recorded: 13 }),
+    }, capsScore);
+    expect(html).toContain('trend in ~31d');
+    expect(html).not.toContain('↘');
+  });
+
+  it('calibrating trend with days_until_ready 0 or missing renders nothing', () => {
+    const html = render({
+      ...score,
+      [`sensor.${n}_health_score_trend`]: st('unknown', { days_until_ready: 0 }),
+    }, capsScore);
+    expect(html).not.toContain('rpc-health-trend');
+    const html2 = render({ ...score, [`sensor.${n}_health_score_trend`]: st('unknown') }, capsScore);
+    expect(html2).not.toContain('rpc-health-trend');
+  });
+
+  it('trend entity absent (≤ 3.1.x) renders no trend markup', () => {
+    const html = render(score, capsScore);
+    expect(html).not.toContain('rpc-health-trend');
+  });
+});
+
+describe('renderHealthZone() — v2.2.0 A3 dock health', () => {
+  it('renders tank level and lifetime counters when sensors present', () => {
+    const html = render({
+      [`sensor.${n}_dock_tank_level`]:        st('68'),
+      [`sensor.${n}_dock_knockoffs`]:         st('3'),
+      [`sensor.${n}_dock_charge_aborts`]:     st('12'),
+      [`sensor.${n}_dock_contact_chatters`]:  st('154'),
+    });
+    expect(html).toContain('DOCK');
+    expect(html).toContain('Tank level 68%');
+    expect(html).toContain('3 knockoffs');
+    expect(html).toContain('12 charge aborts');
+    expect(html).toContain('154 contact chatters');
+    expect(html).toContain('(lifetime)');
+  });
+
+  it('renders subset: tank only (default-enabled sensor, diagnostics disabled)', () => {
+    const html = render({ [`sensor.${n}_dock_tank_level`]: st('40') });
+    expect(html).toContain('Tank level 40%');
+    expect(html).not.toContain('knockoffs');
+  });
+
+  it('renders counters without tank (dock without water tank)', () => {
+    const html = render({ [`sensor.${n}_dock_knockoffs`]: st('1') });
+    expect(html).toContain('1 knockoffs');
+    expect(html).not.toContain('Tank level');
+  });
+
+  it('renders no dock section when all sensors absent (e.g. Roomba 980, no Clean Base)', () => {
+    const html = render({ [`sensor.${n}_filter_remaining_hours`]: st('50', { threshold_hours: 200 }) });
+    expect(html).not.toContain('rpc-dock-health');
+  });
+
+  it('unavailable sensors are treated as absent', () => {
+    const html = render({ [`sensor.${n}_dock_tank_level`]: st('unavailable') });
+    expect(html).not.toContain('rpc-dock-health');
+  });
+});
+
+describe('renderHealthZone() — v2.2.0 R1: dock block respects details collapse', () => {
+  it('dock hidden when health score present and details collapsed', () => {
+    const html = render({
+      [`sensor.${n}_robot_health_score`]: st('82'),
+      [`sensor.${n}_dock_tank_level`]:    st('68'),
+    }, { ...defaultCaps, hasRobotHealthScore: true }, { healthDetailsExpanded: false });
+    expect(html).not.toContain('rpc-dock-health');
+  });
+
+  it('dock visible when details expanded', () => {
+    const html = render({
+      [`sensor.${n}_robot_health_score`]: st('82'),
+      [`sensor.${n}_dock_tank_level`]:    st('68'),
+    }, { ...defaultCaps, hasRobotHealthScore: true }, { healthDetailsExpanded: true });
+    expect(html).toContain('rpc-dock-health');
+  });
+});
+
+describe('renderHealthZone() — v2.3.0 Rooms-Overdue widget', () => {
+  const caps = { ...defaultCaps, hasRoomsOverdue: true };
+
+  it('no section when capability absent, even with the entity present', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('2', { overdue_rooms: ['Kitchen'], rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } } }),
+    }, defaultCaps);
+    expect(html).not.toContain('rpc-rooms-overdue');
+  });
+
+  it('renders "All rooms in rhythm" as a real answer, not hidden, at zero overdue', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('0', { rooms: {}, overdue_rooms: [] }),
+    }, caps);
+    expect(html).toContain('rpc-rooms-overdue');
+    expect(html).toContain('All rooms in rhythm');
+  });
+
+  it('renders overdue rooms in the pre-sorted order from overdue_rooms, with day counts', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('2', {
+        rooms: {
+          Kitchen: { days_since_last: 6.2, expected_interval_days: 3.0, source: 'configured', status: 'overdue', overdue_factor: 2.07 },
+          Bedroom: { days_since_last: 9.6, expected_interval_days: 7.0, source: 'learned', status: 'overdue', overdue_factor: 1.37 },
+        },
+        overdue_rooms: ['Kitchen', 'Bedroom'],
+      }),
+    }, caps);
+    expect(html).toContain('Kitchen — 6d since last clean (expected ~3d)');
+    expect(html).toContain('Bedroom — 10d since last clean (expected ~7d)');
+    // order: Kitchen (higher overdue_factor) must appear before Bedroom
+    expect(html.indexOf('Kitchen')).toBeLessThan(html.indexOf('Bedroom'));
+  });
+
+  it('omits the expected-interval parenthetical when expected_interval_days is null', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Attic: { days_since_last: 40, expected_interval_days: null, source: 'insufficient_data', status: 'overdue', overdue_factor: null } },
+        overdue_rooms: ['Attic'],
+      }),
+    }, caps);
+    expect(html).toContain('Attic — 40d since last clean');
+    expect(html).not.toContain('(expected ~');
+  });
+
+  it('renders the daily_suggested line when present', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 2, expected_interval_days: 2, source: 'learned', status: 'overdue', overdue_factor: 1.0 } },
+        overdue_rooms: ['Kitchen'],
+        daily_suggested: ['Kitchen'],
+      }),
+    }, caps);
+    expect(html).toContain('Kitchen could use daily cleaning');
+  });
+
+  it('omits the daily_suggested line when the key is entirely absent (not just empty)', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('0', { rooms: {}, overdue_rooms: [] }),
+    }, caps);
+    expect(html).not.toContain('could use daily cleaning');
+  });
+
+  it('no section when the entity itself is absent despite the capability flag', () => {
+    const html = render({}, caps);
+    expect(html).not.toContain('rpc-rooms-overdue');
+  });
+
+  // ── Bug-hunt round 1: an unavailable/unknown entity must not read as a
+  // false "0 overdue" — HA clears attributes on unavailable entities, so
+  // without an explicit guard this would render the calm "All rooms in
+  // rhythm" message when the sensor is actually just down. ──
+  it('renders nothing (not "All rooms in rhythm") when the entity is unavailable', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('unavailable', {}),
+    }, caps);
+    expect(html).not.toContain('rpc-rooms-overdue');
+    expect(html).not.toContain('All rooms in rhythm');
+  });
+
+  it('renders nothing (not "All rooms in rhythm") when the entity state is unknown', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('unknown', {}),
+    }, caps);
+    expect(html).not.toContain('rpc-rooms-overdue');
+    expect(html).not.toContain('All rooms in rhythm');
+  });
+
+  it('rooms-overdue alone (no other health content) still produces a non-empty render', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } },
+        overdue_rooms: ['Kitchen'],
+      }),
+    }, caps);
+    expect(html).not.toBe('');
+  });
+
+  // ── "Clean overdue" trigger button — reuses the generic data-reset/
+  // data-service mechanism (dispatchClick's 'reset' case), keyed 'overdue-clean'.
+  it('button appears when rooms are overdue', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } },
+        overdue_rooms: ['Kitchen'],
+      }),
+    }, caps);
+    expect(html).toContain('data-reset="overdue-clean"');
+    expect(html).toContain('data-service="clean_overdue_rooms"');
+    expect(html).toContain('Clean overdue');
+  });
+
+  it('button absent when nothing is overdue — no action for nothing to do', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('0', { rooms: {}, overdue_rooms: [] }),
+    }, caps);
+    expect(html).not.toContain('data-reset="overdue-clean"');
+  });
+
+  it('shows a spinner and disables the button while sending', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } },
+        overdue_rooms: ['Kitchen'],
+      }),
+    }, caps, { resetting: 'overdue-clean' });
+    expect(html).toContain('rpc-spinner');
+    expect(html).toContain('disabled');
+    expect(html).not.toContain('Clean overdue');
+  });
+
+  it('shows an error message when the send failed', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } },
+        overdue_rooms: ['Kitchen'],
+      }),
+    }, caps, { resetError: 'overdue-clean' });
+    expect(html).toContain("Couldn't start — try again");
+  });
+
+  it('a different reset key\'s loading/error state does not leak onto this button', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } },
+        overdue_rooms: ['Kitchen'],
+      }),
+    }, caps, { resetting: 'retention', resetError: 'retention' });
+    expect(html).toContain('Clean overdue');
+    expect(html).not.toContain("Couldn't start — try again");
+  });
+});
+
+describe('renderHealthZone() — v2.3.0 dirt/sensor correlation widget', () => {
+  const caps = { ...defaultCaps, hasDirtCorrelation: true };
+
+  it('no section when capability absent, even with the entity present', () => {
+    const html = render({
+      [`sensor.${n}_dirt_weather_correlation`]: st('0.61', {
+        by_entity: { 'sensor.humidity': { r: 0.61, n: 40 } }, strongest_entity: 'sensor.humidity',
+      }),
+    }, defaultCaps);
+    expect(html).not.toContain('rpc-dirt-corr');
+  });
+
+  it('no section when the entity itself is absent despite the capability flag', () => {
+    const html = render({}, caps);
+    expect(html).not.toContain('rpc-dirt-corr');
+  });
+
+  // ── Bug-hunt round 1 (self-correction): unlike rooms_overdue, this
+  // sensor's state legitimately reads "unknown" whenever nothing passes
+  // the correlation threshold yet — that's the normal case the progress
+  // display exists for, not a broken entity. Only "unavailable" should
+  // hide the section. ──
+  it('renders nothing when the entity is genuinely unavailable', () => {
+    const html = render({
+      [`sensor.${n}_dirt_weather_correlation`]: st('unavailable', {}),
+    }, caps);
+    expect(html).not.toContain('rpc-dirt-corr');
+  });
+
+  it('still renders (does NOT hide) when state is "unknown" with no passing correlation — the normal case', () => {
+    const html = render({
+      [`sensor.${n}_dirt_weather_correlation`]: st('unknown', {
+        by_entity: { 'sensor.humidity': { r: null, n: 5 } }, strongest_entity: null,
+      }),
+    }, caps);
+    expect(html).toContain('rpc-dirt-corr');
+    expect(html).toContain('5/30 missions');
+  });
+
+  it('shows the strongest correlation with the friendly entity name and r value', () => {
+    const html = render({
+      [`sensor.${n}_dirt_weather_correlation`]: st('0.61', {
+        by_entity: { 'sensor.humidity': { r: 0.61, n: 40 } }, strongest_entity: 'sensor.humidity',
+      }),
+      'sensor.humidity': st('55', { friendly_name: 'Outdoor Humidity' }),
+    }, caps);
+    expect(html).toContain('rpc-dirt-corr');
+    expect(html).toContain('Strongest link: Outdoor Humidity (r = 0.61)');
+  });
+
+  it('falls back to the entity id when no friendly_name is available', () => {
+    const html = render({
+      [`sensor.${n}_dirt_weather_correlation`]: st('0.61', {
+        by_entity: { 'sensor.humidity': { r: 0.61, n: 40 } }, strongest_entity: 'sensor.humidity',
+      }),
+    }, caps);
+    expect(html).toContain('Strongest link: sensor.humidity (r = 0.61)');
+  });
+
+  it('shows sample-count progress toward the 30-sample threshold when nothing passes yet', () => {
+    const html = render({
+      [`sensor.${n}_dirt_weather_correlation`]: st('unknown', {
+        by_entity: { 'sensor.humidity': { r: null, n: 18 } }, strongest_entity: null,
+      }),
+      'sensor.humidity': st('55', { friendly_name: 'Outdoor Humidity' }),
+    }, caps);
+    expect(html).toContain('Outdoor Humidity: 18/30 missions');
+  });
+
+  it('shows a calm "Collecting data…" message when by_entity is empty', () => {
+    const html = render({
+      [`sensor.${n}_dirt_weather_correlation`]: st('unknown', { by_entity: {}, strongest_entity: null }),
+    }, caps);
+    expect(html).toContain('Collecting data…');
+  });
+
+  it('dirt-correlation alone (no other health content) still produces a non-empty render', () => {
+    const html = render({
+      [`sensor.${n}_dirt_weather_correlation`]: st('unknown', { by_entity: {}, strongest_entity: null }),
+    }, caps);
+    expect(html).not.toBe('');
   });
 });

@@ -74,14 +74,29 @@ export function detectCapabilities(
     hasNavStats:            e('nav_panics') || e('nav_landmark_quality'),
     hasMaintenanceCalendar: e('wheel_last_cleaned') || e('contact_last_cleaned') || e('bin_last_cleaned'),
     hasMissionProgressSensor: e('mission_progress'),
-    // hasAlignment: non-empty `rooms` dict on image.*_coverage_map. The
-    // integration only populates this once its own internal alignment
-    // confidence is >= 0.70 — no threshold check needed here, presence alone
-    // is sufficient. (The image entity has no alignment_confidence attribute;
-    // that value is carried on cloud-source mission records — see history-zone.)
+    // v2.3.0 CORRECTION: hasAlignment previously read image.*_coverage_map
+    // (RoombaCoverageImage — a GridStore EMA-diagnostic heatmap with NO
+    // rooms/calibration_points attribute at all, verified against source).
+    // The correct entity is image.*_map (RoombaMapImage) — presence alone
+    // is sufficient, same reasoning as before, just the right target now.
     hasAlignment: (() => {
-      const rooms = hass.states[`image.${name}_coverage_map`]?.attributes?.rooms;
+      const rooms = hass.states[`image.${name}_map`]?.attributes?.rooms;
       return !!rooms && typeof rooms === 'object' && Object.keys(rooms).length > 0;
+    })(),
+    // v2.3.0 ZONE-OVERLAY / F24 — same image.*_map entity as hasAlignment,
+    // same aligned-mode gate (integration withholds all three attributes
+    // together outside aligned mode — verified against source).
+    hasZoneOverlays: (() => {
+      const zones = hass.states[`image.${name}_map`]?.attributes?.zones;
+      return Array.isArray(zones) && zones.length > 0;
+    })(),
+    hasDoorMarkers: (() => {
+      const markers = hass.states[`image.${name}_map`]?.attributes?.door_markers;
+      return Array.isArray(markers) && markers.length > 0;
+    })(),
+    hasFurnitureShadows: (() => {
+      const candidates = hass.states[`image.${name}_map`]?.attributes?.furniture_candidates;
+      return Array.isArray(candidates) && candidates.length > 0;
     })(),
     // hasFavorites: at least one button.*_fav_<id> entity. Favorite IDs are
     // arbitrary per-user iRobot routine identifiers, so this scans all
@@ -98,5 +113,12 @@ export function detectCapabilities(
     // A4: position tracker carrying room_estimate (SMART). device_tracker
     // domain, so checked directly rather than via the sensor helper.
     hasPositionTracker: !!hass.states[`device_tracker.${name}_position`],
+
+    // ── v2.3.0 — Rooms-Overdue widget ─────────────────────────────────────
+    hasRoomsOverdue: e('rooms_overdue'),
+    // v2.3.0 — dirt/sensor correlation. Opt-in diagnostic; presence alone
+    // is sufficient (integration only registers it when the user has
+    // configured correlation entities AND cloud is available).
+    hasDirtCorrelation: e('dirt_weather_correlation'),
   };
 }

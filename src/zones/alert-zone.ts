@@ -36,8 +36,23 @@ export function collectAlerts(
   const alerts: Alert[] = [];
 
   // Priority 1 — error. Tagged 'none': already live in the persistent header.
+  //
+  // v2.2.0 B1: gate on the vacuum entity's ACTIVE error, not on
+  // sensor.*_last_error_code alone. That sensor is deliberately persistent
+  // ("last error" — it keeps its value after the error is resolved, paired
+  // with last_error_at). The integration's vacuum entity only carries the
+  // `error_code` attribute while an error is live (vacuum.py: attribute is
+  // set from roombapy's current error_code and disappears on resolution),
+  // and its state is 'error' when the activity mapping reports one. Field
+  // report: a brush-jam banner stayed on the Health tab for a week after
+  // the jam was physically cleared. The resolved error now renders as a
+  // muted informational line in the Health zone instead (see health-zone.ts).
+  const vacuumEntity = hass.states[`vacuum.${n}`];
+  const activeError  = !!vacuumEntity
+    && (vacuumEntity.state === 'error' || !!vacuumEntity.attributes?.error_code);
   const errorSensor = hass.states[`sensor.${n}_last_error_code`];
-  if (errorSensor
+  if (activeError
+      && errorSensor
       && errorSensor.state !== '0'
       && errorSensor.state !== ''
       && errorSensor.state !== 'unknown'
@@ -47,6 +62,18 @@ export function collectAlerts(
     const action = esc((errorSensor.attributes.action      as string) ?? '');
     const subtext = [desc, action].filter(Boolean).join(' ') || undefined;
     alerts.push({ priority: 1, text: `Error: ${label}`, subtext, category: 'none' });
+  } else if (activeError) {
+    // Active error but last_error_code unusable (sensor lagging behind the
+    // live MQTT state, or entity disabled) — fall back to the vacuum
+    // entity's own error attributes so an active error is never silent.
+    // With neither message nor code (state 'error' from an unknown-phase
+    // mapping), use the header's generic wording instead of "Error: Error".
+    const code = vacuumEntity!.attributes?.error_code;
+    const msg  = vacuumEntity!.attributes?.error as string | undefined;
+    const text = msg ? `Error: ${esc(msg)}`
+      : code != null ? `Error: Error ${esc(String(code))}`
+      : 'Robot error — check the iRobot app';
+    alerts.push({ priority: 1, text, category: 'none' });
   }
 
   // Priority 2 — maintenance due (Wave A A5: readiness-specific text). Health.
@@ -155,6 +182,21 @@ export function collectAlerts(
         });
       }
     }
+  }
+
+  // Priority 8 — layout change detected (v2.2.0, integration ≥ 3.2.0). Health.
+  // binary_sensor.*_layout_change_detected (device_class: problem, enabled by
+  // default) fires when per-cell coverage history diverges from the robot's
+  // own learned layout. Lowest priority: informative, not actionable damage.
+  // Presence-based gating — entity absent on ≤ 3.1.x, no cap flag needed.
+  const layoutEntity = hass.states[`binary_sensor.${n}_layout_change_detected`];
+  if (layoutEntity && layoutEntity.state === 'on') {
+    alerts.push({
+      priority: 8,
+      text:    'Room layout may have changed',
+      subtext: 'Coverage pattern diverges from this robot\u2019s learned layout — moved furniture, or a new/removed obstacle.',
+      category: 'health',
+    });
   }
 
   return alerts;

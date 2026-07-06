@@ -336,3 +336,45 @@ describe('renderHeader() — multi-robot active entity', () => {
     expect(html).not.toContain('Start full clean');
   });
 });
+
+describe('renderHeader() — v2.2.0 recharge-aware duration line', () => {
+  const capsProgress = { ...defaultCaps, hasMissionProgressSensor: true };
+
+  it('shows total duration with charging share after a mid-mission recharge', () => {
+    const html = render(
+      {
+        'vacuum.roomba': st('cleaning', {}),
+        [`sensor.${n}_mission_progress`]: st('45', {
+          current_room: 'Living room', mission_duration_min: 156, recharge_min: 42,
+        }),
+      },
+      { caps: capsProgress },
+    );
+    expect(html).toContain('156 min (42 min charging)');
+  });
+
+  it('no duration line when recharge_min is 0 — normal missions stay unchanged', () => {
+    const html = render(
+      {
+        'vacuum.roomba': st('cleaning', {}),
+        [`sensor.${n}_mission_progress`]: st('45', {
+          current_room: 'Living room', mission_duration_min: 38, recharge_min: 0,
+        }),
+      },
+      { caps: capsProgress },
+    );
+    expect(html).not.toContain('min charging');
+    expect(html).not.toContain('38 min');
+  });
+
+  it('no duration line when attributes absent (integration < 2.8.6)', () => {
+    const html = render(
+      {
+        'vacuum.roomba': st('cleaning', {}),
+        [`sensor.${n}_mission_progress`]: st('45', { current_room: 'Living room' }),
+      },
+      { caps: capsProgress },
+    );
+    expect(html).not.toContain('min charging');
+  });
+});

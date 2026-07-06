@@ -37,6 +37,14 @@ export interface ClickState {
   openDay: string | null;
   dayMissions: unknown | null;
   openDaySummary: unknown | null;
+  /** v2.2.0 F1 — open inline explanation. Cleared whenever the day popover
+   *  closes or changes: an explanation belongs to a mission row that is
+   *  about to disappear. */
+  openExplain: unknown | null;
+  /** v2.2.0 F4 — open inline path replay, same lifecycle. */
+  openReplay: unknown | null;
+  /** v2.3.0 MISSION-MAP — open inline coverage replay, same lifecycle. */
+  openMissionMap: unknown | null;
 }
 
 export type ClickPatch = Partial<ClickState>;
@@ -120,7 +128,7 @@ export function clickReducer(key: PureClickKey, state: ClickState, payload: Clic
       return { openMaintPopover: null };
 
     case 'close-day':
-      return { openDay: null, dayMissions: null, openDaySummary: null };
+      return { openDay: null, dayMissions: null, openDaySummary: null, openExplain: null, openReplay: null, openMissionMap: null };
 
     case 'settings-toggle':
       return { settingsPanelOpen: !state.settingsPanelOpen };
@@ -133,7 +141,7 @@ export function clickReducer(key: PureClickKey, state: ClickState, payload: Clic
       // mutually exclusive.
       return {
         historyTab: payload.historyTab as 'calendar' | 'coverage',
-        openDay: null, dayMissions: null, openDaySummary: null,
+        openDay: null, dayMissions: null, openDaySummary: null, openExplain: null, openReplay: null, openMissionMap: null,
       };
 
     case 'bar': {
@@ -150,12 +158,15 @@ export function clickReducer(key: PureClickKey, state: ClickState, payload: Clic
     case 'heatmap-cell': {
       const date = payload.date!;
       if (state.openDay === date) {
-        return { openDay: null, dayMissions: null, openDaySummary: null };
+        return { openDay: null, dayMissions: null, openDaySummary: null, openExplain: null, openReplay: null, openMissionMap: null };
       }
       return {
         openDay: date,
         openDaySummary: payload.daySummaryForDate ?? null,
         dayMissions: payload.dayMissionsForDate ?? null,
+        openExplain: null,
+        openReplay: null,
+        openMissionMap: null,
       };
     }
   }

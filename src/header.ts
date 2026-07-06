@@ -222,6 +222,18 @@ export function renderHeader(props: HeaderProps): string {
         const parts: string[] = [];
         if (currentRoom) parts.push(esc(currentRoom));
         if (!isNaN(progressPct)) parts.push(`${Math.round(progressPct)}%`);
+        // v2.2.0 — recharge-aware duration (mission_duration_min/recharge_min,
+        // integration ≥ 2.8.6; flagged as a header opportunity in the v2.0
+        // plan, deliberately deferred then). Only shown when recharge_min > 0:
+        // a 156-minute mission reads very differently once it's visible that
+        // 42 of those minutes were charging, not struggling. Total duration is
+        // shown WITH its charging share, never as bare wall-clock alone —
+        // the pair is the honest number; either alone misleads.
+        const durationMin = mp?.attributes?.mission_duration_min;
+        const rechargeMin = mp?.attributes?.recharge_min;
+        if (typeof durationMin === 'number' && typeof rechargeMin === 'number' && rechargeMin > 0) {
+          parts.push(`${Math.round(durationMin)} min (${Math.round(rechargeMin)} min charging)`);
+        }
         spatialLineHtml = `<div class="rpc-spatial-line">${parts.join(' · ')}</div>`;
       }
     } else {

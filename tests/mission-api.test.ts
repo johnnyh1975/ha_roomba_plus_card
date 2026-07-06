@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { MissionApiClient } from '../src/mission-api';
 import type { HomeAssistant, CardConfig } from '../src/types';
 
@@ -109,5 +109,115 @@ describe('MissionApiClient.fetchHazards()', () => {
     const client = new MissionApiClient(hass, baseConfig);
     const result = await client.fetchHazards();
     expect(result).toEqual(hazards);
+  });
+});
+
+describe('fetchExplain (v2.2.0 F1)', () => {
+  it('fetches the explain endpoint with encoded mission id', async () => {
+    const explain = { mission_id: 'm 2', is_anomalous: false, anomaly_reason: null, robot_lifted: false, error_code: null, recommended_action: null };
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: true, json: async () => explain } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    const result = await client.fetchExplain('m 2');
+    expect(hass.fetchWithAuth).toHaveBeenCalledWith('/api/roomba_plus/entry-abc/mission/m%202/explain');
+    expect(result).toEqual(explain);
+  });
+
+  it('returns null on 404 (endpoint absent on ≤ 3.1.x, or mission not found)', async () => {
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: false, status: 404 } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    expect(await client.fetchExplain('m1')).toBeNull();
+  });
+});
+
+describe('fetchPath (v2.2.0 F4)', () => {
+  it('fetches the path endpoint by nMssn', async () => {
+    const path = { nMssn: 425, path: [{ room: 'Kitchen', time: '2026-06-26T09:05:00+02:00' }] };
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: true, json: async () => path } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    const result = await client.fetchPath(425);
+    expect(hass.fetchWithAuth).toHaveBeenCalledWith('/api/roomba_plus/entry-abc/mission/425/path');
+    expect(result).toEqual(path);
+  });
+
+  it('returns null on non-OK', async () => {
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: false, status: 404 } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    expect(await client.fetchPath(999)).toBeNull();
+  });
+});
+
+describe('fetchMissionMap (v2.3.0 MISSION-MAP)', () => {
+  it('fetches the map.json endpoint with encoded record id and returns ok status', async () => {
+    const payload = {
+      record_id: 'm_1', mission_id: 'abc', nmssn: 42, pmap_id: 'p1', pmapv_id: 'v1',
+      point_area_m: [0.1049, 0.1049], coverage_mm: [[100, 200]], rooms: { Kitchen: [[0, 0], [1000, 0], [1000, 1000]] },
+    };
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => payload } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    const result = await client.fetchMissionMap('m 1');
+    expect(hass.fetchWithAuth).toHaveBeenCalledWith('/api/roomba_plus/entry-abc/missions/m%201/map.json');
+    expect(result).toEqual({ status: 'ok', data: payload });
+  });
+
+  it('returns status "absent" on 404 (no coverage layer — honest absence, not an error)', async () => {
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: false, status: 404 } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    expect(await client.fetchMissionMap('m1')).toEqual({ status: 'absent' });
+  });
+
+  it('returns status "error" on 409 (map/mission mismatch)', async () => {
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: false, status: 409 } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    expect(await client.fetchMissionMap('m1')).toEqual({ status: 'error' });
+  });
+
+  it('returns status "error" on 502 (cloud transport failure)', async () => {
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({ ok: false, status: 502 } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    expect(await client.fetchMissionMap('m1')).toEqual({ status: 'error' });
+  });
+
+  it('returns status "error" on a network exception (fetchWithAuth throws)', async () => {
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockRejectedValue(new Error('network down')),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    expect(await client.fetchMissionMap('m1')).toEqual({ status: 'error' });
+  });
+
+  it('returns status "error" when the response body is not valid JSON', async () => {
+    const hass = {
+      callWS: vi.fn().mockResolvedValue({ config_entry_id: 'entry-abc' }),
+      fetchWithAuth: vi.fn().mockResolvedValue({
+        ok: true, status: 200, json: async () => { throw new Error('bad json'); },
+      } as unknown as Response),
+    } as unknown as HomeAssistant;
+    const client = new MissionApiClient(hass, baseConfig, 'vacuum.roomba');
+    expect(await client.fetchMissionMap('m1')).toEqual({ status: 'error' });
   });
 });

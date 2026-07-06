@@ -43,6 +43,10 @@ export const defaultCaps: RobotCapabilities = {
   hasMissionProgressSensor: false, hasAlignment: false, hasFavorites: false,
   // v2.1.0
   hasConnectivity: false, hasFirmware: false, hasPositionTracker: false,
+  // v2.3.0
+  hasRoomsOverdue: false,
+  hasZoneOverlays: false, hasDoorMarkers: false, hasFurnitureShadows: false,
+  hasDirtCorrelation: false,
 };
 
 export const fullCaps: RobotCapabilities = {
@@ -68,6 +72,10 @@ export const fullCaps: RobotCapabilities = {
   hasMissionProgressSensor: true, hasAlignment: false, hasFavorites: false,
   // v2.1.0
   hasConnectivity: true, hasFirmware: true, hasPositionTracker: true,
+  // v2.3.0
+  hasRoomsOverdue: true,
+  hasZoneOverlays: false, hasDoorMarkers: false, hasFurnitureShadows: false,
+  hasDirtCorrelation: false,
 };
 
 export const baseConfig: CardConfig = {

@@ -10,7 +10,7 @@
  * This also creates the seam the planned A1–A3 sensor features (navigation
  * health, dirt detection, dock health) slot into, instead of growing render().
  */
-import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, RobotCapabilities } from './types.js';
+import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, RobotCapabilities, MissionExplain, MissionPath, MissionMapPayload } from './types.js';
 import { TabId } from './tabs.js';
 import { renderHistoryZone } from './zones/history-zone.js';
 import { renderHealthZone } from './zones/health-zone.js';
@@ -32,6 +32,12 @@ export interface TabContentContext {
   openDay: string | null;
   dayMissions: MissionRecord[] | null;
   openDaySummary: DaySummary | null;
+  /** v2.2.0 F1 */
+  openExplain: { missionId: string; data: MissionExplain | null; error?: boolean } | null;
+  /** v2.2.0 F4 */
+  openReplay: { nMssn: number; data: MissionPath | null; error?: boolean } | null;
+  /** v2.3.0 MISSION-MAP */
+  openMissionMap: { recordId: string; data: MissionMapPayload | null; status?: 'absent' | 'error' } | null;
   lifetimeExpanded: boolean;
   historyTab: 'calendar' | 'coverage';
   hazards: HazardRecord[];
@@ -77,6 +83,7 @@ export function renderTabContent(tab: TabId | null, ctx: TabContentContext): str
       return renderHistoryZone(hass, config, caps, robotName,
         { data: ctx.missionData, loading: ctx.historyLoading, error: ctx.historyError,
           openDay: ctx.openDay, dayMissions: ctx.dayMissions, openDaySummary: ctx.openDaySummary,
+          openExplain: ctx.openExplain, openReplay: ctx.openReplay, openMissionMap: ctx.openMissionMap,
           lifetimeExpanded: ctx.lifetimeExpanded,
           historyTab: 'coverage', hazards: ctx.hazards,
           mapSelectedRooms: ctx.selectedRooms,
@@ -88,6 +95,7 @@ export function renderTabContent(tab: TabId | null, ctx: TabContentContext): str
       return renderHistoryZone(hass, config, caps, robotName,
         { data: ctx.missionData, loading: ctx.historyLoading, error: ctx.historyError,
           openDay: ctx.openDay, dayMissions: ctx.dayMissions, openDaySummary: ctx.openDaySummary,
+          openExplain: ctx.openExplain, openReplay: ctx.openReplay, openMissionMap: ctx.openMissionMap,
           lifetimeExpanded: ctx.lifetimeExpanded,
           // Companion mode keeps the Calendar/Coverage sub-tab toggle — it's the
           // only mode where this History tab needs to reach the coverage view,

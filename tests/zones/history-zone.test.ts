@@ -323,7 +323,7 @@ describe('renderHistoryZone() — F6a speed trend in summary bar (SC1: migrated 
       [`sensor.${n}_cleaning_performance`]: st('12.4', { trend: 'declining' }),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
-      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).toContain('rpc-trend-declining');
     expect(html).toContain('↓ Speed declining');
@@ -335,7 +335,7 @@ describe('renderHistoryZone() — F6a speed trend in summary bar (SC1: migrated 
       [`sensor.${n}_cleaning_performance`]: st('85.0', { trend: 'stable' }),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
-      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).not.toContain('rpc-trend-declining');
     expect(html).not.toContain('Speed declining');
@@ -346,7 +346,7 @@ describe('renderHistoryZone() — F6a speed trend in summary bar (SC1: migrated 
       [`sensor.${n}_cleaning_performance`]: st('12.4', { trend: 'declining' }),
     });
     const html = renderHistoryZone(hass, baseConfig, defaultCaps, n,
-      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).not.toContain('Speed declining');
   });
@@ -358,7 +358,7 @@ describe('renderHistoryZone() — F6a speed trend in summary bar (SC1: migrated 
       [`sensor.${n}_cleaning_performance`]: st('12.4'),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
-      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).not.toContain('Speed');
   });
@@ -384,7 +384,7 @@ describe('renderHistoryZone() — F6b wifi sparkline', () => {
       { data: null, loading: false, error: null, openDay: '2025-05-14',
         dayMissions: [missionWithWifi],
         openDaySummary: { date: '2025-05-14', total: 1, completed: 1, stuck: 0, area_sqft: 412, result: 'completed' },
-        lifetimeExpanded: false },
+        lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).toContain('rpc-day-wifi');
     expect(html).toContain('<svg');
@@ -399,7 +399,7 @@ describe('renderHistoryZone() — F6b wifi sparkline', () => {
       { data: null, loading: false, error: null, openDay: '2025-05-14',
         dayMissions: [missionNoWifi],
         openDaySummary: { date: '2025-05-14', total: 1, completed: 1, stuck: 0, area_sqft: 412, result: 'completed' },
-        lifetimeExpanded: false },
+        lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).not.toContain('rpc-day-wifi');
   });
@@ -414,7 +414,7 @@ describe('renderHistoryZone() — F6a speed trend — improving and stable (L2, 
       [`sensor.${n}_cleaning_performance`]: st('92.0', { trend: 'improving' }),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
-      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).toContain('↑ Speed improving');
   });
@@ -424,7 +424,7 @@ describe('renderHistoryZone() — F6a speed trend — improving and stable (L2, 
       [`sensor.${n}_cleaning_performance`]: st('85.0', { trend: 'stable' }),
     });
     const html = renderHistoryZone(hass, baseConfig, { ...defaultCaps, hasCleaningSpeedTrend: true }, n,
-      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).not.toContain('Speed');
   });
@@ -440,7 +440,7 @@ describe('renderHistoryZone() — summary bar token rendering', () => {
       [`sensor.${n}_completion_rate_30d`]: st('92'),
     });
     const html = renderHistoryZone(hass, baseConfig, defaultCaps, n,
-      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     expect(html).toContain('rpc-summary-sep');
     expect(html).toContain('rpc-history-summary');
@@ -451,7 +451,7 @@ describe('renderHistoryZone() — summary bar token rendering', () => {
       [`sensor.${n}_clean_streak`]: st('3'),
     });
     const html = renderHistoryZone(hass, baseConfig, defaultCaps, n,
-      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false },
+      { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null, lifetimeExpanded: false, historyTab: 'calendar', hazards: [] },
       false);
     // Single token → no separator needed
     expect(html).not.toContain('rpc-summary-sep');
@@ -688,7 +688,7 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
 
   it('stuck_events pins rendered with 📍 icon when extent attributes present', () => {
     const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 4,
-      room_name: 'Kitchen', bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const }];
+      room_name: 'Kitchen', bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const, dominant_weekday: null, dominant_hour: null }];
     const html = renderWithCoverage(
       { [`image.${n}_coverage_map`]: imageState },
       { historyTab: 'coverage', hazards },
@@ -700,7 +700,7 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
 
   it('robot_learned pins rendered with 🚧 icon (Q_coord resolved)', () => {
     const hazards = [{ gx: null, gy: null, x_mm: 400, y_mm: 200, stuck_count: null,
-      room_name: null, bearing_deg: 90, distance_mm: 450, source: 'robot_learned' as const }];
+      room_name: null, bearing_deg: 90, distance_mm: 450, source: 'robot_learned' as const, dominant_weekday: null, dominant_hour: null }];
     const html = renderWithCoverage(
       { [`image.${n}_coverage_map`]: imageState },
       { historyTab: 'coverage', hazards },
@@ -711,7 +711,7 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
 
   it('keepout pins rendered with 🚫 icon (Q_coord resolved)', () => {
     const hazards = [{ gx: null, gy: null, x_mm: -300, y_mm: 500, stuck_count: null,
-      room_name: 'Hallway', bearing_deg: 270, distance_mm: 583, source: 'keepout' as const }];
+      room_name: 'Hallway', bearing_deg: 270, distance_mm: 583, source: 'keepout' as const, dominant_weekday: null, dominant_hour: null }];
     const html = renderWithCoverage(
       { [`image.${n}_coverage_map`]: imageState },
       { historyTab: 'coverage', hazards },
@@ -729,6 +729,91 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
     expect(html).not.toContain('rpc-hazard-pin');
   });
 
+  // ── v2.3.0 F22 — temporal hotspot data ────────────────────────────────────
+  describe('F22 temporal pattern', () => {
+    it('appends "usually <day> ~<hour>" to the tooltip when both fields present', () => {
+      const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 9,
+        room_name: 'Kitchen', bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const,
+        dominant_weekday: 0, dominant_hour: 9 }];
+      const html = renderWithCoverage(
+        { [`image.${n}_coverage_map`]: imageState },
+        { historyTab: 'coverage', hazards },
+      );
+      // dominant_weekday: 0 is Monday (Python datetime.weekday() convention,
+      // NOT JS Date.getDay()'s Sunday=0) — verified against integration source.
+      expect(html).toContain('usually Mon ~9am');
+    });
+
+    it('formats afternoon/midnight/noon hours correctly (12-hour, no minutes)', () => {
+      const hazards = [
+        { gx: 1, gy: 1, x_mm: 0, y_mm: 0, stuck_count: 9, room_name: null,
+          bearing_deg: 0, distance_mm: 0, source: 'stuck_events' as const,
+          dominant_weekday: 6, dominant_hour: 14 },
+      ];
+      const html = renderWithCoverage(
+        { [`image.${n}_coverage_map`]: imageState },
+        { historyTab: 'coverage', hazards },
+      );
+      // dominant_weekday: 6 is Sunday in the Python convention.
+      expect(html).toContain('usually Sun ~2pm');
+    });
+
+    it('no pattern text when dominant_weekday/dominant_hour are null (threshold gap or n/a)', () => {
+      const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 4,
+        room_name: 'Kitchen', bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const,
+        dominant_weekday: null, dominant_hour: null }];
+      const html = renderWithCoverage(
+        { [`image.${n}_coverage_map`]: imageState },
+        { historyTab: 'coverage', hazards },
+      );
+      expect(html).not.toContain('usually');
+    });
+
+    it('robot_learned/keepout pins never show a pattern even if the fields were non-null', () => {
+      const hazards = [{ gx: null, gy: null, x_mm: 400, y_mm: 200, stuck_count: null,
+        room_name: null, bearing_deg: 90, distance_mm: 450, source: 'robot_learned' as const,
+        dominant_weekday: 0, dominant_hour: 9 }];
+      const html = renderWithCoverage(
+        { [`image.${n}_coverage_map`]: imageState },
+        { historyTab: 'coverage', hazards },
+      );
+      expect(html).not.toContain('usually');
+    });
+
+    it('shows the shared threshold-gap footnote when a 3–7-count pin lacks a pattern', () => {
+      const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 5,
+        room_name: 'Kitchen', bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const,
+        dominant_weekday: null, dominant_hour: null }];
+      const html = renderWithCoverage(
+        { [`image.${n}_coverage_map`]: imageState },
+        { historyTab: 'coverage', hazards },
+      );
+      expect(html).toContain('Time patterns need ≥8 stuck events');
+    });
+
+    it('no footnote once the pin has reached the pattern threshold', () => {
+      const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 9,
+        room_name: 'Kitchen', bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const,
+        dominant_weekday: 0, dominant_hour: 9 }];
+      const html = renderWithCoverage(
+        { [`image.${n}_coverage_map`]: imageState },
+        { historyTab: 'coverage', hazards },
+      );
+      expect(html).not.toContain('Time patterns need');
+    });
+
+    it('no footnote when stuck_count is below 3 (not even hotspot-eligible) or already at/above 8', () => {
+      const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 2,
+        room_name: 'Kitchen', bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const,
+        dominant_weekday: null, dominant_hour: null }];
+      const html = renderWithCoverage(
+        { [`image.${n}_coverage_map`]: imageState },
+        { historyTab: 'coverage', hazards },
+      );
+      expect(html).not.toContain('Time patterns need');
+    });
+  });
+
   // ── v2.0 C7-ROOM-BOUNDS: room polygon overlay + tap-to-select ────────────
   describe('v2.0 C7-ROOM-BOUNDS room overlay', () => {
     const roomsAttr = {
@@ -741,15 +826,33 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
         name: 'Hallway', room_id: 'hallway', icon: 'mdi:door', x: 400, y: 0,
       },
     };
-    const alignedImageState = st('idle', {
+    // v2.3.0 CORRECTION: rooms/calibration_points live on image.*_map
+    // (RoombaMapImage), NOT image.*_coverage_map (RoombaCoverageImage —
+    // verified against source to carry neither attribute at all). Three
+    // calibration anchor points, matching the integration's own
+    // (minX,minY)/(maxX,minY)/(maxX,maxY) construction — see
+    // calibration.test.ts for the transform math itself; here they just
+    // need to be internally consistent so the overlay renders.
+    const calibrationPoints = [
+      { vacuum: { x: -1000, y: -800 }, map: { x: 0, y: 480 } },
+      { vacuum: { x: 1000, y: -800 }, map: { x: 600, y: 480 } },
+      { vacuum: { x: 1000, y: 800 }, map: { x: 600, y: 0 } },
+    ];
+    const coverageImageState = st('idle', {
       entity_picture: '/api/image/serve/abc/512x512',
       x_min_mm: -1000, x_max_mm: 1000, y_min_mm: -800, y_max_mm: 800,
+    });
+    const mapImageState = st('idle', {
       rooms: roomsAttr,
+      calibration_points: calibrationPoints,
     });
 
     it('renders room polygons and labels when caps.hasAlignment is true', () => {
       const html = renderHistoryZone(
-        makeHass({ [`image.${n}_coverage_map`]: alignedImageState }),
+        makeHass({
+          [`image.${n}_coverage_map`]: coverageImageState,
+          [`image.${n}_map`]: mapImageState,
+        }),
         baseConfig, { ...coverageCaps, hasAlignment: true }, n,
         { ...emptyState, historyTab: 'coverage' }, false,
       );
@@ -761,7 +864,10 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
 
     it('omits room overlay when caps.hasAlignment is false, even with rooms data present', () => {
       const html = renderHistoryZone(
-        makeHass({ [`image.${n}_coverage_map`]: alignedImageState }),
+        makeHass({
+          [`image.${n}_coverage_map`]: coverageImageState,
+          [`image.${n}_map`]: mapImageState,
+        }),
         baseConfig, { ...coverageCaps, hasAlignment: false }, n,
         { ...emptyState, historyTab: 'coverage' }, false,
       );
@@ -771,7 +877,10 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
 
     it('marks a room as selected when present in mapSelectedRooms', () => {
       const html = renderHistoryZone(
-        makeHass({ [`image.${n}_coverage_map`]: alignedImageState }),
+        makeHass({
+          [`image.${n}_coverage_map`]: coverageImageState,
+          [`image.${n}_map`]: mapImageState,
+        }),
         baseConfig, { ...coverageCaps, hasAlignment: true }, n,
         { ...emptyState, historyTab: 'coverage', mapSelectedRooms: new Set(['Kitchen']) }, false,
       );
@@ -781,24 +890,185 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
       expect(hallwayPoly).not.toContain('rpc-room-poly--selected');
     });
 
-    it('omits room overlay when no extent attributes are present (graceful degradation)', () => {
-      const noExtentRoomsState = st('idle', { entity_picture: '/api/image/serve/abc/512x512', rooms: roomsAttr });
+    it('omits room overlay when calibration_points are absent (graceful degradation — no transform to derive)', () => {
+      const noCalMapState = st('idle', { rooms: roomsAttr });
       const html = renderHistoryZone(
-        makeHass({ [`image.${n}_coverage_map`]: noExtentRoomsState }),
+        makeHass({
+          [`image.${n}_coverage_map`]: coverageImageState,
+          [`image.${n}_map`]: noCalMapState,
+        }),
         baseConfig, { ...coverageCaps, hasAlignment: true }, n,
         { ...emptyState, historyTab: 'coverage' }, false,
       );
       expect(html).not.toContain('rpc-room-overlay');
     });
 
-    // ── region_areas_m2 (integration v2.9.1): cross-entity lookup from the
-    // CloudSmartZoneSelect entity, same location as region_icons. NOT part
-    // of the image entity's `rooms` dict — joined here by room name. ──
+    it('omits room overlay when image.*_map itself is entirely absent', () => {
+      const html = renderHistoryZone(
+        makeHass({ [`image.${n}_coverage_map`]: coverageImageState }),
+        baseConfig, { ...coverageCaps, hasAlignment: true }, n,
+        { ...emptyState, historyTab: 'coverage' }, false,
+      );
+      expect(html).not.toContain('rpc-room-overlay');
+    });
+
+    // ── v2.3.0 ZONE-OVERLAY / F24 — zones, door markers, furniture shadows.
+    // All three share image.*_map + calibration_points with rooms above;
+    // all gated on their own cap flag AND caps.hasAlignment (the transform
+    // itself requires calibration_points, same source as rooms). ──
+    describe('v2.3.0 ZONE-OVERLAY: observed/keepout zones', () => {
+      it('renders an observed-obstacle circle', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              zones: [{ type: 'observed', x: 100, y: 200 }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasZoneOverlays: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain('rpc-zone-observed');
+      });
+
+      it('renders a keepout polygon', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              zones: [{ type: 'keepout', polygon: [[0, 0], [100, 0], [100, 100]] }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasZoneOverlays: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain('rpc-zone-keepout');
+      });
+
+      it('skips a degenerate keepout polygon (fewer than 3 vertices) without throwing', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              zones: [{ type: 'keepout', polygon: [[0, 0], [100, 0]] }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasZoneOverlays: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).not.toContain('rpc-zone-keepout');
+      });
+
+      it('omits zone overlay when hasZoneOverlays is false, even with zones data present', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              zones: [{ type: 'observed', x: 100, y: 200 }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasZoneOverlays: false }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).not.toContain('rpc-zone-observed');
+      });
+    });
+
+    describe('v2.3.0 ZONE-OVERLAY: door markers', () => {
+      it('renders a door marker with a label + mission-count tooltip', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              door_markers: [{ id: 'dm_1', cx: 100, cy: 200, label: 'Hallway door', mission_count: 4 }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasDoorMarkers: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain('rpc-door-marker');
+        expect(html).toContain('Hallway door (seen 4×)');
+      });
+
+      it('omits door markers when hasDoorMarkers is false', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              door_markers: [{ id: 'dm_1', cx: 100, cy: 200, label: 'Hallway door', mission_count: 4 }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasDoorMarkers: false }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).not.toContain('rpc-door-marker');
+      });
+    });
+
+    describe('v2.3.0 F24: furniture shadows', () => {
+      it('renders a furniture shadow marker', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              furniture_candidates: [{ x_mm: 150, y_mm: 250 }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasFurnitureShadows: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain('rpc-furniture-shadow');
+      });
+
+      it('omits furniture shadows when hasFurnitureShadows is false', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              furniture_candidates: [{ x_mm: 150, y_mm: 250 }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasFurnitureShadows: false }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).not.toContain('rpc-furniture-shadow');
+      });
+
+      it('no furniture shadows, zones, or door markers render when caps.hasAlignment is false (calibration transform unavailable)', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: st('idle', {
+              rooms: roomsAttr, calibration_points: calibrationPoints,
+              zones: [{ type: 'observed', x: 100, y: 200 }],
+              door_markers: [{ id: 'dm_1', cx: 100, cy: 200, label: 'Door', mission_count: 1 }],
+              furniture_candidates: [{ x_mm: 150, y_mm: 250 }],
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: false, hasZoneOverlays: true, hasDoorMarkers: true, hasFurnitureShadows: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).not.toContain('rpc-zone-observed');
+        expect(html).not.toContain('rpc-door-marker');
+        expect(html).not.toContain('rpc-furniture-shadow');
+      });
+    });
+
+
     describe('region_areas_m2 area annotation', () => {
       it('appends area to the label when region_areas_m2 has data for that room', () => {
         const html = renderHistoryZone(
           makeHass({
-            [`image.${n}_coverage_map`]: alignedImageState,
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
             [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen', 'Hallway'], region_areas_m2: { Kitchen: 20.0 } }),
           }),
           baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
@@ -811,7 +1081,8 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
       it('shows name only (no area suffix) when region_areas_m2 lacks data for that specific room', () => {
         const html = renderHistoryZone(
           makeHass({
-            [`image.${n}_coverage_map`]: alignedImageState,
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
             // Only Kitchen has an area; Hallway is absent from the dict —
             // e.g. partial cloud data for that room.
             [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen', 'Hallway'], region_areas_m2: { Kitchen: 20.0 } }),
@@ -826,7 +1097,10 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
 
       it('shows name only when the select entity is entirely absent (local-only / old integration / EPHEMERAL without CloudSmartZoneSelect)', () => {
         const html = renderHistoryZone(
-          makeHass({ [`image.${n}_coverage_map`]: alignedImageState }),
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+          }),
           baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
           { ...emptyState, historyTab: 'coverage' }, false,
         );
@@ -837,7 +1111,8 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
       it('falls back to zone_select entity id when hasSmartZones is false', () => {
         const html = renderHistoryZone(
           makeHass({
-            [`image.${n}_coverage_map`]: alignedImageState,
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
             [`select.${n}_zone_select`]: st('Kitchen', { options: ['Kitchen'], region_areas_m2: { Kitchen: 15.5 } }),
           }),
           baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: false }, n,
@@ -850,7 +1125,8 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
       it('does not throw and shows name only when region_areas_m2 attribute is malformed (not an object)', () => {
         const html = renderHistoryZone(
           makeHass({
-            [`image.${n}_coverage_map`]: alignedImageState,
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
             [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen'], region_areas_m2: 'not-an-object' }),
           }),
           baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
@@ -865,7 +1141,7 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
   it('coverage image renders without pins when extent attrs absent (R2 graceful degradation)', () => {
     const noExtentState = st('idle', { entity_picture: '/api/image/serve/abc/512x512' });
     const hazards = [{ gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 2,
-      room_name: null, bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const }];
+      room_name: null, bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const, dominant_weekday: null, dominant_hour: null }];
     const html = renderWithCoverage(
       { [`image.${n}_coverage_map`]: noExtentState },
       { historyTab: 'coverage', hazards },
@@ -886,7 +1162,7 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
   it('legend shows entries only for pin sources that are present', () => {
     const hazards = [
       { gx: 3, gy: 5, x_mm: 200, y_mm: 300, stuck_count: 4, room_name: null,
-        bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const },
+        bearing_deg: 45, distance_mm: 360, source: 'stuck_events' as const, dominant_weekday: null, dominant_hour: null },
     ];
     const html = renderWithCoverage(
       { [`image.${n}_coverage_map`]: imageState },
@@ -1014,5 +1290,293 @@ describe('renderHistoryZone() — F12 cleaned rooms sequence', () => {
     );
     expect(html).toContain('rpc-mission-dest-popover');
     expect(html).toContain('Final: Kitchen');
+  });
+});
+
+describe('renderHistoryZone() — v2.2.0 F1 "Why?" explanation', () => {
+  const summary: DaySummary = { date: '2025-05-14', total: 2, completed: 1, stuck: 0, area_sqft: 100, result: 'error' };
+  const mk = (id: string, result: string, source: 'local' | 'cloud' = 'local'): MissionRecord => ({
+    id, started_at: '2025-05-14T07:14:00Z', ended_at: null,
+    duration_min: 20, run_min: null, area_sqft: null, result,
+    initiator: 'schedule', zones: [], error_code: null,
+    recharges: null, evacuations: null, dirt_events: null, wifi_signal: null, source,
+  });
+
+  it('v2.3.0 EXPLAIN-CLOUD: Why? button now shows on cloud-source rows too (integration resolves c_{ts} ids via a dedicated cloud-fallback path — verified against source)', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('c_1750912345', 'error_battery', 'cloud')],
+    });
+    expect(html).toContain('data-explain="c_1750912345"');
+  });
+
+  it('shows Why? button on caution and failure missions, not on success', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m1', 'completed'), mk('m2', 'error_battery'), mk('m3', 'stuck')],
+    });
+    const count = (html.match(/data-explain=/g) ?? []).length;
+    expect(count).toBe(2);
+    expect(html).toContain('data-explain="m2"');
+    expect(html).toContain('data-explain="m3"');
+  });
+
+  it('shows loading panel while data is null without error', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m2', 'error')],
+      openExplain: { missionId: 'm2', data: null },
+    });
+    expect(html).toContain('Analysing…');
+  });
+
+  it('renders anomalous explanation with friendly reason label and recommendation', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m2', 'error')],
+      openExplain: { missionId: 'm2', data: {
+        mission_id: 'm2', is_anomalous: true, anomaly_reason: 'obstacle_or_blockage',
+        robot_lifted: true, error_code: 2,
+        recommended_action: 'Check for cords, rugs, or furniture.',
+      } },
+    });
+    expect(html).toContain('Obstacle or blockage');
+    expect(html).toContain('picked up during this mission');
+    expect(html).toContain('Check for cords, rugs, or furniture.');
+  });
+
+  it('is_anomalous=false renders the "nothing unusual" answer', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m2', 'cancelled')],
+      openExplain: { missionId: 'm2', data: {
+        mission_id: 'm2', is_anomalous: false, anomaly_reason: null,
+        robot_lifted: false, error_code: null, recommended_action: null,
+      } },
+    });
+    expect(html).toContain('Nothing statistically unusual');
+  });
+
+  it('error state renders graceful integration-version hint', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m2', 'error')],
+      openExplain: { missionId: 'm2', data: null, error: true },
+    });
+    expect(html).toContain('Explanation not available for this mission.');
+  });
+
+  it('unknown future reason keys degrade to readable text, never hidden', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m2', 'error')],
+      openExplain: { missionId: 'm2', data: {
+        mission_id: 'm2', is_anomalous: true, anomaly_reason: 'thermal_throttling',
+        robot_lifted: false, error_code: null, recommended_action: null,
+      } },
+    });
+    expect(html).toContain('thermal throttling');
+  });
+
+  it('panel attaches only to the matching mission', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m2', 'error'), mk('m3', 'stuck')],
+      openExplain: { missionId: 'm3', data: null },
+    });
+    const m2Idx = html.indexOf('data-explain="m2"');
+    const m3Idx = html.indexOf('data-explain="m3"');
+    const panelIdx = html.indexOf('rpc-explain-panel');
+    expect(panelIdx).toBeGreaterThan(m3Idx);
+    expect(m3Idx).toBeGreaterThan(m2Idx);
+  });
+});
+
+describe('renderHistoryZone() — v2.2.0 F4 path replay', () => {
+  const summary: DaySummary = { date: '2025-05-14', total: 1, completed: 1, stuck: 0, area_sqft: 100, result: 'completed' };
+  const mk = (over: Partial<MissionRecord> = {}): MissionRecord => ({
+    id: 'm1', started_at: '2025-05-14T07:14:00Z', ended_at: null,
+    duration_min: 20, run_min: null, area_sqft: null, result: 'completed',
+    initiator: 'schedule', zones: [], error_code: null,
+    recharges: null, evacuations: null, dirt_events: null, wifi_signal: null, source: 'cloud',
+    ...over,
+  });
+
+  it('no Route button when n_mssn absent (integration ≤ 3.2.0 records)', () => {
+    const html = render({}, { openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk()] });
+    expect(html).not.toContain('data-replay');
+  });
+
+  it('Route button appears when n_mssn present — also on success missions', () => {
+    const html = render({}, { openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk({ n_mssn: 425 })] });
+    expect(html).toContain('data-replay="425"');
+  });
+
+  it('renders room timeline with times and separators', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk({ n_mssn: 425 })],
+      openReplay: { nMssn: 425, data: { nMssn: 425, path: [
+        { room: 'Kitchen', time: '2025-05-14T07:05:00Z' },
+        { room: 'Hallway & More', time: '2025-05-14T07:23:00Z' },
+      ] } },
+    });
+    expect(html).toContain('rpc-replay-panel');
+    expect(html).toContain('Kitchen');
+    expect(html).toContain('Hallway &amp; More');
+    expect(html).toContain('rpc-trav-sep');
+  });
+
+  it('empty path renders honest fallback', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk({ n_mssn: 425 })],
+      openReplay: { nMssn: 425, data: { nMssn: 425, path: [] } },
+    });
+    expect(html).toContain('No room-level path recorded');
+  });
+
+  it('error state renders graceful message', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk({ n_mssn: 425 })],
+      openReplay: { nMssn: 425, data: null, error: true },
+    });
+    expect(html).toContain('Path not available');
+  });
+});
+
+describe('renderHistoryZone() — v2.2.0 A2 lifetime dirt-detection counters', () => {
+  it('shows dirt detect line in expanded Stats when sensors present', () => {
+    const html = render({
+      [`sensor.${n}_lifetime_missions`]:        st('425'),
+      [`sensor.${n}_optical_dirt_detections`]:  st('1043'),
+      [`sensor.${n}_piezo_dirt_detections`]:    st('877'),
+      [`sensor.${n}_scrubs_count`]:             st('212'),
+    }, { lifetimeExpanded: true });
+    expect(html).toContain('Dirt detect:');
+    expect(html).toContain('optical');
+    expect(html).toContain('piezo');
+    expect(html).toContain('212 scrub events');
+  });
+
+  it('renders subset when only scrubs_count is enabled', () => {
+    const html = render({
+      [`sensor.${n}_lifetime_missions`]:  st('425'),
+      [`sensor.${n}_scrubs_count`]:       st('212'),
+    }, { lifetimeExpanded: true });
+    expect(html).toContain('212 scrub events');
+    expect(html).not.toContain('optical');
+  });
+
+  it('no dirt line when sensors absent (default-disabled diagnostics)', () => {
+    const html = render({ [`sensor.${n}_lifetime_missions`]: st('425') }, { lifetimeExpanded: true });
+    expect(html).not.toContain('Dirt detect:');
+  });
+
+  it('dirt sensors alone make the Stats section appear', () => {
+    const html = render({ [`sensor.${n}_scrubs_count`]: st('212') });
+    expect(html).toContain('Stats');
+  });
+
+  it('hidden when Stats collapsed', () => {
+    const html = render({
+      [`sensor.${n}_lifetime_missions`]:       st('425'),
+      [`sensor.${n}_optical_dirt_detections`]: st('1043'),
+    }, { lifetimeExpanded: false });
+    expect(html).not.toContain('Dirt detect:');
+  });
+});
+
+describe('renderHistoryZone() — v2.2.0 F4 against integration 3.2.1 record shapes', () => {
+  const summary: DaySummary = { date: '2025-05-14', total: 1, completed: 1, stuck: 0, area_sqft: 100, result: 'completed' };
+  it('local row with n_mssn null (not yet cloud-backfilled) gets no Route button', () => {
+    const m: MissionRecord = {
+      id: 'm_1750912345', started_at: '2025-05-14T07:14:00Z', ended_at: null,
+      duration_min: 20, run_min: null, area_sqft: null, result: 'completed',
+      initiator: 'schedule', zones: [], error_code: null,
+      recharges: null, evacuations: null, dirt_events: null, wifi_signal: null,
+      source: 'local', n_mssn: null,
+    };
+    const html = render({}, { openDay: '2025-05-14', openDaySummary: summary, dayMissions: [m] });
+    expect(html).not.toContain('data-replay');
+  });
+});
+
+describe('renderHistoryZone() — v2.3.0 MISSION-MAP coverage replay', () => {
+  const summary: DaySummary = { date: '2025-05-14', total: 1, completed: 1, stuck: 0, area_sqft: 100, result: 'completed' };
+  const mk = (over: Partial<MissionRecord> = {}): MissionRecord => ({
+    id: 'm1', started_at: '2025-05-14T07:14:00Z', ended_at: null,
+    duration_min: 20, run_min: null, area_sqft: null, result: 'completed',
+    initiator: 'schedule', zones: [], error_code: null,
+    recharges: null, evacuations: null, dirt_events: null, wifi_signal: null,
+    source: 'local', n_mssn: 425,
+    ...over,
+  });
+
+  it('no Map button when n_mssn absent (same SMART+cloud proxy as Route)', () => {
+    const html = render({}, { openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk({ n_mssn: null })] });
+    expect(html).not.toContain('data-map');
+  });
+
+  it('R2-1-style gate: no Map button on cloud-source rows even with n_mssn present', () => {
+    // v2.3.0: Why?'s equivalent gap was fixed (EXPLAIN-CLOUD, verified
+    // against source), but _mission_map_payload()'s own record resolution
+    // is a separate, still-unfixed lookup with no cloud fallback — this
+    // gate must stay until that endpoint gets its own fix.
+    const html = render({}, { openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk({ source: 'cloud', n_mssn: 425 })] });
+    expect(html).not.toContain('data-map');
+  });
+
+  it('Map button appears for local rows with n_mssn present', () => {
+    const html = render({}, { openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk()] });
+    expect(html).toContain('data-map="m1"');
+  });
+
+  it('loading state shows a calm "Loading…" message', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk()],
+      openMissionMap: { recordId: 'm1', data: null },
+    });
+    expect(html).toContain('rpc-map-panel');
+    expect(html).toContain('Loading…');
+  });
+
+  it('renders the coverage SVG when data is present', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk()],
+      openMissionMap: {
+        recordId: 'm1',
+        data: {
+          record_id: 'm1', mission_id: 'abc', nmssn: 425, pmap_id: 'p1', pmapv_id: 'v1',
+          point_area_m: [0.1049, 0.1049], coverage_mm: [[0, 0], [1000, 1000]],
+          rooms: { Kitchen: [[0, 0], [2000, 0], [2000, 2000]] },
+        },
+      },
+    });
+    expect(html).toContain('<svg');
+    expect(html).toContain('rpc-map-dot');
+  });
+
+  it('status "absent" (404) renders a calm honest-absence message, not an error', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk()],
+      openMissionMap: { recordId: 'm1', data: null, status: 'absent' },
+    });
+    expect(html).toContain('No coverage map for this mission');
+  });
+
+  it('status "error" (409/502) renders a generic retry message', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk()],
+      openMissionMap: { recordId: 'm1', data: null, status: 'error' },
+    });
+    expect(html).toContain("Couldn't load the map");
+  });
+
+  it('a different mission\'s open state does not leak the panel onto this row', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk({ id: 'm1' })],
+      openMissionMap: { recordId: 'm2', data: null, status: 'absent' },
+    });
+    expect(html).toContain('data-map="m1"');
+    expect(html).not.toContain('No coverage map for this mission');
   });
 });

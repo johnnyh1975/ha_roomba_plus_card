@@ -73,6 +73,16 @@ export function healthTabHasBadge(
     }
   }
 
+  // v2.3.0 — Rooms-Overdue: same "needs attention" badge philosophy as the
+  // health-score/maintenance checks above.
+  if (caps.hasRoomsOverdue) {
+    const entity = hass.states[`sensor.${n}_rooms_overdue`];
+    if (entity && entity.state !== 'unknown' && entity.state !== 'unavailable') {
+      const count = parseFloat(entity.state);
+      if (!isNaN(count) && count > 0) return true;
+    }
+  }
+
   if (hasAlertForTab(hass, caps, robotName, 'health')) return true;
 
   return false;

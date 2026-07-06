@@ -1,10 +1,62 @@
-import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord } from '../types.js';
-import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, mmToImagePct, mmToImagePctNum } from '../heatmap.js';
+import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord, MissionExplain, MissionPath, MissionMapPayload } from '../types.js';
+import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, mmToImagePct } from '../heatmap.js';
+import { renderMissionMapSvg } from '../mission-map.js';
+import { buildCalibrationTransform, calibrationToImagePct, calibrationToImagePctNum, CalibrationPoint } from '../calibration.js';
 import { esc, timeSince } from '../utils.js';
 import { MDI_TO_EMOJI } from '../const.js';
 
-export interface HistoryZoneState {
-  data: DaySummary[] | null;
+// ── v2.2.0 F1 — anomaly explanation display ──────────────────────────────────
+//
+// anomaly_reason machine keys → friendly labels. Keys mirror the
+// integration's MissionStore._ANOMALY_RECOMMENDATIONS. Unknown future keys
+// degrade to the raw key with underscores replaced — displayed, not hidden,
+// so a new integration-side reason is never silently dropped.
+const EXPLAIN_REASON_LABELS: Record<string, string> = {
+  obstacle_or_blockage: 'Obstacle or blockage',
+  excessive_recharge:   'Excessive recharging',
+  dirt_spike:           'Unusually dirty area',
+  incomplete_coverage:  'Incomplete coverage',
+};
+
+function explainReasonLabel(reason: string): string {
+  return EXPLAIN_REASON_LABELS[reason] ?? reason.replace(/_/g, ' ');
+}
+
+export function renderExplainPanel(data: MissionExplain): string {
+  if (!data.is_anomalous) {
+    return `<div class="rpc-explain-panel rpc-explain-panel--muted">Nothing statistically unusual vs. this robot's own history — the result code above is the whole story.</div>`;
+  }
+  const reason = data.anomaly_reason ? explainReasonLabel(data.anomaly_reason) : 'Anomalous mission';
+  const lifted = data.robot_lifted ? `<div class="rpc-explain-lifted">Robot was picked up during this mission.</div>` : '';
+  const rec = data.recommended_action
+    ? `<div class="rpc-explain-rec">${esc(data.recommended_action)}</div>`
+    : '';
+  return `
+    <div class="rpc-explain-panel">
+      <div class="rpc-explain-reason">${esc(reason)}</div>
+      ${lifted}
+      ${rec}
+    </div>`;
+}
+
+// ── v2.2.0 F4 — mission path replay display ──────────────────────────────────
+export function renderReplayPanel(data: MissionPath, locale: string): string {
+  if (!data.path.length) {
+    return `<div class="rpc-replay-panel rpc-explain-panel--muted">No room-level path recorded for this mission.</div>`;
+  }
+  const steps = data.path.map(step => {
+    const t = new Date(step.time).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `<span class="rpc-replay-step"><span class="rpc-replay-time">${t}</span> ${esc(step.room)}</span>`;
+  }).join('<span class="rpc-trav-sep">→</span>');
+  return `<div class="rpc-replay-panel">${steps}</div>`;
+}
+
+// ── v2.3.0 MISSION-MAP — coverage replay display ─────────────────────────────
+export function renderMissionMapPanel(data: MissionMapPayload): string {
+  return renderMissionMapSvg(data);
+}
+
+export interface HistoryZoneState {  data: DaySummary[] | null;
   loading: boolean;
   error: string | null;
   openDay: string | null;
@@ -29,6 +81,16 @@ export interface HistoryZoneState {
    *  footer — both belong to the History tab, not to a spatial map view.
    *  The Map tab should show only: heatmap + legend + "Updated X ago". */
   isMapContext?: boolean;
+  /** v2.2.0 F1 — inline "Why?" explanation state for one mission in the open
+   *  day popover. null = no explanation open. data null while loading;
+   *  error=true when the fetch failed or the endpoint is absent (≤ 3.1.x). */
+  openExplain?: { missionId: string; data: MissionExplain | null; error?: boolean } | null;
+  /** v2.2.0 F4 — inline path-replay state, same lifecycle as openExplain. */
+  openReplay?: { nMssn: number; data: MissionPath | null; error?: boolean } | null;
+  /** v2.3.0 MISSION-MAP — inline coverage-replay state, same lifecycle.
+   *  status is undefined while loading; 'absent' = honest 404 (no map for
+   *  this mission); 'error' = 409/502/network. */
+  openMissionMap?: { recordId: string; data: MissionMapPayload | null; status?: 'absent' | 'error' } | null;
 }
 
 function formatArea(sqft: number, useMetric: boolean): string {
@@ -43,11 +105,34 @@ function pinIcon(source: string): string {
   return '📍'; // stuck_events (default)
 }
 
+// v2.3.0 F22 — dominant_weekday follows Python's datetime.weekday() convention
+// (0=Monday ... 6=Sunday), verified against integration source (image.py's
+// stuck_wh computation) — deliberately NOT the JS Date.getDay() convention
+// (0=Sunday). Getting this backwards would silently show every pattern one
+// day off.
+const F22_WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function formatF22Hour(hour: number): string {
+  const period = hour < 12 ? 'am' : 'pm';
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}${period}`;
+}
+
+/** v2.3.0 F22 — "usually Mon ~9am" when both fields are present; '' otherwise
+ *  (robot_learned/keepout pins always carry null here — uniform schema, not
+ *  an error; stuck_events pins with stuck_count 3–7 also carry null, the
+ *  accepted threshold gap vs. stuck_pattern()'s own 8-count minimum). */
+function formatF22Pattern(h: HazardRecord): string {
+  if (h.dominant_weekday == null || h.dominant_hour == null) return '';
+  const day = F22_WEEKDAY_LABELS[h.dominant_weekday] ?? '';
+  return day ? ` · usually ${day} ~${formatF22Hour(h.dominant_hour)}` : '';
+}
+
 /** Build a tooltip string for a hazard pin */
 function buildPinTip(h: HazardRecord): string {
   const room = h.room_name ? ` · ${h.room_name}` : '';
   if (h.source === 'stuck_events')
-    return `Stuck hotspot${h.stuck_count ? ` (${h.stuck_count}×)` : ''}${room}`;
+    return `Stuck hotspot${h.stuck_count ? ` (${h.stuck_count}×)` : ''}${room}${formatF22Pattern(h)}`;
   if (h.source === 'robot_learned') return `Robot-detected obstacle${room}`;
   if (h.source === 'keepout')       return `Keep-out zone${room}`;
   return 'Hazard';
@@ -162,78 +247,171 @@ export function renderHistoryZone(
       hasPinKeeout ? '<span>🚫</span> Keep-out zone'       : '',
     ].filter(Boolean).join(' ');
 
+    // v2.3.0 F22 — accepted threshold gap, not a bug: stuck_pattern()'s own
+    // confidence threshold (8) is higher than hotspots()'s pin-eligibility
+    // threshold (3), so a pin can exist (stuck_count 3–7) without ever
+    // carrying a time pattern yet. One shared footnote rather than
+    // annotating every such pin individually.
+    const hasF22ThresholdGap = hazards.some(h =>
+      h.source === 'stuck_events' && h.stuck_count != null
+      && h.stuck_count >= 3 && h.stuck_count < 8
+      && h.dominant_weekday == null);
+    const f22FootnoteHtml = hasF22ThresholdGap
+      ? `<div class="rpc-coverage-note">Time patterns need ≥8 stuck events at one spot</div>`
+      : '';
+
     // v2.0 C7-ROOM-BOUNDS: room polygon overlays + tap-to-select.
-    // Gated on caps.hasAlignment — non-empty `rooms` dict on the image
-    // entity. Coordinates are pose-space mm (confirmed against integration
-    // source — NOT image pixels), so they need the same xMin/xMax/yMin/yMax
-    // spatial-extent transform already used for hazard pins above.
+    //
+    // v2.3.0 CORRECTION — this block previously read `rooms` from
+    // `attrs` (the image.*_coverage_map entity shown as entityPic above)
+    // and positioned it via that entity's x_min_mm/x_max_mm bbox. Verified
+    // against source: image.*_coverage_map (RoombaCoverageImage) has NO
+    // rooms/calibration_points attribute at all — it's an unrelated
+    // GridStore EMA-diagnostic heatmap. hasAlignment therefore likely
+    // evaluated false for every installation; this overlay may never have
+    // rendered. The correct source is a SEPARATE entity, image.*_map
+    // (RoombaMapImage), read independently below — its own
+    // `calibration_points` (3 pose-mm↔px anchor pairs, verified against
+    // source: same _mm_to_px_fit the renderer itself uses) replace the
+    // bbox-based transform, since image.*_coverage_map's bbox comes from
+    // GridStore.bounding_box_mm() — an unrelated data source with no
+    // guaranteed relationship to image.*_map's own render extent.
+    //
+    // OPEN VERIFICATION POINT (not yet field-confirmed): the picture shown
+    // (`entityPic`, still image.*_coverage_map) and this overlay's source
+    // (image.*_map) are two independently-rendered images. If their
+    // effective framing/scale differs, this overlay will be visibly
+    // offset from the picture beneath it. Hazard pins above are
+    // deliberately left untouched (they already work, positioned via
+    // image.*_coverage_map's own bbox) — only the overlay drawn here uses
+    // the new transform. Revisit once a live installation confirms
+    // whether the two images share compatible framing.
     let roomOverlayHtml = '';
-    if (hasExtent && caps.hasAlignment) {
-      const rooms = (attrs['rooms'] ?? {}) as Record<string, {
+    let zoneOverlayHtml = '';
+    let doorMarkerHtml = '';
+    let furnitureHtml = '';
+    if (caps.hasAlignment) {
+      const mapAttrs = hass.states[`image.${n}_map`]?.attributes ?? {};
+      const rooms = (mapAttrs['rooms'] ?? {}) as Record<string, {
         outline: [number, number][]; name: string; room_id: string; icon: string; x: number; y: number;
       }>;
+      const calPoints = mapAttrs['calibration_points'] as CalibrationPoint[] | undefined;
+      const cal = Array.isArray(calPoints) ? buildCalibrationTransform(calPoints) : null;
 
-      const polygons = Object.values(rooms).map(room => {
-        if (!room.outline || room.outline.length < 3) return '';
-        const pointsAttr = room.outline
-          .map(([x, y]) => {
-            const p = mmToImagePctNum(x, y, xMin!, xMax!, yMin!, yMax!);
-            return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
-          })
-          .join(' ');
-        const selected = mapSelectedRooms?.has(room.name) ?? false;
-        return `<polygon class="rpc-room-poly${selected ? ' rpc-room-poly--selected' : ''}"
-          points="${pointsAttr}" data-room-poly="${esc(room.name)}" />`;
-      }).join('');
+      if (cal) {
+        const polygons = Object.values(rooms).map(room => {
+          if (!room.outline || room.outline.length < 3) return '';
+          const pointsAttr = room.outline
+            .map(([x, y]) => {
+              const p = calibrationToImagePctNum(cal, x, y);
+              return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+            })
+            .join(' ');
+          const selected = mapSelectedRooms?.has(room.name) ?? false;
+          return `<polygon class="rpc-room-poly${selected ? ' rpc-room-poly--selected' : ''}"
+            points="${pointsAttr}" data-room-poly="${esc(room.name)}" />`;
+        }).join('');
 
-      // v2.0.1: region_areas_m2 (integration v2.9.1) — lives on the
-      // CloudSmartZoneSelect entity, same location as region_icons, NOT on
-      // the image entity that supplies `rooms` above. This is a deliberate
-      // cross-entity lookup: room geometry (outline/centroid/icon) comes
-      // from the image entity's `rooms` dict, while the area annotation
-      // comes from the select entity by room name — the two are joined
-      // here, not at the integration level. Room name labels are drawn by
-      // the card only (the integration stopped baking labels into the PNG
-      // as of v2.7.3, specifically to avoid duplicate labels appearing
-      // once the card started drawing its own) — this area annotation
-      // follows that same card-side-only convention.
-      //
-      // Per-room: absent when the integration hasn't computed an area for
-      // that specific room (e.g. partial cloud data). Whole-attribute
-      // absent: local-only setup, integration < v2.9.1, an inactive floor,
-      // or an EPHEMERAL robot with no CloudSmartZoneSelect entity at all.
-      // All of these degrade to the name-only label exactly as before —
-      // never an error, never a placeholder.
-      const regionAreasM2 = (() => {
-        const selectId = caps.hasSmartZones
-          ? `select.${n}_smart_zone_select`
-          : `select.${n}_zone_select`;
-        const raw = hass.states[selectId]?.attributes?.['region_areas_m2'];
-        return (raw && typeof raw === 'object' && !Array.isArray(raw))
-          ? raw as Record<string, number>
-          : {} as Record<string, number>;
-      })();
+        // v2.0.1: region_areas_m2 (integration v2.9.1) — lives on the
+        // CloudSmartZoneSelect entity, same location as region_icons, NOT on
+        // the image entity that supplies `rooms` above. This is a deliberate
+        // cross-entity lookup: room geometry (outline/centroid/icon) comes
+        // from the image entity's `rooms` dict, while the area annotation
+        // comes from the select entity by room name — the two are joined
+        // here, not at the integration level. Room name labels are drawn by
+        // the card only (the integration stopped baking labels into the PNG
+        // as of v2.7.3, specifically to avoid duplicate labels appearing
+        // once the card started drawing its own) — this area annotation
+        // follows that same card-side-only convention.
+        //
+        // Per-room: absent when the integration hasn't computed an area for
+        // that specific room (e.g. partial cloud data). Whole-attribute
+        // absent: local-only setup, integration < v2.9.1, an inactive floor,
+        // or an EPHEMERAL robot with no CloudSmartZoneSelect entity at all.
+        // All of these degrade to the name-only label exactly as before —
+        // never an error, never a placeholder.
+        const regionAreasM2 = (() => {
+          const selectId = caps.hasSmartZones
+            ? `select.${n}_smart_zone_select`
+            : `select.${n}_zone_select`;
+          const raw = hass.states[selectId]?.attributes?.['region_areas_m2'];
+          return (raw && typeof raw === 'object' && !Array.isArray(raw))
+            ? raw as Record<string, number>
+            : {} as Record<string, number>;
+        })();
 
-      const labels = Object.values(rooms).map(room => {
-        const pos    = mmToImagePct(room.x, room.y, xMin!, xMax!, yMin!, yMax!);
-        const emoji  = MDI_TO_EMOJI[room.icon] ?? '';
-        const selected = mapSelectedRooms?.has(room.name) ?? false;
-        const areaM2 = regionAreasM2[room.name];
-        const areaSuffix = typeof areaM2 === 'number' && !isNaN(areaM2)
-          ? ` / ${areaM2.toFixed(1)} m²`
-          : '';
-        return `<div class="rpc-room-label${selected ? ' rpc-room-label--selected' : ''}"
-          style="left:${pos.left};top:${pos.top}" data-room-label="${esc(room.name)}">
-          ${emoji ? `${emoji} ` : ''}${esc(room.name)}${esc(areaSuffix)}
-        </div>`;
-      }).join('');
+        const labels = Object.values(rooms).map(room => {
+          const pos    = calibrationToImagePct(cal, room.x, room.y);
+          const emoji  = MDI_TO_EMOJI[room.icon] ?? '';
+          const selected = mapSelectedRooms?.has(room.name) ?? false;
+          const areaM2 = regionAreasM2[room.name];
+          const areaSuffix = typeof areaM2 === 'number' && !isNaN(areaM2)
+            ? ` / ${areaM2.toFixed(1)} m²`
+            : '';
+          return `<div class="rpc-room-label${selected ? ' rpc-room-label--selected' : ''}"
+            style="left:${pos.left};top:${pos.top}" data-room-label="${esc(room.name)}">
+            ${emoji ? `${emoji} ` : ''}${esc(room.name)}${esc(areaSuffix)}
+          </div>`;
+        }).join('');
 
-      roomOverlayHtml = `
-        <svg class="rpc-room-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
-          ${polygons}
-        </svg>
-        ${labels}
-      `;
+        roomOverlayHtml = `
+          <svg class="rpc-room-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
+            ${polygons}
+          </svg>
+          ${labels}
+        `;
+
+        // v2.3.0 ZONE-OVERLAY — observed-obstacle circles + keepout polygons.
+        // Same image.*_map entity, same aligned-mode gate, same calibration
+        // transform as rooms above (all four attributes are pose-space mm
+        // and withheld together outside aligned mode — verified against
+        // source, so no separate gate check is needed here).
+        if (caps.hasZoneOverlays) {
+          const zones = (mapAttrs['zones'] ?? []) as (
+            { type: 'observed'; x: number; y: number }
+            | { type: 'keepout'; polygon: [number, number][] }
+          )[];
+          const zonePieces = zones.map(z => {
+            if (z.type === 'observed') {
+              const p = calibrationToImagePctNum(cal, z.x, z.y);
+              return `<circle class="rpc-zone-observed" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2"><title>Robot-detected obstacle</title></circle>`;
+            }
+            if (z.type === 'keepout' && z.polygon.length >= 3) {
+              const pts = z.polygon.map(([x, y]) => {
+                const p = calibrationToImagePctNum(cal, x, y);
+                return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+              }).join(' ');
+              return `<polygon class="rpc-zone-keepout" points="${pts}"><title>Keep-out zone</title></polygon>`;
+            }
+            return '';
+          }).join('');
+          zoneOverlayHtml = zonePieces
+            ? `<svg class="rpc-room-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">${zonePieces}</svg>`
+            : '';
+        }
+
+        // v2.3.0 ZONE-OVERLAY — door markers. Small dot + label tooltip.
+        if (caps.hasDoorMarkers) {
+          const markers = (mapAttrs['door_markers'] ?? []) as
+            { id: string; cx: number; cy: number; label: string; mission_count: number }[];
+          doorMarkerHtml = markers.map(m => {
+            const pos = calibrationToImagePct(cal, m.cx, m.cy);
+            const tip = esc(`${m.label} (seen ${m.mission_count}×)`);
+            return `<div class="rpc-door-marker" style="left:${pos.left};top:${pos.top}" title="${tip}" aria-label="${tip}">🚪</div>`;
+          }).join('');
+        }
+
+        // v2.3.0 F24 — furniture shadow candidates. Small shadow markers;
+        // no per-candidate label (the underlying data carries no name/id,
+        // just a location — verified against source).
+        if (caps.hasFurnitureShadows) {
+          const candidates = (mapAttrs['furniture_candidates'] ?? []) as { x_mm: number; y_mm: number }[];
+          furnitureHtml = candidates.map(c => {
+            const pos = calibrationToImagePct(cal, c.x_mm, c.y_mm);
+            return `<div class="rpc-furniture-shadow" style="left:${pos.left};top:${pos.top}" title="Possible furniture change" aria-label="Possible furniture change"></div>`;
+          }).join('');
+        }
+      }
     }
 
     coveragePanelHtml = entityPic ? `
@@ -241,6 +419,9 @@ export function renderHistoryZone(
         <div class="rpc-coverage-image-wrap">
           <img class="rpc-coverage-img" src="${entityPic}" alt="Coverage map" />
           ${roomOverlayHtml}
+          ${zoneOverlayHtml}
+          ${doorMarkerHtml}
+          ${furnitureHtml}
           ${pinHtml}
         </div>
         ${noExtentNote}
@@ -249,6 +430,7 @@ export function renderHistoryZone(
           <span style="color:var(--rpc-grey-mid,#9ca3af)">●</span> Rarely cleaned
           ${legendPins}
         </div>
+        ${f22FootnoteHtml}
         ${updatedLine}
       </div>` : `<div class="rpc-history-error">Coverage map unavailable</div>`;
   }
@@ -407,6 +589,106 @@ export function renderHistoryZone(
           alignmentNote = `<div class="rpc-alignment-note">* Coverage estimates (alignment confidence: ${confPct}%)</div>`;
         }
 
+        // v2.2.0 F1 — "Why?" explanation (integration ≥ 3.2.0 ANOMALY-EXPLAIN).
+        //
+        // v2.3.0 CORRECTION: the source==='local' gate is REMOVED. It
+        // existed because the explain endpoint resolved ids via
+        // MissionStore.find_by_id() alone, which never matched cloud-only
+        // rows' synthetic c_{ts} ids (minted in the API layer, never
+        // written to the store) — a real 404-on-tap risk (R2-1, v2.2.0).
+        // Verified against source: integration's EXPLAIN-CLOUD fix adds a
+        // dedicated resolution path (ExplainMissionView now recognises the
+        // "c_" prefix and resolves it against cloud_coordinator.raw_records
+        // directly, handing the result to explain_mission() via a new
+        // record_override parameter) — c_{ts} ids resolve correctly now,
+        // same as local ids. Any still-unresolvable id (e.g. a mission
+        // that's rolled out of the cloud history window) 404s exactly like
+        // any other absent case and is already handled below via
+        // open.error — no special-casing needed on the card side.
+        //
+        // NOTE: this does NOT apply to the Map button (MISSION-MAP, below)
+        // — verified separately that _mission_map_payload()'s own record
+        // resolution is unchanged (still `r.get("id") == record_id` only,
+        // no cloud fallback) — that gate stays as-is.
+        //
+        // is_anomalous=false is itself a meaningful answer. Endpoint absence
+        // (≤ 3.1.x) surfaces as a graceful error line only AFTER a tap — no
+        // capability probe, one wasted tap on old integrations.
+        let explainHtml = '';
+        if (tier !== 'success') {
+          const open = state.openExplain?.missionId === m.id ? state.openExplain : null;
+          const btn = `<button class="rpc-explain-btn" data-explain="${esc(m.id)}" aria-expanded="${!!open}">Why?</button>`;
+          let panel = '';
+          if (open) {
+            if (open.error) {
+              panel = `<div class="rpc-explain-panel rpc-explain-panel--muted">Explanation not available for this mission.</div>`;
+            } else if (open.data === null) {
+              panel = `<div class="rpc-explain-panel rpc-explain-panel--muted">Analysing…</div>`;
+            } else {
+              panel = renderExplainPanel(open.data);
+            }
+          }
+          explainHtml = `${btn}${panel}`;
+        }
+
+        // v2.2.0 F4 — path replay (integration MISSION-REPLAY). Gated on
+        // n_mssn presence in the record. Integration 3.2.1 ships the field
+        // in both unified converters (verified against source); ≤ 3.2.0
+        // drops it, so the button simply doesn't render there. Local-source
+        // rows carry null until backfill_from_cloud() enriches them — same
+        // gate, honest "replay unavailable" until the data exists.
+        let replayHtml = '';
+        if (m.n_mssn != null) {
+          const open = state.openReplay?.nMssn === m.n_mssn ? state.openReplay : null;
+          const btn = `<button class="rpc-explain-btn" data-replay="${m.n_mssn}" aria-expanded="${!!open}">Route</button>`;
+          let panel = '';
+          if (open) {
+            if (open.error) {
+              panel = `<div class="rpc-replay-panel rpc-explain-panel--muted">Path not available for this mission.</div>`;
+            } else if (open.data === null) {
+              panel = `<div class="rpc-replay-panel rpc-explain-panel--muted">Loading…</div>`;
+            } else {
+              panel = renderReplayPanel(open.data, hass.language);
+            }
+          }
+          replayHtml = `${btn}${panel}`;
+        }
+
+        // v2.3.0 MISSION-MAP — coverage replay (integration ≥ 3.3.0
+        // MISSION-MAP). Gate mirrors Route's n_mssn != null check plus a
+        // source==='local' rule — STILL NEEDED HERE even though Why?'s
+        // equivalent gate was removed above: verified against source that
+        // _mission_map_payload()'s own record resolution is a SEPARATE,
+        // still-unfixed lookup (`r.get("id") == record_id` against
+        // ms.records only — no cloud_coordinator fallback, unlike the
+        // explain endpoint's EXPLAIN-CLOUD fix). Cloud-only synthetic
+        // c_{ts} rows remain genuinely unresolvable for this endpoint
+        // specifically; do not remove this gate without re-verifying
+        // _mission_map_payload() against a future integration release.
+        // n_mssn presence is reused as the SMART+cloud proxy signal — no
+        // dedicated per-record field exists yet to confirm pmaps_info
+        // ahead of the fetch; a 404 for a genuinely absent map (e.g.
+        // unconfirmed i-series coverage layers) is treated as a real, calm
+        // answer below, not an error.
+        let mapHtml = '';
+        if (m.source === 'local' && m.n_mssn != null) {
+          const open = state.openMissionMap?.recordId === m.id ? state.openMissionMap : null;
+          const btn = `<button class="rpc-explain-btn" data-map="${esc(m.id)}" aria-expanded="${!!open}">Map</button>`;
+          let panel = '';
+          if (open) {
+            if (open.status === 'absent') {
+              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">No coverage map for this mission.</div>`;
+            } else if (open.status === 'error') {
+              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">Couldn't load the map — try again.</div>`;
+            } else if (open.data === null) {
+              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">Loading…</div>`;
+            } else {
+              panel = renderMissionMapPanel(open.data);
+            }
+          }
+          mapHtml = `${btn}${panel}`;
+        }
+
         return `
           <div class="rpc-day-mission">
             <span class="rpc-day-icon ${cls}">${icon}</span>
@@ -419,6 +701,9 @@ export function renderHistoryZone(
             ${sequenceHtml}
             ${roomCoverageHtml}
             ${alignmentNote}
+            ${explainHtml}
+            ${replayHtml}
+            ${mapHtml}
           </div>`;
       }).join('');
     } else if (summary && summary.total > 0) {
@@ -477,16 +762,47 @@ export function renderHistoryZone(
     // cleaning_analytics_30d state is m² (cloud API is metric) — pass raw value
     // and always format as m² regardless of user unit preference.
     const areaM2   = analyticsEntity ? parseFloat(analyticsEntity.state) : NaN;
-    const hasAny   = !isNaN(missions) || !isNaN(hours) || !isNaN(areaM2);
+
+    // v2.2.0 A2 — lifetime dirt-detection counters (integration ≥ 3.0,
+    // i/s-series bbrun/runtimeStats fields). All three sensors are
+    // entity_registry_enabled_default=False (diagnostic) — presence-gated
+    // per the C5-ANOMALY precedent: renders only for users who enabled
+    // them, and activates automatically should a future integration
+    // options flow flip the defaults. These are LIFETIME counters
+    // (TOTAL_INCREASING), which is why they live here in the Stats
+    // footer and deliberately NOT in the per-mission day detail.
+    const numState = (id: string): number => {
+      const e = hass.states[id];
+      if (!e || e.state === 'unknown' || e.state === 'unavailable') return NaN;
+      return parseInt(e.state, 10);
+    };
+    const optical = numState(`sensor.${n}_optical_dirt_detections`);
+    const piezo   = numState(`sensor.${n}_piezo_dirt_detections`);
+    const scrubs  = numState(`sensor.${n}_scrubs_count`);
+
+    const hasAny   = !isNaN(missions) || !isNaN(hours) || !isNaN(areaM2)
+      || !isNaN(optical) || !isNaN(piezo) || !isNaN(scrubs);
 
     if (hasAny) {
+      const dirtParts = [
+        !isNaN(optical) ? `${optical.toLocaleString()} optical` : '',
+        !isNaN(piezo)   ? `${piezo.toLocaleString()} piezo` : '',
+        !isNaN(scrubs)  ? `${scrubs.toLocaleString()} scrub events` : '',
+      ].filter(Boolean);
+      const dirtLine = dirtParts.length
+        ? `<div class="rpc-lifetime-stats rpc-lifetime-dirt">
+            <span class="rpc-lifetime-arrow">→</span>
+            <span>Dirt detect: ${dirtParts.join(' · ')}</span>
+          </div>`
+        : '';
+
       const expandedContent = state.lifetimeExpanded ? `
         <div class="rpc-lifetime-stats">
           <span class="rpc-lifetime-arrow">→</span>
           ${!isNaN(missions) ? `<span>${missions.toLocaleString()} missions</span>` : ''}
           ${!isNaN(areaM2)   ? `<span>${areaM2.toLocaleString()} m²</span>` : ''}
           ${!isNaN(hours)    ? `<span>${hours.toLocaleString()} h (30 d)</span>` : ''}
-        </div>` : '';
+        </div>${dirtLine}` : '';
 
       lifetimeHtml = `
         <div class="rpc-lifetime-divider"></div>

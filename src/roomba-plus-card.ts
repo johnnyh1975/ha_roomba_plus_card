@@ -3,7 +3,7 @@
  * Spec: roomba_plus_card_spec.md + roomba_plus_card_wave_features.md (Wave A)
  */
 
-import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, HouseholdSummary } from './types.js';
+import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, HouseholdSummary, MissionExplain, MissionPath, MissionMapPayload } from './types.js';
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
 import { timeSince } from './utils.js';
@@ -247,6 +247,11 @@ const STYLES = `
   .rpc-nav-factor-label { color: var(--secondary-text-color); }
   .rpc-nav-factor-value { font-weight: 600; font-variant-numeric: tabular-nums; }
   .rpc-health-score-band  { font-size: 0.75rem; font-weight: 600; }
+  /* v2.2.0 F2/F3 — plain status + trend */
+  .rpc-health-trend { font-size: 0.75rem; font-weight: 600; margin-left: 8px; }
+  .rpc-health-trend--calibrating { color: var(--secondary-text-color); font-weight: 400; font-style: italic; }
+  .rpc-health-plain-status { font-size: 0.82rem; margin: 2px 0 6px; }
+  .rpc-health-recommendation { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 1px; }
   .rpc-health-score-calibrating {
     font-size: 0.82rem; color: var(--secondary-text-color, #9ca3af); font-style: italic;
   }
@@ -359,6 +364,44 @@ const STYLES = `
   .rpc-day-time  { font-weight: 500; }
   .rpc-day-dur, .rpc-day-area { color: var(--secondary-text-color); }
   .rpc-day-zones { width: 100%; padding-left: 20px; color: var(--secondary-text-color); font-size: 0.78rem; }
+  /* v2.2.0 F1 — Why? explanation */
+  .rpc-explain-btn { background: none; border: 1px solid var(--divider-color, #e5e7eb); border-radius: 10px;
+    color: var(--secondary-text-color); font-size: 0.72rem; padding: 1px 8px; cursor: pointer; }
+  .rpc-explain-btn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+  .rpc-explain-panel { width: 100%; margin: 4px 0 4px 20px; padding: 6px 10px; font-size: 0.78rem;
+    background: var(--rpc-panel-bg, rgba(0,0,0,.03)); border-radius: 8px; }
+  .rpc-explain-panel--muted { color: var(--secondary-text-color); }
+  .rpc-explain-reason { font-weight: 600; }
+  .rpc-explain-lifted { color: var(--secondary-text-color); margin-top: 2px; }
+  .rpc-explain-rec { color: var(--secondary-text-color); margin-top: 2px; }
+  /* v2.2.0 F4 — path replay */
+  .rpc-replay-panel { width: 100%; margin: 4px 0 4px 20px; padding: 6px 10px; font-size: 0.78rem;
+    background: var(--rpc-panel-bg, rgba(0,0,0,.03)); border-radius: 8px; line-height: 1.7; }
+  .rpc-replay-step { white-space: nowrap; }
+  .rpc-replay-time { color: var(--secondary-text-color); font-variant-numeric: tabular-nums; margin-right: 3px; }
+  /* v2.3.0 MISSION-MAP — coverage replay. Button reuses .rpc-explain-btn styling
+     (same visual family as Why?/Route) via a shared class on the element. */
+  .rpc-map-panel { width: 100%; margin: 4px 0 4px 20px; padding: 6px 10px; font-size: 0.78rem;
+    background: var(--rpc-panel-bg, rgba(0,0,0,.03)); border-radius: 8px; }
+  .rpc-map-svg { display: block; background: var(--rpc-map-bg, #fafafa); border-radius: 6px; }
+  .rpc-map-room { fill: none; stroke: var(--divider-color, #d1d5db); stroke-width: 1.5; }
+  .rpc-map-dot { fill: var(--rpc-map-dot-colour, #2d9c4f); fill-opacity: 0.55; stroke: none; }
+  /* v2.2.0 A2/A3 */
+  .rpc-lifetime-dirt { margin-top: 2px; }
+  .rpc-dock-health { font-size: 0.82rem; }
+  .rpc-dock-label { font-size: 0.7rem; font-weight: 700; letter-spacing: .06em; color: var(--secondary-text-color); margin-bottom: 2px; }
+  .rpc-dock-tank { margin-bottom: 2px; }
+  .rpc-dock-counters { color: var(--secondary-text-color); font-size: 0.78rem; }
+  .rpc-dock-lifetime-note { opacity: .7; }
+  /* v2.3.0 — Rooms-Overdue widget */
+  .rpc-rooms-overdue { font-size: 0.82rem; }
+  .rpc-rooms-overdue-row { margin-bottom: 2px; }
+  .rpc-rooms-overdue-row--muted { color: var(--secondary-text-color); }
+  .rpc-rooms-overdue-daily { color: var(--secondary-text-color); font-size: 0.78rem; margin-top: 2px; }
+  /* v2.3.0 — Dirt correlation widget */
+  .rpc-dirt-corr { font-size: 0.82rem; }
+  .rpc-dirt-corr-row { margin-bottom: 2px; }
+  .rpc-dirt-corr-row--muted { color: var(--secondary-text-color); font-size: 0.78rem; }
   .rpc-day-aggregate { font-size: 0.82rem; }
   .rpc-day-no-detail { font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 4px; }
   /* F1: demand initiator badge — robot cleaned because floor was dirty */
@@ -413,6 +456,8 @@ const STYLES = `
   .rpc-alert-icon    { font-size: 1rem; flex-shrink: 0; line-height: 1.4; }
   .rpc-alert-text    { font-size: 0.85rem; font-weight: 500; }
   .rpc-alert-sub     { font-size: 0.78rem; color: var(--secondary-text-color); margin-top: 2px; }
+  /* v2.2.0 B1 — resolved-error info line: informational, deliberately unalarming */
+  .rpc-last-error-info { font-size: 0.78rem; color: var(--secondary-text-color); margin: 4px 0 8px; }
 
   /* ─── Wave B/C additions ─── */
 
@@ -569,6 +614,25 @@ const STYLES = `
   }
   .rpc-room-label--selected {
     background: var(--primary-color, #2563eb); color: #fff;
+  }
+  /* v2.3.0 ZONE-OVERLAY / F24 */
+  .rpc-zone-observed {
+    fill: var(--rpc-amber, #d97706); fill-opacity: 0.5; stroke: none;
+  }
+  .rpc-zone-keepout {
+    fill: var(--rpc-red, #dc2626); fill-opacity: 0.12;
+    stroke: var(--rpc-red, #dc2626); stroke-opacity: 0.6; stroke-width: 0.4;
+    stroke-dasharray: 2 1;
+  }
+  .rpc-door-marker {
+    position: absolute; transform: translate(-50%, -50%);
+    font-size: 0.85rem; pointer-events: none;
+  }
+  .rpc-furniture-shadow {
+    position: absolute; transform: translate(-50%, -50%);
+    width: 10px; height: 10px; border-radius: 2px;
+    background: var(--secondary-text-color); opacity: 0.35;
+    pointer-events: none;
   }
 
   /* ── v1.5 — F8 room coverage chips in day popover ───────────────────────── */
@@ -730,6 +794,11 @@ class RoombaPlusCard extends HTMLElement {
   private openDay: string | null = null;
   private dayMissions: MissionRecord[] | null = null;
   private openDaySummary: DaySummary | null = null;
+  private openExplain: { missionId: string; data: MissionExplain | null; error?: boolean } | null = null; // v2.2.0 F1
+  private openReplay: { nMssn: number; data: MissionPath | null; error?: boolean } | null = null;         // v2.2.0 F4
+  // v2.3.0 MISSION-MAP — status undefined while loading; 'absent' = honest
+  // 404 (no coverage map for this mission); 'error' = 409/502/network.
+  private openMissionMap: { recordId: string; data: MissionMapPayload | null; status?: 'absent' | 'error' } | null = null;
   private lifetimeExpanded = false;      // C1: lifetime stats footer expanded
   private hazards: HazardRecord[] = [];  // F7: coverage map hazard pins (fetched with history)
   private historyTab: 'calendar' | 'coverage' = 'calendar'; // F7: active tab in history zone
@@ -745,7 +814,7 @@ class RoombaPlusCard extends HTMLElement {
       let changed = false;
       if (this.openPopover !== null) { this.openPopover = null; changed = true; }
       if (this.openMaintPopover !== null) { this.openMaintPopover = null; changed = true; }
-      if (this.openDay !== null)     { this.openDay = null; this.dayMissions = null; this.openDaySummary = null; changed = true; }
+      if (this.openDay !== null)     { this.openDay = null; this.dayMissions = null; this.openDaySummary = null; this.openExplain = null; this.openReplay = null; this.openMissionMap = null; changed = true; }
       if (changed) this.render();
     }
   };
@@ -884,6 +953,18 @@ class RoombaPlusCard extends HTMLElement {
       this.activeRobot,
       `sensor.${n}_last_error_code`,
       `sensor.${n}_last_error_zone`,          // B2: needed for error zone display
+      `sensor.${n}_last_error_at`,            // v2.2.0 B1: resolved-error info line timestamp
+      `sensor.${n}_health_score_trend`,       // v2.2.0 F3: trend badge + readiness countdown
+      `binary_sensor.${n}_layout_change_detected`, // v2.2.0 F3b: layout change alert
+      `sensor.${n}_optical_dirt_detections`,  // v2.2.0 A2 (diagnostic, default-disabled)
+      `sensor.${n}_piezo_dirt_detections`,    // v2.2.0 A2 (diagnostic, default-disabled)
+      `sensor.${n}_scrubs_count`,             // v2.2.0 A2 (diagnostic, default-disabled)
+      `sensor.${n}_dock_tank_level`,          // v2.2.0 A3
+      `sensor.${n}_dock_knockoffs`,           // v2.2.0 A3 (diagnostic, default-disabled)
+      `sensor.${n}_dock_charge_aborts`,       // v2.2.0 A3 (diagnostic, default-disabled)
+      `sensor.${n}_dock_contact_chatters`,    // v2.2.0 A3 (diagnostic, default-disabled)
+      `sensor.${n}_rooms_overdue`,            // v2.3.0 ROOM-SCHED
+      `sensor.${n}_dirt_weather_correlation`,  // v2.3.0 CROSS-CORR
       `sensor.${n}_phase`,
       `binary_sensor.${n}_mission_active`,
       `binary_sensor.${n}_maintenance_due`,
@@ -939,6 +1020,7 @@ class RoombaPlusCard extends HTMLElement {
       // cleaning_analytics_30d and missions_last_30d already tracked above — A4 vs-usual delta uses both
       // v2.2+
       `image.${n}_coverage_map`,               // B2: hasCoverageImage detection
+      `image.${n}_map`,                        // v2.3.0: hasAlignment/rooms/zones/door_markers/furniture_candidates (CORRECTION — previously missing entirely; these attributes were never on coverage_map)
 
       // v2.0.1 bug fix: these v2.0 entities were never added to the render
       // guard when their features were built — an update to any of them
@@ -1004,6 +1086,9 @@ class RoombaPlusCard extends HTMLElement {
     this.openDay           = null;
     this.dayMissions       = null;
     this.openDaySummary    = null;
+    this.openExplain       = null;
+    this.openReplay        = null;
+    this.openMissionMap    = null;
     this.settingsPanelOpen = false;
     this.lifetimeExpanded  = false;
     this.hazards           = [];              // F7: clear pins on robot switch
@@ -1236,6 +1321,7 @@ class RoombaPlusCard extends HTMLElement {
       hass: this._hass, config: this.config, caps, robotName: this.robotName, isMetric,
       missionData: this.missionData, historyLoading: this.historyLoading, historyError: this.historyError,
       openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
+      openExplain: this.openExplain, openReplay: this.openReplay, openMissionMap: this.openMissionMap,
       lifetimeExpanded: this.lifetimeExpanded, historyTab: this.historyTab, hazards: this.hazards,
       selectedRooms: this.selectedRooms,
       openPopover: this.openPopover, resetting: this.resetting, resetError: this.resetError,
@@ -1478,7 +1564,15 @@ class RoombaPlusCard extends HTMLElement {
           try {
             await this._hass.callService('roomba_plus', service, { entity_id: this.activeRobot });
             await new Promise(r => setTimeout(r, 800)); // brief delay so sensor state refreshes
-            this.openPopover = null;
+            // Bug-hunt round 1: only close the popover THIS reset action
+            // lives inside (retention/bar resets share their key with
+            // their own popover's openPopover value by construction) —
+            // not any unrelated popover that happens to be open elsewhere.
+            // Without this check, a reset button living inline (no
+            // popover of its own, e.g. v2.3.0's "Clean overdue") would
+            // unconditionally close whatever unrelated popover was open
+            // on the same tab.
+            if (this.openPopover === key) this.openPopover = null;
           } catch {
             this.resetError = key;
           } finally {
@@ -1545,6 +1639,109 @@ class RoombaPlusCard extends HTMLElement {
         const entityId = ds.favEntity!;
         this._hass.callService('button', 'press', { entity_id: entityId })
           .catch(() => { /* non-fatal */ });
+        return;
+      }
+
+      case 'replay': {
+        // v2.2.0 F4 — same toggle/stale-guard pattern as 'explain'.
+        const nMssn = parseInt((el as HTMLElement).getAttribute('data-replay')!, 10);
+        if (this.openReplay?.nMssn === nMssn) {
+          this.openReplay = null;
+          this.render();
+          return;
+        }
+        if (!this.apiClient) {  // R2: same forever-loading guard as 'explain'
+          this.openReplay = { nMssn, data: null, error: true };
+          this.render();
+          return;
+        }
+        this.openReplay = { nMssn, data: null };
+        this.render();
+        this.apiClient.fetchPath(nMssn)
+          .then(data => {
+            if (this.openReplay?.nMssn !== nMssn) return; // stale
+            this.openReplay = data === null
+              ? { nMssn, data: null, error: true }
+              : { nMssn, data };
+            this.render();
+          })
+          .catch(() => {
+            if (this.openReplay?.nMssn !== nMssn) return; // stale
+            this.openReplay = { nMssn, data: null, error: true };
+            this.render();
+          });
+        return;
+      }
+
+      case 'map': {
+        // v2.3.0 MISSION-MAP — inline coverage replay. Same toggle/stale-guard
+        // pattern as 'explain'/'replay', but the fetch result is three-way
+        // (ok/absent/error) rather than boolean-error — 'absent' (404) is a
+        // real, calm answer ("no coverage map for this mission" — the
+        // known-open lewis/i-series case), not a failure state.
+        const recordId = (el as HTMLElement).getAttribute('data-map')!;
+        if (this.openMissionMap?.recordId === recordId) {
+          this.openMissionMap = null;
+          this.render();
+          return;
+        }
+        if (!this.apiClient) {  // R2: same forever-loading guard as 'explain'/'replay'
+          this.openMissionMap = { recordId, data: null, status: 'error' };
+          this.render();
+          return;
+        }
+        this.openMissionMap = { recordId, data: null };
+        this.render();
+        this.apiClient.fetchMissionMap(recordId)
+          .then(result => {
+            if (this.openMissionMap?.recordId !== recordId) return; // stale
+            this.openMissionMap = result.status === 'ok'
+              ? { recordId, data: result.data }
+              : { recordId, data: null, status: result.status };
+            this.render();
+          })
+          .catch(() => {
+            if (this.openMissionMap?.recordId !== recordId) return; // stale
+            this.openMissionMap = { recordId, data: null, status: 'error' };
+            this.render();
+          });
+        return;
+      }
+
+      case 'explain': {
+        // v2.2.0 F1 — inline "Why?" explanation. Toggle-off when the same
+        // mission's panel is already open; otherwise show the loading panel
+        // immediately, then patch in the fetched result. A stale response
+        // (user tapped a different mission, or closed the popover, before
+        // the fetch resolved) is dropped by re-checking the open missionId.
+        const missionId = (el as HTMLElement).getAttribute('data-explain')!;
+        if (this.openExplain?.missionId === missionId) {
+          this.openExplain = null;
+          this.render();
+          return;
+        }
+        // R2: without an apiClient the optional-chained fetch would never
+        // resolve and the panel would show "Analysing…" forever.
+        if (!this.apiClient) {
+          this.openExplain = { missionId, data: null, error: true };
+          this.render();
+          return;
+        }
+        this.openExplain = { missionId, data: null };
+        this.render();
+        this.apiClient.fetchExplain(missionId)
+          .then(data => {
+            if (this.openExplain?.missionId !== missionId) return; // stale
+            this.openExplain = data === null
+              ? { missionId, data: null, error: true }
+              : { missionId, data };
+            this.render();
+          })
+          .catch(() => {
+            if (this.openExplain?.missionId !== missionId) return; // stale
+            this.openExplain = { missionId, data: null, error: true };
+            this.render();
+          });
         return;
       }
     }

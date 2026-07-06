@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { renderHeatmap, renderSkeletonHeatmap } from '../src/heatmap';
 import type { DaySummary } from '../src/types';
 
@@ -38,14 +38,38 @@ describe('renderHeatmap()', () => {
     expect(renderHeatmap(summaries, 28, 'auto')).toContain('#2d9c4f');
   });
 
-  it('stuck mission cell has amber colour', () => {
+  it('stuck mission cell has red colour (v2.2.0 B2: failure tier)', () => {
     const today = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const dateStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
     const summaries: DaySummary[] = [
       { date: dateStr, total: 1, completed: 0, stuck: 1, area_sqft: null, result: 'stuck' },
     ];
-    expect(renderHeatmap(summaries, 28, 'auto')).toContain('#d97706');
+    expect(renderHeatmap(summaries, 28, 'auto')).toContain('#dc2626');
+  });
+
+  it('error day cell has amber colour (v2.2.0 B2: caution tier, was red)', () => {
+    const today = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dateStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    const summaries: DaySummary[] = [
+      { date: dateStr, total: 2, completed: 0, stuck: 0, area_sqft: null, result: 'error' },
+    ];
+    const svg = renderHeatmap(summaries, 28, 'auto');
+    expect(svg).toContain('#d97706');
+    expect(svg).not.toContain('#dc2626');
+  });
+
+  it('cancelled day cell stays neutral grey — not caution amber', () => {
+    const today = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dateStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    const summaries: DaySummary[] = [
+      { date: dateStr, total: 1, completed: 0, stuck: 0, area_sqft: null, result: 'cancelled' },
+    ];
+    const svg = renderHeatmap(summaries, 28, 'auto');
+    expect(svg).toContain('#9ca3af');
+    expect(svg).not.toContain('#d97706');
   });
 
   it('multi-mission day shows dot indicators', () => {
@@ -268,7 +292,7 @@ describe('renderSkeletonHeatmap() — fixed-size SVG', () => {
 
 // ── F16: Dirt density opacity modulation ─────────────────────────────────────
 describe('renderHeatmap() — F16 dirt density opacity', () => {
-  const day = (date: string, opts: Partial<import('../../src/types').DaySummary> = {}) => ({
+  const day = (date: string, opts: Partial<import('../src/types').DaySummary> = {}) => ({
     date, total: 1, completed: 1, stuck: 0, area_sqft: 100, result: 'completed' as const, ...opts,
   });
 

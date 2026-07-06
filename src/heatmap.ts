@@ -3,10 +3,29 @@ import { DaySummary } from './types.js';
 // ── Heatmap cell colours (semantic — intentionally not theme-variable mapped)
 // These are data-meaning colours, not brand colours. They must be consistent
 // regardless of the active HA theme so users can parse the calendar at a glance.
+// v2.2.0 B2: colours follow the three-tier mission classification introduced
+// in v2.0.2 (✓ success / ⚠ caution / ✗ failure). Before this fix the two
+// were INVERTED relative to the tiers: a day whose worst mission was `stuck`
+// (a hard failure — robot never recovered) rendered amber, while a day whose
+// worst mission was `error` (caution tier — mission ended, e.g. a brush jam
+// the user cleared) rendered red. Field report: a day containing only two
+// ⚠-tier missions showed a red cell.
+//
+// Note this is a REMAP of the server-side DaySummary.result (5-value enum),
+// not a client-side tier computation — format=summary carries no per-mission
+// results, so the cell can only be as precise as the integration's dominant
+// value. Two integration-side coarseness issues found during this release
+// were fixed in integration 3.2.1 (dominance now ranks stuck > error, and
+// error_*/cancelled_by_user variants are bucketed instead of falling
+// through to 'none'); this remap is deliberately version-agnostic — it maps
+// result VALUES, not orderings, so it renders both 3.2.0 and 3.2.1 shapes
+// correctly. `cancelled` deliberately stays neutral grey rather than caution
+// amber: a day whose ONLY missions were user-cancelled (the sole way
+// `cancelled` becomes dominant) is not a warning condition at day granularity.
 const COLOURS: Record<string, string> = {
-  completed: '#2d9c4f',
-  stuck:     '#d97706',
-  error:     '#dc2626',
+  completed: '#2d9c4f',   // ✓ success tier
+  stuck:     '#dc2626',   // ✗ failure tier (was amber — inverted)
+  error:     '#d97706',   // ⚠ caution tier (was red — inverted)
   cancelled: '#9ca3af',
   none:      'var(--rpc-cell-empty, var(--rpc-grey-light, #e5e7eb))',
 };
@@ -241,7 +260,7 @@ export function mmToImagePct(
  * v2.0 C7-ROOM-BOUNDS: numeric variant of mmToImagePct for SVG polygon
  * point lists (`points="x1,y1 x2,y2 ..."` needs raw numbers, not CSS
  * percentage strings). Same transform, same mm-space convention — the
- * `rooms` attribute on image.*_coverage_map gives outline coordinates in
+ * `rooms` attribute on image.*_map gives outline coordinates in
  * pose-space mm (confirmed against integration source; NOT image pixels
  * as an earlier plan draft assumed), so this reuses the identical
  * spatial-extent-based transform already used for hazard pins.
