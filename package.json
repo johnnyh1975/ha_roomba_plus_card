@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "esbuild": "^0.21.0",
-    "typescript": "^5.4.0",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.7"
   },
   "repository": {
