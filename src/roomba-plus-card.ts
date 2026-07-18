@@ -1021,6 +1021,7 @@ class RoombaPlusCard extends HTMLElement {
       // v2.2+
       `image.${n}_coverage_map`,               // B2: hasCoverageImage detection
       `image.${n}_map`,                        // v2.3.0: hasAlignment/rooms/zones/door_markers/furniture_candidates (CORRECTION — previously missing entirely; these attributes were never on coverage_map)
+      `sensor.${n}_room_accessibility_scores`,  // v2.4.0 ROOM-ACCESS: room-label tooltip
 
       // v2.0.1 bug fix: these v2.0 entities were never added to the render
       // guard when their features were built — an update to any of them

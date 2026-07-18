@@ -47,6 +47,8 @@ export const defaultCaps: RobotCapabilities = {
   hasRoomsOverdue: false,
   hasZoneOverlays: false, hasDoorMarkers: false, hasFurnitureShadows: false,
   hasDirtCorrelation: false,
+  // v2.4.0
+  hasRoomAccess: false,
 };
 
 export const fullCaps: RobotCapabilities = {
@@ -76,6 +78,8 @@ export const fullCaps: RobotCapabilities = {
   hasRoomsOverdue: true,
   hasZoneOverlays: false, hasDoorMarkers: false, hasFurnitureShadows: false,
   hasDirtCorrelation: false,
+  // v2.4.0
+  hasRoomAccess: false,
 };
 
 export const baseConfig: CardConfig = {

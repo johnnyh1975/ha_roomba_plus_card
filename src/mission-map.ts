@@ -116,8 +116,21 @@ export function buildMissionMapGeometry(payload: MissionMapPayload): MissionMapG
   return { points, rooms, empty: points.length === 0 && rooms.length === 0 };
 }
 
-/** Assemble the geometry into an inline SVG string. Pure — no DOM access. */
-export function renderMissionMapSvg(payload: MissionMapPayload): string {
+/**
+ * Assemble the geometry into an inline SVG string. Pure — no DOM access.
+ *
+ * v2.4.0 MISSION-MAP-ROTATE-PARITY: optional `rotate` (0/90/180/270,
+ * clockwise) mirrors the integration's own `?rotate=` query param on
+ * `.../map.png` (integration ≥ 3.4.1) — same user-facing intent (their
+ * dashboard's orientation doesn't match the robot's Smart Map orientation),
+ * but a much simpler mechanism here: the integration rotates the finished
+ * *raster* image as a whole (PIL transpose, verified against source —
+ * applied after all drawing, not a coordinate-space transform before it),
+ * whereas this SVG only needs a single group-level `transform="rotate(...)"`
+ * around the viewBox centre — lossless, and no change to
+ * buildMissionMapGeometry()'s point/polygon math at all.
+ */
+export function renderMissionMapSvg(payload: MissionMapPayload, rotate: 0 | 90 | 180 | 270 = 0): string {
   const geo = buildMissionMapGeometry(payload);
   if (geo.empty) {
     return `<div class="rpc-map-panel rpc-explain-panel--muted">No coverage data to draw for this mission.</div>`;
@@ -128,11 +141,15 @@ export function renderMissionMapSvg(payload: MissionMapPayload): string {
   const dots = geo.points
     .map(p => `<circle class="rpc-map-dot" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.r.toFixed(1)}"/>`)
     .join('');
+  const center = SVG_SIZE / 2;
+  const content = `${roomPolys}${dots}`;
+  const rotated = rotate !== 0
+    ? `<g transform="rotate(${rotate} ${center} ${center})">${content}</g>`
+    : content;
   return `
     <div class="rpc-map-panel">
       <svg class="rpc-map-svg" viewBox="0 0 ${SVG_SIZE} ${SVG_SIZE}" width="${SVG_SIZE}" height="${SVG_SIZE}" role="img" aria-label="Mission coverage map">
-        ${roomPolys}
-        ${dots}
+        ${rotated}
       </svg>
     </div>`;
 }

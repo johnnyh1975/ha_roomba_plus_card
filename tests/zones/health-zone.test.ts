@@ -1206,6 +1206,93 @@ describe('renderHealthZone() — v2.3.0 Rooms-Overdue widget', () => {
     expect(html).toContain('Clean overdue');
     expect(html).not.toContain("Couldn't start — try again");
   });
+
+  // ── v2.4.0 — suggested_interval_days (full per-room dict, previously
+  // only its daily_suggested subset was surfaced) ──
+  it('renders the full suggested_interval_days dict, sorted ascending by days', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('0', {
+        rooms: {}, overdue_rooms: [],
+        suggested_interval_days: { Bedroom: 4.5, Kitchen: 2.1 },
+      }),
+    }, caps);
+    expect(html).toContain('Kitchen: suggested every 2.1d');
+    expect(html).toContain('Bedroom: suggested every 4.5d');
+    expect(html.indexOf('Kitchen')).toBeLessThan(html.indexOf('Bedroom'));
+  });
+
+  it('omits the suggested-interval section when the key is entirely absent', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('0', { rooms: {}, overdue_rooms: [] }),
+    }, caps);
+    expect(html).not.toContain('rpc-rooms-suggested');
+  });
+
+  it('omits the suggested-interval section when the dict is empty', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('0', { rooms: {}, overdue_rooms: [], suggested_interval_days: {} }),
+    }, caps);
+    expect(html).not.toContain('rpc-rooms-suggested');
+  });
+
+  it('skips a non-finite suggested-interval value defensively instead of rendering "every NaNd"', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('0', {
+        rooms: {}, overdue_rooms: [],
+        suggested_interval_days: { Kitchen: 2.1, Attic: 'unknown' as unknown as number },
+      }),
+    }, caps);
+    expect(html).toContain('Kitchen: suggested every 2.1d');
+    expect(html).not.toContain('NaN');
+    expect(html).not.toContain('Attic');
+  });
+
+  // ── v2.4.0 — "Auto-clean dirty rooms" trigger button — same generic
+  // data-reset/data-service mechanism, own key 'auto-clean-dirty'. Unlike
+  // Clean overdue, deliberately NOT gated on anything overdue-related —
+  // always present once the ROOMS block itself renders.
+  it('button appears even when nothing is overdue (different signal, no no-op case to hide for)', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('0', { rooms: {}, overdue_rooms: [] }),
+    }, caps);
+    expect(html).toContain('data-reset="auto-clean-dirty"');
+    expect(html).toContain('data-service="auto_clean_dirty_rooms"');
+    expect(html).toContain('Auto-clean dirty rooms');
+  });
+
+  it('button appears alongside Clean overdue when rooms are also overdue', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } },
+        overdue_rooms: ['Kitchen'],
+      }),
+    }, caps);
+    expect(html).toContain('data-reset="overdue-clean"');
+    expect(html).toContain('data-reset="auto-clean-dirty"');
+  });
+
+  it('shows its own spinner/disabled state without affecting the Clean overdue button', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } },
+        overdue_rooms: ['Kitchen'],
+      }),
+    }, caps, { resetting: 'auto-clean-dirty' });
+    expect(html).toContain('rpc-spinner');
+    expect(html).not.toContain('Auto-clean dirty rooms');
+    expect(html).toContain('Clean overdue'); // unaffected — different key
+  });
+
+  it('shows an error message for its own key without leaking onto Clean overdue', () => {
+    const html = render({
+      [`sensor.${n}_rooms_overdue`]: st('1', {
+        rooms: { Kitchen: { days_since_last: 6, expected_interval_days: 3, source: 'configured', status: 'overdue', overdue_factor: 2 } },
+        overdue_rooms: ['Kitchen'],
+      }),
+    }, caps, { resetError: 'auto-clean-dirty' });
+    expect(html).toContain("Couldn't start — try again");
+    expect(html).toContain('Clean overdue');
+  });
 });
 
 describe('renderHealthZone() — v2.3.0 dirt/sensor correlation widget', () => {

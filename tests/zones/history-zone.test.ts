@@ -1136,6 +1136,152 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
         expect(html).not.toContain('m²');
       });
     });
+
+    // v2.4.0 ROOM-ACCESS — accessibility score as a room-label tooltip.
+    // Same image.*_map + calibration_points precondition as the overlay
+    // itself, but sourced from a SEPARATE sensor entity, gated on its own
+    // hasRoomAccess cap flag (mirrors region_areas_m2's degrade-gracefully
+    // pattern above, just from a different entity).
+    describe('v2.4.0 ROOM-ACCESS: room-label tooltip', () => {
+      it('adds a title/aria-label tooltip when a room has an accessibility score', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+            [`sensor.${n}_room_accessibility_scores`]: st('2', {
+              Kitchen: { score: 78.4, limiting_factor: 'obstacle_density' },
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasRoomAccess: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>/)?.[0] ?? '';
+        expect(kitchenLabel).toContain('title="Kitchen — access 78/100 (limited by obstacle density)"');
+        expect(kitchenLabel).toContain('aria-label="Kitchen — access 78/100 (limited by obstacle density)"');
+      });
+
+      it.each([
+        ['obstacle_density', 'obstacle density'],
+        ['narrow_passages', 'narrow passages'],
+        ['coverage_gap', 'coverage gaps'],
+      ])('maps limiting_factor %s to the readable label %s', (code, label) => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+            [`sensor.${n}_room_accessibility_scores`]: st('1', {
+              Kitchen: { score: 50, limiting_factor: code },
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasRoomAccess: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain(`limited by ${label}`);
+      });
+
+      it('omits the "(limited by ...)" parenthetical when limiting_factor is null', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+            [`sensor.${n}_room_accessibility_scores`]: st('1', {
+              Kitchen: { score: 95, limiting_factor: null },
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasRoomAccess: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>/)?.[0] ?? '';
+        expect(kitchenLabel).toContain('title="Kitchen — access 95/100"');
+        expect(kitchenLabel).not.toContain('limited by');
+      });
+
+      it('shows an unrecognised future limiting_factor code as-is rather than hiding it', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+            [`sensor.${n}_room_accessibility_scores`]: st('1', {
+              Kitchen: { score: 60, limiting_factor: 'future_signal' },
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasRoomAccess: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain('limited by future_signal');
+      });
+
+      it('no tooltip when hasRoomAccess is false, even with sensor data present', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+            [`sensor.${n}_room_accessibility_scores`]: st('1', {
+              Kitchen: { score: 78, limiting_factor: 'obstacle_density' },
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasRoomAccess: false }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>/)?.[0] ?? '';
+        expect(kitchenLabel).not.toContain('title=');
+        expect(html).not.toContain('access 78');
+      });
+
+      it('no tooltip for a room missing from the scores dict, even when other rooms have one', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+            [`sensor.${n}_room_accessibility_scores`]: st('1', {
+              Kitchen: { score: 78, limiting_factor: 'obstacle_density' },
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasRoomAccess: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        const hallwayLabel = html.match(/<div[^>]*data-room-label="Hallway"[^>]*>/)?.[0] ?? '';
+        expect(hallwayLabel).not.toContain('title=');
+        const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>/)?.[0] ?? '';
+        expect(kitchenLabel).toContain('title=');
+      });
+
+      // Bug-hunt-style defensive test: this sensor's extra_state_attributes
+      // has no wrapper key (unlike rooms_overdue's `rooms` sub-key), so HA's
+      // own state_class/friendly_name attributes land in the same flat
+      // dict — must not be mistaken for room entries or throw.
+      it('ignores non-room-shaped entries (e.g. HA state_class/friendly_name) mixed into the same flat attributes dict', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+            [`sensor.${n}_room_accessibility_scores`]: st('1', {
+              state_class: 'measurement',
+              friendly_name: 'Roomba Room accessibility scores',
+              Kitchen: { score: 78, limiting_factor: 'obstacle_density' },
+            }),
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasRoomAccess: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>/)?.[0] ?? '';
+        expect(kitchenLabel).toContain('access 78/100');
+        expect(html).not.toContain('state_class');
+      });
+
+      it('no tooltip when the sensor entity itself is absent, even with hasRoomAccess true', () => {
+        const html = renderHistoryZone(
+          makeHass({
+            [`image.${n}_coverage_map`]: coverageImageState,
+            [`image.${n}_map`]: mapImageState,
+          }),
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasRoomAccess: true }, n,
+          { ...emptyState, historyTab: 'coverage' }, false,
+        );
+        expect(html).toContain('data-room-label="Kitchen"');
+        expect(html).not.toContain('access');
+      });
+    });
   });
 
   it('coverage image renders without pins when extent attrs absent (R2 graceful degradation)', () => {
@@ -1516,13 +1662,12 @@ describe('renderHistoryZone() — v2.3.0 MISSION-MAP coverage replay', () => {
     expect(html).not.toContain('data-map');
   });
 
-  it('R2-1-style gate: no Map button on cloud-source rows even with n_mssn present', () => {
-    // v2.3.0: Why?'s equivalent gap was fixed (EXPLAIN-CLOUD, verified
-    // against source), but _mission_map_payload()'s own record resolution
-    // is a separate, still-unfixed lookup with no cloud fallback — this
-    // gate must stay until that endpoint gets its own fix.
-    const html = render({}, { openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk({ source: 'cloud', n_mssn: 425 })] });
-    expect(html).not.toContain('data-map');
+  it('v2.4.0 MISSION-MAP-CLOUD-ROWS: Map button now shows on cloud-source rows too (integration resolves c_{ts} ids via a dedicated cloud-fallback path, mirroring EXPLAIN-CLOUD — verified against source)', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk({ id: 'c_1750912345', source: 'cloud', n_mssn: 425 })],
+    });
+    expect(html).toContain('data-map="c_1750912345"');
   });
 
   it('Map button appears for local rows with n_mssn present', () => {
@@ -1553,6 +1698,37 @@ describe('renderHistoryZone() — v2.3.0 MISSION-MAP coverage replay', () => {
     });
     expect(html).toContain('<svg');
     expect(html).toContain('rpc-map-dot');
+  });
+
+  // v2.4.0 MISSION-MAP-ROTATE-PARITY — config.mission_map_rotate wiring
+  it('passes config.mission_map_rotate through to the rendered SVG', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk()],
+      openMissionMap: {
+        recordId: 'm1',
+        data: {
+          record_id: 'm1', mission_id: 'abc', nmssn: 425, pmap_id: 'p1', pmapv_id: 'v1',
+          point_area_m: [0.1049, 0.1049], coverage_mm: [[0, 0], [1000, 1000]],
+          rooms: { Kitchen: [[0, 0], [2000, 0], [2000, 2000]] },
+        },
+      },
+    }, { mission_map_rotate: 90 });
+    expect(html).toContain('transform="rotate(90 140 140)"');
+  });
+
+  it('no rotate transform when config.mission_map_rotate is unset (default)', () => {
+    const html = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary, dayMissions: [mk()],
+      openMissionMap: {
+        recordId: 'm1',
+        data: {
+          record_id: 'm1', mission_id: 'abc', nmssn: 425, pmap_id: 'p1', pmapv_id: 'v1',
+          point_area_m: [0.1049, 0.1049], coverage_mm: [[0, 0], [1000, 1000]],
+          rooms: { Kitchen: [[0, 0], [2000, 0], [2000, 2000]] },
+        },
+      },
+    });
+    expect(html).not.toContain('rotate(');
   });
 
   it('status "absent" (404) renders a calm honest-absence message, not an error', () => {

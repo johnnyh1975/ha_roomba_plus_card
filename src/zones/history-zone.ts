@@ -52,8 +52,10 @@ export function renderReplayPanel(data: MissionPath, locale: string): string {
 }
 
 // ── v2.3.0 MISSION-MAP — coverage replay display ─────────────────────────────
-export function renderMissionMapPanel(data: MissionMapPayload): string {
-  return renderMissionMapSvg(data);
+// v2.4.0 MISSION-MAP-ROTATE-PARITY: rotate passed through from
+// config.mission_map_rotate, defaulting to 0 (no rotation) when unset.
+export function renderMissionMapPanel(data: MissionMapPayload, rotate: 0 | 90 | 180 | 270 = 0): string {
+  return renderMissionMapSvg(data, rotate);
 }
 
 export interface HistoryZoneState {  data: DaySummary[] | null;
@@ -340,6 +342,44 @@ export function renderHistoryZone(
             : {} as Record<string, number>;
         })();
 
+        // v2.4.0 ROOM-ACCESS — per-room accessibility score as a label
+        // tooltip (title attribute), same lightweight approach as door
+        // markers' hover tooltip below. Sourced from a SEPARATE sensor
+        // entity (sensor.*_room_accessibility_scores), not image.*_map —
+        // gated by hasRoomAccess (same underlying umf_aligner condition as
+        // hasAlignment itself, verified against source).
+        //
+        // Defensive shape check: unlike rooms_overdue's `rooms` sub-key,
+        // this sensor's extra_state_attributes has NO wrapper key (verified
+        // against source) — HA also merges its own state_class/
+        // friendly_name/etc. into that same flat attributes dict, so only
+        // entries actually shaped like {score: number, ...} are treated as
+        // room entries here, not every key present.
+        const roomAccessScores: Record<string, { score: number; limiting_factor: string | null }> = {};
+        if (caps.hasRoomAccess) {
+          const raw = (hass.states[`sensor.${n}_room_accessibility_scores`]?.attributes ?? {}) as Record<string, unknown>;
+          for (const [name, val] of Object.entries(raw)) {
+            if (val && typeof val === 'object' && typeof (val as Record<string, unknown>).score === 'number') {
+              roomAccessScores[name] = val as { score: number; limiting_factor: string | null };
+            }
+          }
+        }
+        // The integration's three known limiting_factor codes (verified
+        // against RobotProfileStore.room_accessibility_scores()) mapped to
+        // short readable labels; an unrecognised future code is shown as-is
+        // rather than hidden, same "don't silently drop new data" instinct
+        // used elsewhere in this project. null/undefined (no limiting
+        // factor — a room with no signals at all) shows no factor at all.
+        const limitingFactorLabel = (factor: string | null | undefined): string => {
+          if (factor == null) return '';
+          switch (factor) {
+            case 'obstacle_density': return 'obstacle density';
+            case 'narrow_passages':  return 'narrow passages';
+            case 'coverage_gap':     return 'coverage gaps';
+            default:                 return factor;
+          }
+        };
+
         const labels = Object.values(rooms).map(room => {
           const pos    = calibrationToImagePct(cal, room.x, room.y);
           const emoji  = MDI_TO_EMOJI[room.icon] ?? '';
@@ -348,8 +388,14 @@ export function renderHistoryZone(
           const areaSuffix = typeof areaM2 === 'number' && !isNaN(areaM2)
             ? ` / ${areaM2.toFixed(1)} m²`
             : '';
+          const access = roomAccessScores[room.name];
+          const factorLabel = access ? limitingFactorLabel(access.limiting_factor) : '';
+          const accessTip = access
+            ? `${room.name} — access ${Math.round(access.score)}/100${factorLabel ? ` (limited by ${factorLabel})` : ''}`
+            : '';
+          const tipAttr = accessTip ? ` title="${esc(accessTip)}" aria-label="${esc(accessTip)}"` : '';
           return `<div class="rpc-room-label${selected ? ' rpc-room-label--selected' : ''}"
-            style="left:${pos.left};top:${pos.top}" data-room-label="${esc(room.name)}">
+            style="left:${pos.left};top:${pos.top}" data-room-label="${esc(room.name)}"${tipAttr}>
             ${emoji ? `${emoji} ` : ''}${esc(room.name)}${esc(areaSuffix)}
           </div>`;
         }).join('');
@@ -655,23 +701,31 @@ export function renderHistoryZone(
         }
 
         // v2.3.0 MISSION-MAP — coverage replay (integration ≥ 3.3.0
-        // MISSION-MAP). Gate mirrors Route's n_mssn != null check plus a
-        // source==='local' rule — STILL NEEDED HERE even though Why?'s
-        // equivalent gate was removed above: verified against source that
-        // _mission_map_payload()'s own record resolution is a SEPARATE,
-        // still-unfixed lookup (`r.get("id") == record_id` against
-        // ms.records only — no cloud_coordinator fallback, unlike the
-        // explain endpoint's EXPLAIN-CLOUD fix). Cloud-only synthetic
-        // c_{ts} rows remain genuinely unresolvable for this endpoint
-        // specifically; do not remove this gate without re-verifying
-        // _mission_map_payload() against a future integration release.
-        // n_mssn presence is reused as the SMART+cloud proxy signal — no
+        // MISSION-MAP).
+        //
+        // v2.4.0 CORRECTION: the source==='local' gate is REMOVED. It
+        // existed because _mission_map_payload()'s own record resolution
+        // was a separate, still-unfixed lookup (`r.get("id") ==
+        // record_id` against ms.records only) — the same R2-1-class gap
+        // Why?'s EXPLAIN-CLOUD fix closed elsewhere, but never applied
+        // here (verified against source at v3.4.2 time — still open).
+        // Verified against the v3.4.2 MISSION-MAP-CLOUD-ROWS fix: a new
+        // _resolve_cloud_mission_map_record() helper (mirrors
+        // _resolve_cloud_explain_record() exactly — same startTime-then-
+        // timestamp precedence) now resolves c_{ts} ids against
+        // cloud_coordinator.raw_records before _mission_map_payload()
+        // falls through to its local-only lookup. c_{ts} ids resolve
+        // correctly now, same as local ids.
+        //
+        // n_mssn presence remains the SMART+cloud proxy signal — no
         // dedicated per-record field exists yet to confirm pmaps_info
-        // ahead of the fetch; a 404 for a genuinely absent map (e.g.
-        // unconfirmed i-series coverage layers) is treated as a real, calm
-        // answer below, not an error.
+        // ahead of the fetch; a 404 for a genuinely absent map (e.g. an
+        // EPHEMERAL-tier cloud row with no pmaps_info, or unconfirmed
+        // i-series coverage layers) is treated as a real, calm answer
+        // below via open.status === 'absent' — not an error, and not a
+        // new failure mode introduced by this unlock.
         let mapHtml = '';
-        if (m.source === 'local' && m.n_mssn != null) {
+        if (m.n_mssn != null) {
           const open = state.openMissionMap?.recordId === m.id ? state.openMissionMap : null;
           const btn = `<button class="rpc-explain-btn" data-map="${esc(m.id)}" aria-expanded="${!!open}">Map</button>`;
           let panel = '';
@@ -683,7 +737,7 @@ export function renderHistoryZone(
             } else if (open.data === null) {
               panel = `<div class="rpc-map-panel rpc-explain-panel--muted">Loading…</div>`;
             } else {
-              panel = renderMissionMapPanel(open.data);
+              panel = renderMissionMapPanel(open.data, config.mission_map_rotate ?? 0);
             }
           }
           mapHtml = `${btn}${panel}`;

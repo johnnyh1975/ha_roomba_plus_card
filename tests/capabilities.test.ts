@@ -242,6 +242,13 @@ describe('detectCapabilities() — v1.6 entity flags', () => {
 
   it('hasRoomsOverdue true when sensor present', () =>
     expect(detectCapabilities(makeHass({ [`sensor.${n}_rooms_overdue`]: st('2') }), n, baseConfig).hasRoomsOverdue).toBe(true));
+
+  // v2.4.0 ROOM-ACCESS
+  it('hasRoomAccess false when sensor absent', () =>
+    expect(detectCapabilities(makeHass(), n, baseConfig).hasRoomAccess).toBe(false));
+
+  it('hasRoomAccess true when sensor present', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_room_accessibility_scores`]: st('2') }), n, baseConfig).hasRoomAccess).toBe(true));
 });
 
 describe('detectCapabilities() — v2.3.0 CORRECTION: hasAlignment reads image.*_map', () => {

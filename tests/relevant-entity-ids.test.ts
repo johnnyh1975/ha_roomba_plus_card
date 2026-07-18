@@ -108,6 +108,7 @@ function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?
     `sensor.${n}_dock_contact_chatters`,
     `sensor.${n}_rooms_overdue`,       // v2.3.0 ROOM-SCHED
     `sensor.${n}_dirt_weather_correlation`, // v2.3.0 CROSS-CORR
+    `sensor.${n}_room_accessibility_scores`, // v2.4.0 ROOM-ACCESS
     ...(helperEntity ? [helperEntity] : []),
   ];
 }
@@ -261,4 +262,10 @@ describe('relevantEntityIds() — v2.3.0 additions watched', () => {
     expect(ids).toContain('sensor.roomba_rooms_overdue'));
   it('watches sensor.roomba_dirt_weather_correlation', () =>
     expect(ids).toContain('sensor.roomba_dirt_weather_correlation'));
+});
+
+describe('relevantEntityIds() — v2.4.0 additions watched', () => {
+  const ids = relevantEntityIds('roomba', 'vacuum.roomba');
+  it('watches sensor.roomba_room_accessibility_scores', () =>
+    expect(ids).toContain('sensor.roomba_room_accessibility_scores'));
 });

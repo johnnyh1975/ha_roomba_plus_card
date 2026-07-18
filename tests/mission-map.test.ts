@@ -105,4 +105,41 @@ describe('renderMissionMapSvg', () => {
     expect(html).not.toContain('<svg');
     expect(html).toContain('No coverage data');
   });
+
+  // v2.4.0 MISSION-MAP-ROTATE-PARITY
+  describe('rotate parameter', () => {
+    it('adds no rotate transform when rotate is omitted (default)', () => {
+      const html = renderMissionMapSvg(basePayload());
+      expect(html).not.toContain('rotate(');
+    });
+
+    it('adds no rotate transform when rotate is explicitly 0', () => {
+      const html = renderMissionMapSvg(basePayload(), 0);
+      expect(html).not.toContain('rotate(');
+    });
+
+    it.each([90, 180, 270] as const)('wraps content in a %d° rotate transform around the SVG centre', (deg) => {
+      const html = renderMissionMapSvg(basePayload(), deg);
+      expect(html).toContain(`transform="rotate(${deg} 140 140)"`);
+    });
+
+    it('still contains the same room/dot markup regardless of rotation (geometry itself is untouched)', () => {
+      const unrotated = renderMissionMapSvg(basePayload());
+      const rotated = renderMissionMapSvg(basePayload(), 90);
+      expect(rotated).toContain('rpc-map-room');
+      expect(rotated).toContain('rpc-map-dot');
+      // Same inner content, just wrapped in an extra <g> — the polygon
+      // points/circle coordinates themselves are identical either way,
+      // since rotation is a pure SVG-level transform, not a coordinate
+      // recomputation (buildMissionMapGeometry never sees `rotate`).
+      const dotMatch = unrotated.match(/<circle[^>]*\/>/);
+      expect(rotated).toContain(dotMatch![0]);
+    });
+
+    it('an empty-mission message is unaffected by rotate (nothing to wrap)', () => {
+      const html = renderMissionMapSvg(basePayload({ coverage_mm: [], rooms: {} }), 90);
+      expect(html).toContain('No coverage data');
+      expect(html).not.toContain('rotate(');
+    });
+  });
 });

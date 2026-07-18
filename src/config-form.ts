@@ -96,6 +96,21 @@ export function buildConfigFormSchema(): HAFormField[] {
       },
     },
     {
+      name: 'mission_map_rotate',
+      label: 'Mission map rotation (History → Map button)',
+      selector: {
+        select: {
+          options: [
+            { value: 0,   label: 'No rotation' },
+            { value: 90,  label: '90°' },
+            { value: 180, label: '180°' },
+            { value: 270, label: '270°' },
+          ],
+          mode: 'dropdown',
+        },
+      },
+    },
+    {
       name: 'presence_entities',
       label: 'Presence sensors (person.* entities)',
       selector: { entity: { domain: 'person', multiple: true } },

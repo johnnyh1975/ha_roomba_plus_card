@@ -32,6 +32,16 @@ export interface CardConfig {
   /** Optional override for which tab is shown on first render.
    *  Default: 'map' for standalone SMART/EPHEMERAL, 'history' otherwise. */
   default_tab?: 'map' | 'history' | 'health' | 'settings';
+
+  // ── v2.4.0 ──────────────────────────────────────────────────────────────
+  /** v2.4.0 MISSION-MAP-ROTATE-PARITY: clockwise rotation (degrees) applied
+   *  to the Map button's client-side coverage-replay SVG (History day-
+   *  detail), matching the integration's own `?rotate=` param on
+   *  `.../map.png` (integration ≥ 3.4.1) for users whose dashboard
+   *  orientation doesn't match the robot's Smart Map orientation. Default
+   *  0 (no rotation) when unset — a purely cosmetic, lossless transform;
+   *  does not affect calibration, room selection, or any other geometry. */
+  mission_map_rotate?: 0 | 90 | 180 | 270;
 }
 
 export interface RobotCapabilities {
@@ -139,6 +149,15 @@ export interface RobotCapabilities {
   hasDoorMarkers: boolean;
   /** v2.3.0 F24 — non-empty `furniture_candidates` array on image.*_map. */
   hasFurnitureShadows: boolean;
+  /** v2.4.0 ROOM-ACCESS — sensor.*_room_accessibility_scores present.
+   *  Rendered as a Map-tab room-label tooltip (same place hasZoneOverlays/
+   *  hasDoorMarkers render), but sourced from a SEPARATE sensor entity, not
+   *  image.*_map — the integration gates its registration on umf_aligner
+   *  presence (same SMART-tier + aligned-map condition as hasAlignment
+   *  itself, room polygons come from the same UmfAligner source), so
+   *  presence alone is sufficient, same reasoning as hasRoomsOverdue.
+   *  DIAGNOSTIC category but enabled by default (verified against source). */
+  hasRoomAccess: boolean;
   /** button.*_fav_* (any present) — FAVORITES, fully shipped in the
    *  integration but with no home in the card before v2.0. */
   hasFavorites: boolean;

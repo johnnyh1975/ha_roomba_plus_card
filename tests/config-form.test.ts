@@ -34,6 +34,13 @@ describe('B4 — top-level leads with real v2.0 switches', () => {
   it('keeps entity required', () => {
     expect(field('entity')?.required).toBe(true);
   });
+
+  // v2.4.0 MISSION-MAP-ROTATE-PARITY
+  it('exposes mission_map_rotate at top level with all four rotation options', () => {
+    expect(topLevelNames).toContain('mission_map_rotate');
+    const opts = (field('mission_map_rotate')?.selector as any)?.select?.options?.map((o: any) => o.value);
+    expect(opts).toEqual([0, 90, 180, 270]);
+  });
 });
 
 describe('B4 — legacy show_* flags grouped under Advanced', () => {

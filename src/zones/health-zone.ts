@@ -401,6 +401,14 @@ function renderDockHealth(hass: HomeAssistant, n: string): string {
 // v1 deliberately does not surface the configured/learned source distinction
 // per room (adds visual noise for a difference most users won't act on
 // differently) — revisit if field feedback wants it.
+//
+// v2.4.0 additions to the same block/entity (bundled together deliberately —
+// same widget, same release item, precedent set by v2.3.0's Rooms-Overdue +
+// Overdue-Clean pairing): the full suggested_interval_days dict (previously
+// only its daily_suggested subset was surfaced) and a second trigger button
+// for roomba_plus.auto_clean_dirty_rooms (SMART-ORDER) — a different signal
+// (dirt index) than Clean overdue's rooms_overdue, hence its own button
+// rather than folding into the existing one.
 function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: string, state: HealthZoneState): string {
   if (!caps.hasRoomsOverdue) return '';
 
@@ -442,6 +450,27 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
     ? `<div class="rpc-rooms-overdue-daily">${dailySuggested.map(esc).join(', ')} could use daily cleaning</div>`
     : '';
 
+  // v2.4.0 — Suggested cleaning intervals (RobotProfileStore DIRT-VEL).
+  // suggested_interval_days is present only once the integration has
+  // enough dirt-velocity data per room — absent/empty otherwise, same
+  // gate daily_suggested already assumes; was previously read only for
+  // that daily_suggested subset, the full per-room dict was unused.
+  // Sorted ascending (shortest suggested interval — the most actionable
+  // room — first), since unlike overdue_rooms this dict carries no
+  // ordering guarantee from the integration. Defensive: a malformed/
+  // non-finite value is skipped rather than rendered as "every NaNd"
+  // (same guard-against-malformed-cloud-data discipline used throughout
+  // this project, e.g. calibration.ts's anchor-point validation).
+  const suggestedIntervals = (attrs['suggested_interval_days'] ?? {}) as Record<string, unknown>;
+  const suggestedEntries = Object.entries(suggestedIntervals)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && isFinite(entry[1]))
+    .sort((a, b) => a[1] - b[1]);
+  const suggestedHtml = suggestedEntries.length > 0
+    ? `<div class="rpc-rooms-suggested">${suggestedEntries.map(([name, days]) =>
+        `<div class="rpc-rooms-suggested-row">${esc(name)}: suggested every ${days.toFixed(1)}d</div>`
+      ).join('')}</div>`
+    : '';
+
   // v2.3.0 — "Clean overdue" trigger. Reuses the existing generic
   // data-reset/data-service mechanism (dispatchClick's 'reset' case) rather
   // than adding a bespoke click case: that handler already calls any
@@ -459,13 +488,38 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
     ${state.resetError === 'overdue-clean' ? `<div class="rpc-send-error">Couldn't start — try again</div>` : ''}
   ` : '';
 
+  // v2.4.0 — "Auto-clean dirty rooms" trigger (integration's SMART-ORDER
+  // service, the sibling of clean_overdue_rooms — same entity_id +
+  // optional max_rooms schema, same generic data-reset/data-service
+  // plumbing). Deliberately NOT gated on any "is something dirty" signal
+  // the way Clean overdue is on overdueRooms.length: no per-room dirt-
+  // index attribute is exposed to the card, and unlike
+  // clean_overdue_rooms (a true no-op when nothing qualifies — verified
+  // against source), auto_clean_dirty_rooms always starts a mission — a
+  // whole-house clean when no room passes the dirt-index trust gate.
+  // "Hide when it would no-op" therefore doesn't apply here; always shown
+  // once the ROOMS block itself renders (same hasRoomsOverdue tier gate).
+  // Own distinct reset key so the two buttons' loading/error states never
+  // collide.
+  const isAutoCleaningDirty = state.resetting === 'auto-clean-dirty';
+  const autoCleanDirtyBtnHtml = `
+    <button class="rpc-btn rpc-btn-secondary rpc-rooms-overdue-btn${isAutoCleaningDirty ? ' rpc-btn-loading' : ''}"
+            data-reset="auto-clean-dirty" data-service="auto_clean_dirty_rooms"
+            ${isAutoCleaningDirty ? 'disabled' : ''}>
+      ${isAutoCleaningDirty ? '<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>' : 'Auto-clean dirty rooms'}
+    </button>
+    ${state.resetError === 'auto-clean-dirty' ? `<div class="rpc-send-error">Couldn't start — try again</div>` : ''}
+  `;
+
   return `
     <div class="rpc-health-divider"></div>
     <div class="rpc-rooms-overdue">
       <div class="rpc-dock-label">ROOMS</div>
       ${bodyHtml}
       ${dailyHtml}
+      ${suggestedHtml}
       ${cleanBtnHtml}
+      ${autoCleanDirtyBtnHtml}
     </div>
   `;
 }

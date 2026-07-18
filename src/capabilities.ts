@@ -98,6 +98,10 @@ export function detectCapabilities(
       const candidates = hass.states[`image.${name}_map`]?.attributes?.furniture_candidates;
       return Array.isArray(candidates) && candidates.length > 0;
     })(),
+    // v2.4.0 ROOM-ACCESS — separate sensor entity (not image.*_map), but
+    // registered by the integration only when umf_aligner is present —
+    // same underlying gate as hasAlignment, so presence alone suffices.
+    hasRoomAccess: e('room_accessibility_scores'),
     // hasFavorites: at least one button.*_fav_<id> entity. Favorite IDs are
     // arbitrary per-user iRobot routine identifiers, so this scans all
     // entity_ids for the prefix rather than checking a single fixed key.
