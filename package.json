@@ -21,7 +21,7 @@
   "devDependencies": {
     "esbuild": "^0.21.0",
     "typescript": "^5.4.0",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.10"
   },
   "repository": {
     "type": "git",
