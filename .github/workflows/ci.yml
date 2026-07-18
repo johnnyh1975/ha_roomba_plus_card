@@ -1,1 +1,55 @@
+name: CI
 
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist is up to date
+        run: |
+          git diff --exit-code dist/roomba-plus-card.js || {
+            echo "dist/roomba-plus-card.js is out of date — run npm run build and commit the result"
+            exit 1
+          }
+
+  # Adapted from ha_roomba_plus's identically-named check (session: CI
+  # pipeline review). Motivated there by a real drift (README badge stuck
+  # two releases behind manifest.json) — same class of mistake is just as
+  # possible here, and package.json + README are already out of sync in
+  # exactly the tolerated way (badge "2.3" vs package.json "2.3.0"), so
+  # this is verified against a real repo state, not a hypothetical.
+  version-badge:
+    name: Version Badge Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check README badge vs. package.json
+        run: python3 scripts/check_version_badge.py

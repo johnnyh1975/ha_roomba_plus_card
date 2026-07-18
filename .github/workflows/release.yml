@@ -1,0 +1,121 @@
+name: Release
+
+# Adapted from ha_roomba_plus's identically-named workflow (session: CI
+# pipeline review). Previously triggered on `release: published` — the
+# maintainer created the GitHub Release by hand first (typing notes
+# directly into GitHub's UI), and this workflow only rebuilt + attached
+# the JS asset afterward. RELEASE_NOTES_vX.Y.Z.md files existed in the
+# repo (at root) but were never actually wired to what got published —
+# purely the maintainer's own versioned copy.
+#
+# Now: this workflow creates the release itself from a git tag, same as
+# the integration's, sourcing the body from release-notes/vX.Y.Z.md
+# (files moved from root + renamed to match this exact lookup — worth
+# noting: the integration's own release.yml looks for
+# release-notes/${tag}.md too, but that directory doesn't actually exist
+# in that repo; only root RELEASE_NOTES_vX.Y.Z.md files do, so every one
+# of its releases has likely gone out through the "no notes file found"
+# warning branch rather than the file ever being read. Kept genuinely in
+# sync here instead of copying that mismatch.
+#
+# Two ways to run this:
+# 1. Push a tag matching v*.*.* (e.g. `git tag v2.4.0 && git push --tags`) — runs automatically.
+# 2. Actions tab → Release → "Run workflow" → enter a tag manually. Useful for a
+#    safe first test: use a throwaway tag like v0.0.1-test, then delete the
+#    resulting release + tag afterwards from the Releases page if it was just a test.
+#    Manual runs build from whichever branch is selected in the dropdown (defaults
+#    to main) — the new tag is created pointing at that commit.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to package and release (e.g. v2.4.0). Use a throwaway tag like v0.0.1-test for a safe test run — it still gets a real release, but you can delete it afterwards from the Releases page."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Tag: ${TAG} -> Version: ${VERSION}"
+
+      - name: Validate package.json version matches tag
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PACKAGE_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version check passed: $PACKAGE_VERSION"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Zero-failure-before-packaging as a pipeline gate, same as
+      # ha_roomba_plus's release.yml — placed right after the cheap
+      # version-string check, before spending any time on release-notes
+      # lookup or the build itself.
+      - name: Type check
+        run: npm run check
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist is up to date
+        run: |
+          git diff --exit-code dist/roomba-plus-card.js || {
+            echo "dist/roomba-plus-card.js is out of date — run npm run build and commit the result"
+            exit 1
+          }
+
+      - name: Prepare release notes
+        id: notes
+        run: |
+          NOTES_FILE="release-notes/${{ steps.version.outputs.tag }}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "path=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No $NOTES_FILE found — release will be created without notes body. Commit it before tagging next time."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release with asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: ${{ steps.notes.outputs.found == 'true' && steps.notes.outputs.path || '' }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, 'b') || contains(steps.version.outputs.tag, 'rc') }}
+          files: dist/roomba-plus-card.js

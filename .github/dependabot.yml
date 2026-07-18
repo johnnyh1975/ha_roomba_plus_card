@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # package.json's dependencies/devDependencies — no automated way currently
+  # to notice a security patch landing upstream. Weekly (not daily) — same
+  # reasoning as ha_roomba_plus's identical setup: this is dev/build
+  # tooling, not something shipped raw to end users (the built
+  # dist/roomba-plus-card.js is what actually ships), so daily PR noise
+  # isn't warranted.
+  #
+  # No `labels:` here, deliberately, mirroring the integration's own
+  # dependabot.yml: Dependabot requires labels to already exist in the
+  # repo before it can apply them to a PR. Create "dependencies" / "ci"
+  # under Settings → Labels first if you want categorization, then add
+  # labels: ["dependencies"] / ["dependencies", "ci"] to the two entries
+  # below.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # The workflow files themselves (actions/checkout, actions/setup-node,
+  # github/codeql-action, softprops/action-gh-release, etc.) — same
+  # reasoning as above, weekly.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

@@ -1,0 +1,43 @@
+name: CodeQL
+
+# Adapted from ha_roomba_plus's identically-named workflow (session: CI
+# pipeline review). Kept as its own workflow, separate from ci.yml,
+# for the same reason as there: CodeQL's analysis step takes several
+# minutes and shouldn't slow down the fast type-check/test/build loop
+# on every push. Weekly schedule catches drift from dependency updates
+# even with no code changes; PR/push-to-main still covers actual code
+# changes promptly. Language is javascript-typescript (CodeQL's combined
+# JS+TS analyzer) instead of the integration's python — no build step is
+# needed beforehand for this language pair, CodeQL analyzes source
+# directly.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "0 4 * * 1"  # Mondays, offset from the integration's own CodeQL run
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
