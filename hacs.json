@@ -4,5 +4,5 @@
   "render_readme": true,
   "filename": "roomba-plus-card.js",
   "content_in_root": false,
-  "homeassistant": "2024.1.0"
+  "homeassistant": "2025.5.0"
 }

@@ -93,3 +93,20 @@ describe('renderFavorites', () => {
     expect(html).toContain('&lt;script&gt;');
   });
 });
+
+// ── v2.5.0 — Prime / V4 favourites are button.{n}_favorite_<id> ─────────────
+describe('favourites — v2.5.0 Prime naming', () => {
+  it('finds Classic _fav_ and Prime _favorite_ buttons, not other buttons', () => {
+    const hass = makeHass({
+      [`button.${n}_fav_1`]: st('unknown'),
+      [`button.${n}_favorite_abc`]: st('unknown'),
+      [`button.${n}_repeat_mission`]: st('unknown'),
+    });
+    expect(favoriteEntityIds(hass, n)).toEqual([`button.${n}_fav_1`, `button.${n}_favorite_abc`]);
+  });
+
+  it('label fallback strips the Prime prefix too', () => {
+    const hass = makeHass({ [`button.${n}_favorite_quick_kitchen`]: st('unknown') });
+    expect(favoriteLabel(hass, `button.${n}_favorite_quick_kitchen`, n)).toBe('Quick Kitchen');
+  });
+});

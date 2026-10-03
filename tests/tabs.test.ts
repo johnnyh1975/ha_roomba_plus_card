@@ -162,3 +162,9 @@ describe('renderTabBar()', () => {
     expect(html).not.toContain('rpc-tab-badge');
   });
 });
+
+describe('healthTabHasBadge() — Prime rooms overdue (integration 4.2.19)', () => {
+  it('badges for overdue rooms on sensor.{n}_prime_rooms_overdue', () =>
+    expect(healthTabHasBadge(makeHass({ 'sensor.roomba_prime_rooms_overdue': st('2') }),
+      { ...defaultCaps, hasRoomsOverdue: true }, 'roomba')).toBe(true));
+});

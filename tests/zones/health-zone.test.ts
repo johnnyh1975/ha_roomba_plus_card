@@ -106,12 +106,38 @@ describe('renderHealthZone() — Clean Base', () => {
     expect(html).toContain('~3 uses remaining');
   });
 
-  it('"Empty" state → "Bag full — replace soon"', () => {
+  // v2.5.0 F6: slugs since integration 4.x; display text is the
+  // integration's (HA formatter), humanised slug in the test harness.
+  // The old 'Empty' → "Bag full" mapping was backwards: `empty` (302/303)
+  // means the dock just emptied the bin.
+  it('`empty` slug → integration text, no "Bag full" claim', () => {
     const html = render(
-      { [`sensor.${n}_clean_base_status`]: st('Empty') },
+      { [`sensor.${n}_clean_base_status`]: st('empty') },
       { ...defaultCaps, hasCleanBase: true },
     );
-    expect(html).toContain('Bag full');
+    expect(html).toContain('>Empty<');
+    expect(html).not.toContain('Bag full');
+    expect(html).not.toContain('rpc-bar-cleanbase-state--warn');
+  });
+
+  it('`bag_full` slug → integration text, highlighted as needing attention', () => {
+    const hass = makeHass({ [`sensor.${n}_clean_base_status`]: st('bag_full') });
+    hass.formatEntityState = (obj) => obj.state === 'bag_full' ? 'Beutel voll' : obj.state;
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCleanBase: true }, n, {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
+    });
+    expect(html).toContain('Beutel voll');
+    expect(html).toContain('rpc-bar-cleanbase-state--warn');
+  });
+
+  it('never prints a raw slug (formatter fallback humanises)', () => {
+    const html = render(
+      { [`sensor.${n}_clean_base_status`]: st('bin_full_sensors_not_cleared') },
+      { ...defaultCaps, hasCleanBase: true },
+    );
+    expect(html).not.toContain('bin_full_sensors_not_cleared');
+    expect(html).toContain('Bin full sensors not cleared');
   });
 });
 
@@ -177,14 +203,14 @@ describe('renderHealthZone() — popover', () => {
       { openPopover: 'filter', legendShown: false, resetting: null, resetError: null },
     );
     expect(html).toContain('rpc-popover');
-    expect(html).toContain('Threshold');
+    expect(html).toContain('Rated life');
   });
 
   it('popover not rendered when openPopover is null', () => {
     const html = render(
       { [`sensor.${n}_filter_remaining_hours`]: st('100', { threshold_hours: 200 }) },
     );
-    expect(html).not.toContain('Threshold');
+    expect(html).not.toContain('Rated life');
   });
 
   it('last-replaced date shown in popover', () => {
@@ -365,7 +391,7 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
 
   it('renders the zone for coverage-only data, with zero consumable bars present', () => {
     const hass = makeHass({
-      [`sensor.${n}_recent_coverage_pct`]: st('91'),
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 91 }),
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
@@ -392,17 +418,44 @@ describe('renderHealthZone() — F6a battery retention bar', () => {
 describe('renderHealthZone() — A6 mop pad bar', () => {
   const n = 'roomba';
 
-  it('renders pad bar from sensor.*_pad_days_until_due', () => {
+  // v2.5.0 F6: the bar used to wait for a `threshold_days` attribute the
+  // integration never had, so it NEVER rendered. The sensor is a forecast in
+  // days, shown as such.
+  it('renders the pad row as days remaining from sensor.*_pad_days_until_due', () => {
     const hass = makeHass({
-      [`sensor.${n}_pad_days_until_due`]: st('18', { threshold_days: 30 }),
-      [`sensor.${n}_mop_pad`]: st('Wet (reusable)'),
+      [`sensor.${n}_pad_days_until_due`]: st('18'),
+      [`sensor.${n}_mop_pad`]: st('reusable_wet'),
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasPad: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
       healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
-    expect(html).toContain('Pad');
-    expect(html).toContain('60%');    // 18/30 = 60%
+    expect(html).toContain('data-bar="pad"');
+    expect(html).toContain('~18 days left');
+    expect(html).toContain('var(--rpc-green)');
+  });
+
+  it('pad row: ≤ 3 days red, 0 → "Due now"', () => {
+    const mk = (days: string) => renderHealthZone(
+      makeHass({ [`sensor.${n}_pad_days_until_due`]: st(days) }),
+      baseConfig, { ...defaultCaps, hasPad: true }, n, {
+        openPopover: null, resetting: null, resetError: null, legendShown: false,
+        healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
+      });
+    expect(mk('2')).toContain('var(--rpc-red)');
+    expect(mk('0')).toContain('Due now');
+    expect(mk('unknown')).not.toContain('data-bar="pad"');
+  });
+
+  it('pad popover keeps the reset action and shows days, not a bogus percentage', () => {
+    const hass = makeHass({ [`sensor.${n}_pad_days_until_due`]: st('9') });
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasPad: true }, n, {
+      openPopover: 'pad', resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
+    });
+    expect(html).toContain('data-service="reset_pad"');
+    expect(html).toContain('~9 days left');
+    expect(html).not.toContain('rpc-popover-bar-track');
   });
 
   it('pad bar absent when only stale _mop_pad_remaining_hours present', () => {
@@ -425,7 +478,7 @@ describe('renderHealthZone() — F6a coverage pct bar', () => {
   it('renders coverage bar with percentage when ≥10 missions', () => {
     const hass = makeHass({
       [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
-      [`sensor.${n}_recent_coverage_pct`]: st('78'),
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 78 }),
       [`sensor.${n}_missions_last_30d`]: st('15'),
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
@@ -440,7 +493,7 @@ describe('renderHealthZone() — F6a coverage pct bar', () => {
   it('shows "Building history…" skeleton when fewer than 10 missions', () => {
     const hass = makeHass({
       [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
-      [`sensor.${n}_recent_coverage_pct`]: st('62'),
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 62 }),
       [`sensor.${n}_missions_last_30d`]: st('7'),
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
@@ -459,7 +512,7 @@ describe('renderHealthZone() — F6a coverage bar skeleton fallback (L1)', () =>
   it('shows skeleton when missions_last_30d entity is absent (NaN guard)', () => {
     const hass = makeHass({
       [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
-      [`sensor.${n}_recent_coverage_pct`]: st('72'),
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 72 }),
       // missions_last_30d intentionally absent
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
@@ -473,7 +526,7 @@ describe('renderHealthZone() — F6a coverage bar skeleton fallback (L1)', () =>
   it('shows bar when missions_last_30d >= 10', () => {
     const hass = makeHass({
       [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
-      [`sensor.${n}_recent_coverage_pct`]: st('82'),
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 82 }),
       [`sensor.${n}_missions_last_30d`]: st('14'),
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
@@ -554,7 +607,7 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
   it('renders coverage bar as interactive (data-bar="coverage")', () => {
     const hass = makeHass({
       [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
-      [`sensor.${n}_recent_coverage_pct`]: st('78'),
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 78 }),
       [`sensor.${n}_missions_last_30d`]: st('15'),
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
@@ -568,7 +621,7 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
   it('renders popover with mission count context when openPopover is coverage', () => {
     const hass = makeHass({
       [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
-      [`sensor.${n}_recent_coverage_pct`]: st('72'),
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 72 }),
       [`sensor.${n}_missions_last_30d`]: st('20'),
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
@@ -576,22 +629,24 @@ describe('renderHealthZone() — F6a coverage bar popover', () => {
       healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
     expect(html).toContain('Floor Coverage');
-    expect(html).toContain('72% of floor area');
+    expect(html).toContain('72% of your usual cleaned area');
     expect(html).toContain('20 missions');
   });
 
-  it('clamps coverage pct at 100', () => {
+  // v2.5.0 F5: coverage_pct is the last mission against the 60-day typical
+  // area, so >100 is real information — the bar is clamped, the number not.
+  it('clamps the bar at 100 but shows the real percentage', () => {
     const hass = makeHass({
       [`sensor.${n}_filter_remaining_hours`]: st('200', { threshold_hours: 500 }),
-      [`sensor.${n}_recent_coverage_pct`]: st('103'),
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 103 }),
       [`sensor.${n}_missions_last_30d`]: st('12'),
     });
     const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasCoveragePct: true }, n, {
       openPopover: null, resetting: null, resetError: null, legendShown: false,
       healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
     });
-    expect(html).toContain('100%');
-    expect(html).not.toContain('103%');
+    expect(html).toContain('width:100%');
+    expect(html).toContain('103%');
   });
 });
 
@@ -1376,5 +1431,104 @@ describe('renderHealthZone() — v2.3.0 dirt/sensor correlation widget', () => {
       [`sensor.${n}_dirt_weather_correlation`]: st('unknown', { by_entity: {}, strongest_entity: null }),
     }, caps);
     expect(html).not.toBe('');
+  });
+});
+
+// v2.5.0 I18N — end-to-end proof that a non-English hass.language actually
+// changes rendered Health tab output, not just the dictionaries in isolation.
+describe('renderHealthZone() — v2.5.0 I18N end-to-end', () => {
+  it('renders German text when hass.language is de', () => {
+    const hass = {
+      ...makeHass({ [`sensor.${n}_robot_health_score`]: st('unknown') }),
+      language: 'de',
+    };
+    const healthState: HealthZoneState = {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
+    };
+    const html = renderHealthZone(hass, baseConfig, { ...defaultCaps, hasRobotHealthScore: true }, n, healthState);
+    expect(html).toContain('Wird kalibriert'); // health.calibrating
+    expect(html).not.toContain('Calibrating');
+  });
+});
+
+// ── v2.5.0 F6/F7/F8 ───────────────────────────────────────────────────────────
+describe('renderHealthZone() — v2.5.0 consumables', () => {
+  const n = 'roomba';
+  const st0: HealthZoneState = {
+    openPopover: null, resetting: null, resetError: null, legendShown: false,
+    healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
+  };
+
+  it('F7: the filter bar measures against max_hours (cloud full life) when present', () => {
+    // Cloud remainder 150 h of a 300 h life = 50 %. Against the local
+    // threshold_hours (150) alone it would read 100 %.
+    const html = renderHealthZone(makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('150', { threshold_hours: 150, max_hours: 300 }),
+    }), baseConfig, defaultCaps, n, st0);
+    expect(html).toContain('>50%<');
+    expect(html).not.toContain('>100%<');
+  });
+
+  it('F7: threshold_hours still works when max_hours is absent (older integrations)', () => {
+    const html = renderHealthZone(makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('100', { threshold_hours: 200 }),
+    }), baseConfig, defaultCaps, n, st0);
+    expect(html).toContain('>50%<');
+  });
+
+  it('F8: battery bar from sensor.*_battery_level (schema-21 migrated install)', () => {
+    const html = renderHealthZone(makeHass({
+      [`sensor.${n}_battery_level`]: st('64'),
+    }), baseConfig, defaultCaps, n, st0);
+    expect(html).toContain('data-bar="battery"');
+    expect(html).toContain('64%');
+  });
+
+  it('F6: mop pad / behaviour are shown in the integration\'s words, never as slugs', () => {
+    const html = renderHealthZone(makeHass({
+      [`sensor.${n}_mop_pad`]: st('reusable_wet'),
+      [`sensor.${n}_mop_behavior`]: st('standard'),
+    }), baseConfig, { ...defaultCaps, isMop: true, hasPad: true, hasMopBehavior: true }, n, st0);
+    expect(html).toContain('Reusable wet');
+    expect(html).toContain('Standard intensity');
+    expect(html).not.toContain('reusable_wet');
+  });
+});
+
+describe('renderHealthZone() — v2.5.0 consumable display units', () => {
+  const n = 'roomba';
+  const st0: HealthZoneState = {
+    openPopover: null, resetting: null, resetError: null, legendShown: false,
+    healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
+  };
+  it('a filter sensor displayed in days is converted back to hours before the % (max_hours is hours)', () => {
+    const html = renderHealthZone(makeHass({
+      [`sensor.${n}_filter_remaining_hours`]: st('5', { unit_of_measurement: 'd', max_hours: 240 }),
+    }), baseConfig, defaultCaps, n, st0);
+    expect(html).toContain('>50%<');   // 5 d = 120 h of 240 h
+    expect(html).toContain('120h');
+  });
+});
+
+describe('renderHealthZone() — v2.5.0 unknown duration unit (bug hunt 2)', () => {
+  it('an unrecognised display unit hides the bar instead of mis-scaling it', () => {
+    const html = renderHealthZone(makeHass({
+      'sensor.roomba_filter_remaining_hours': st('5', { unit_of_measurement: 'fortnights', max_hours: 240 }),
+    }), baseConfig, defaultCaps, 'roomba', {
+      openPopover: null, resetting: null, resetError: null, legendShown: false,
+      healthDetailsExpanded: false, openMaintPopover: null, navDetailsExpanded: false,
+    });
+    expect(html).not.toContain('data-bar="filter"');
+  });
+});
+
+describe('renderHealthZone() — Prime rooms-overdue (integration 4.2.19)', () => {
+  it('reads sensor.{n}_prime_rooms_overdue, same attributes as Classic', () => {
+    const html = render({
+      [`sensor.${n}_prime_rooms_overdue`]: st('1', { overdue_rooms: ['Bad'], rooms: { Bad: { days_since_last: 8, expected_interval_days: 4, source: 'configured', status: 'overdue', overdue_factor: 2 } } }),
+    }, { ...defaultCaps, hasRoomsOverdue: true });
+    expect(html).toContain('rpc-rooms-overdue');
+    expect(html).toContain('Bad');
   });
 });

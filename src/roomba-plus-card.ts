@@ -6,10 +6,10 @@
 import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, HouseholdSummary, MissionExplain, MissionPath, MissionMapPayload } from './types.js';
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
-import { timeSince } from './utils.js';
+import { timeSince, isMetricSystem } from './utils.js';
 import { renderRoomSelectorZone } from './zones/room-selector-zone.js';
 import { renderAlertZone }        from './zones/alert-zone.js';
-import { renderHouseholdZone }    from './zones/household-zone.js';
+import { renderHouseholdZone, renderHouseholdSkeleton } from './zones/household-zone.js';
 import { CHIP_TO_OPTION, OPTION_TO_CHIP } from './zones/room-selector-zone.js';
 import { renderHeader } from './header.js';
 import { availableTabs, defaultTab, healthTabHasBadge, historyTabHasBadge, renderTabBar, TabId } from './tabs.js';
@@ -18,7 +18,10 @@ import { buildConfigFormSchema } from './config-form.js';
 import { shouldReloadForEvent } from './mission-events.js';
 import { renderTabContent } from './tab-content.js';
 import { isPureClickKey, clickReducer, ClickState, ClickPayload } from './click-reducers.js';
+import { t, resolveLang } from './i18n/index.js';
 import { planAction } from './action-plan.js';
+import { relevantEntityIds } from './relevant-entity-ids.js';
+import { checkMinimums, fetchIntegrationVersion, renderVersionNotice, VersionProblem } from './version-check.js';
 
 // ──────────────────────────────────────────────
 // CSS
@@ -92,6 +95,7 @@ const STYLES = `
 
   .rpc-state-label { font-size: 1rem; font-weight: 500; }
   .rpc-error-state { border-left: 3px solid var(--rpc-red); padding-left: 10px; }
+  .rpc-offline-state { border-left: 3px solid var(--rpc-grey-mid, #9ca3af); padding-left: 10px; }
   .rpc-error-action, .rpc-error-zone {
     font-size: 0.8rem; color: var(--secondary-text-color);
     margin-top: 2px; margin-left: 28px;
@@ -149,6 +153,11 @@ const STYLES = `
   }
   .rpc-btn-text:hover { color: var(--primary-text-color); }
   .rpc-send-error { font-size: 0.78rem; color: var(--rpc-red); margin-top: 6px; }
+  .rpc-version-notice {
+    font-size: 0.78rem; line-height: 1.35; color: var(--primary-text-color);
+    background: rgba(217, 119, 6, 0.12); border-left: 3px solid var(--rpc-amber);
+    border-radius: 6px; padding: 6px 10px; margin-bottom: 10px;
+  }
 
   /* Spinner */
   .rpc-spinner {
@@ -194,6 +203,8 @@ const STYLES = `
   .rpc-bar-hours { font-size: 0.78rem; color: var(--secondary-text-color); min-width: 30px; flex-shrink: 0; }
   .rpc-bar-arrow { font-size: 0.78rem; font-weight: 600; flex-shrink: 0; }
   .rpc-bar-cleanbase-state { font-size: 0.82rem; color: var(--secondary-text-color); flex: 1; }
+  .rpc-bar-cleanbase-state--warn { color: var(--rpc-amber); font-weight: 500; }
+  .rpc-bar-days { font-size: 0.82rem; font-weight: 500; flex: 1; }
 
   /* Wear legend */
   .rpc-wear-legend {
@@ -576,8 +587,15 @@ const STYLES = `
 
   /* ── v1.5 — Coverage heatmap panel ──────────────────────────────────────── */
   .rpc-coverage-panel { margin-top: 8px; }
-  .rpc-coverage-image-wrap { position: relative; }
-  .rpc-coverage-img { width: 100%; display: block; border-radius: 8px; }
+  /* v2.5.0 F11 (#20): the wrapper is the grid's content box — aspect ratio
+     and a 70vh height cap come inline from coverageFrameStyles() — so a wide
+     desktop column no longer scales the map past the screen, and the
+     transparent part of the square picture is cropped. Every overlay (pins,
+     rooms, zones) is positioned in % of this same box. */
+  .rpc-coverage-image-wrap {
+    position: relative; margin: 0 auto; overflow: hidden; border-radius: 8px;
+  }
+  .rpc-coverage-img { display: block; max-width: none; }
   .rpc-hazard-pin {
     position: absolute; transform: translate(-50%, -100%);
     cursor: pointer; font-size: 1rem; line-height: 1;
@@ -616,6 +634,11 @@ const STYLES = `
     background: var(--primary-color, #2563eb); color: #fff;
   }
   /* v2.3.0 ZONE-OVERLAY / F24 */
+  .rpc-legend-swatch { display: inline-block; width: 10px; height: 10px; vertical-align: middle; }
+  .rpc-legend-observed { border-radius: 50%; background: var(--rpc-amber, #d97706); opacity: 0.6; }
+  .rpc-legend-keepout {
+    background: rgba(220, 38, 38, 0.12); border: 1px dashed var(--rpc-red, #dc2626);
+  }
   .rpc-zone-observed {
     fill: var(--rpc-amber, #d97706); fill-opacity: 0.5; stroke: none;
   }
@@ -720,6 +743,20 @@ const STYLES = `
   .rpc-household-floors   { margin-bottom: 4px; }
   .rpc-household-floor    { display: flex; align-items: baseline; gap: 8px; font-size: 0.75rem; color: var(--secondary-text-color); padding: 2px 0; }
   .rpc-household-floor-label { font-weight: 500; }
+  /* v2.5.0 FLEET-1 — fleet-health rollup line + per-robot attention badge */
+  .rpc-household-fleet-health { font-size: 0.78rem; padding: 2px 0 6px; font-weight: 500; }
+  .rpc-household-fleet-ok     { color: var(--rpc-green); }
+  .rpc-household-fleet-warn   { color: var(--rpc-amber); }
+  .rpc-household-attention    { color: var(--rpc-amber); cursor: default; }
+  /* v2.5.0 — household view loading skeleton, same pulse timing as
+     renderSkeletonHeatmap()'s .rpc-skel (heatmap.ts), reimplemented here
+     for plain HTML bars rather than SVG rects. */
+  @keyframes rpc-skel-pulse { 0%,100% { opacity: .35 } 50% { opacity: .7 } }
+  .rpc-household-skel-row { animation: rpc-skel-pulse 1.5s ease-in-out infinite; }
+  .rpc-skel-bar { display: inline-block; height: 10px; border-radius: 3px; background: var(--rpc-grey-light, #e5e7eb); }
+  .rpc-skel-bar--name { width: 70px; }
+  .rpc-skel-bar--pct  { width: 28px; margin-left: 8px; }
+  .rpc-skel-bar--meta { width: 90px; margin-left: auto; }
   /* v2.0 — household view "← Back" chip */
   .rpc-household-back {
     background: none; border: none; cursor: pointer; font-family: inherit;
@@ -804,6 +841,9 @@ class RoombaPlusCard extends HTMLElement {
   private historyTab: 'calendar' | 'coverage' = 'calendar'; // F7: active tab in history zone
   private householdData: HouseholdSummary | null = null;     // F17: household summary (multi-robot only)
   private apiClient: MissionApiClient | null = null;
+  /** v2.5.0: components below the card's minimum (version-check.ts). */
+  private versionProblems: VersionProblem[] = [];
+  private versionCheckStarted = false;
   private prevVacuumState  = '';
   private prevMissionActive = '';   // tracks binary_sensor.*_mission_active across updates
 
@@ -885,7 +925,13 @@ class RoombaPlusCard extends HTMLElement {
 
   set hass(hass: HomeAssistant) {
     // Compute relevance BEFORE updating reference so we can diff old vs new
-    const relevant = this.relevantEntityIds();
+    // v2.5.0: some ids are resolved from what exists (entity-ids.ts), so the
+    // watch list is taken from BOTH snapshots — an entity that just appeared
+    // (or vanished) counts as a change.
+    const relevant = Array.from(new Set([
+      ...relevantEntityIds(this._hass, this.robotName, this.activeRobot, this.config.robot_selector_helper),
+      ...relevantEntityIds(hass, this.robotName, this.activeRobot, this.config.robot_selector_helper),
+    ]));
     const changed = !this._hass || relevant.some(id =>
       hass.states[id]?.state       !== this._hass.states[id]?.state ||
       hass.states[id]?.last_changed !== this._hass.states[id]?.last_changed
@@ -934,6 +980,9 @@ class RoombaPlusCard extends HTMLElement {
     // reload. Lazy (first hass with a connection), idempotent, multi-robot-safe.
     this.maybeSubscribeMissionEvents();
 
+    // v2.5.0: minimum versions (HA 2025.5, integration 4.2) — once per card.
+    this.maybeCheckVersions();
+
     // Render guard: skip full re-render when no relevant entity changed.
     // Always render on first call (prev is undefined) or when a relevant entity changed.
     if (!prev || changed) {
@@ -941,124 +990,6 @@ class RoombaPlusCard extends HTMLElement {
     }
   }
 
-  /** Entity IDs that drive card rendering. Changes outside this set are ignored.
-   * B1 fix: uses this.activeRobot (not this.config.entity) so multi-robot mode
-   * correctly watches the currently displayed robot's entities.
-   */
-  private relevantEntityIds(): string[] {
-    const n = this.robotName;
-    // Use activeRobot as the vacuum entity — in multi-robot mode this differs
-    // from config.entity (which is always the first/default robot).
-    return [
-      this.activeRobot,
-      `sensor.${n}_last_error_code`,
-      `sensor.${n}_last_error_zone`,          // B2: needed for error zone display
-      `sensor.${n}_last_error_at`,            // v2.2.0 B1: resolved-error info line timestamp
-      `sensor.${n}_health_score_trend`,       // v2.2.0 F3: trend badge + readiness countdown
-      `binary_sensor.${n}_layout_change_detected`, // v2.2.0 F3b: layout change alert
-      `sensor.${n}_optical_dirt_detections`,  // v2.2.0 A2 (diagnostic, default-disabled)
-      `sensor.${n}_piezo_dirt_detections`,    // v2.2.0 A2 (diagnostic, default-disabled)
-      `sensor.${n}_scrubs_count`,             // v2.2.0 A2 (diagnostic, default-disabled)
-      `sensor.${n}_dock_tank_level`,          // v2.2.0 A3
-      `sensor.${n}_dock_knockoffs`,           // v2.2.0 A3 (diagnostic, default-disabled)
-      `sensor.${n}_dock_charge_aborts`,       // v2.2.0 A3 (diagnostic, default-disabled)
-      `sensor.${n}_dock_contact_chatters`,    // v2.2.0 A3 (diagnostic, default-disabled)
-      `sensor.${n}_rooms_overdue`,            // v2.3.0 ROOM-SCHED
-      `sensor.${n}_dirt_weather_correlation`,  // v2.3.0 CROSS-CORR
-      `sensor.${n}_phase`,
-      `binary_sensor.${n}_mission_active`,
-      `binary_sensor.${n}_maintenance_due`,
-      `sensor.${n}_readiness`,                // B2: needed for A5 alert text
-      `binary_sensor.${n}_schedule_hold_active`,
-      `sensor.${n}_next_clean`,
-      `sensor.${n}_filter_remaining_hours`,
-      `sensor.${n}_brush_remaining_hours`,
-      `sensor.${n}_mop_pad`,                  // B2: Braava pad consumable
-      `sensor.${n}_mop_tank_level`,           // B2: Braava tank level
-      `sensor.${n}_mop_behavior`,             // B2: Braava mop behavior
-      `sensor.${n}_clean_base_status`,
-      `sensor.${n}_nav_quality`,
-      `sensor.${n}_nav_panics`,             // A1: navigation health detail
-      `sensor.${n}_nav_landmark_quality`,   // A1
-      `sensor.${n}_nav_good_landmarks`,     // A1
-      `sensor.${n}_next_likely_clean_window`,
-      `sensor.${n}_presence_clean_opportunities_7d`,
-      `sensor.${n}_presence_clean_utilisation_7d`,
-      `sensor.${n}_cleaning_passes`,
-      `select.${n}_cleaning_passes`,
-      `select.${n}_smart_zone_select`,
-      `select.${n}_zone_select`,
-      `sensor.${n}_clean_streak`,
-      `sensor.${n}_completion_rate_30d`,
-      `sensor.${n}_lifetime_missions`,
-      // SC1 (integration v2.7.0): sensor.*_recent_area_30d and
-      // sensor.*_recent_time_30d are deprecated (removed in v3.0) and no
-      // longer tracked. Both area (state) and time (time_h attribute) now
-      // come from this single consolidated sensor.
-      `sensor.${n}_cleaning_analytics_30d`,
-      // v1.3 — performance & health sensors
-      `sensor.${n}_battery_capacity_retention`,
-      `sensor.${n}_estimated_battery_eol`,     // B2: EOL shown in popover
-      // SC1 (integration v2.7.0): sensor.*_recent_wifi_floor deprecated
-      // (removed in v3.0) — replaced by sensor.*_wifi_health. Note this is
-      // not a like-for-like metric swap; see alert-zone.ts WIFI_FLOOR_MIGRATION.
-      `sensor.${n}_wifi_health`,
-      `sensor.${n}_recent_coverage_pct`,
-      `sensor.${n}_missions_last_30d`,          // gates coverage bar skeleton
-      `sensor.${n}_average_mission_time`,       // A1: progress bar duration estimate
-      // SC1 (integration v2.7.0): sensor.*_cleaning_speed_trend deprecated
-      // (removed in v3.0) — trend now read from `trend` attribute on
-      // sensor.*_cleaning_performance (tracked above is unnecessary since
-      // it's the same entity already needed for hasCleaningSpeedTrend detection
-      // — listed explicitly here for clarity since cleaning_performance wasn't
-      // otherwise in this list before this migration).
-      `sensor.${n}_cleaning_performance`,
-      `binary_sensor.${n}_consecutive_clean_skips`,
-      // Status zone live metrics
-      `sensor.${n}_area_cleaned_today`,         // B2: Wave A3 area-today line
-      `sensor.${n}_mission_expire_time`,        // B2: recharge ETA countdown
-      // cleaning_analytics_30d and missions_last_30d already tracked above — A4 vs-usual delta uses both
-      // v2.2+
-      `image.${n}_coverage_map`,               // B2: hasCoverageImage detection
-      `image.${n}_map`,                        // v2.3.0: hasAlignment/rooms/zones/door_markers/furniture_candidates (CORRECTION — previously missing entirely; these attributes were never on coverage_map)
-      `sensor.${n}_room_accessibility_scores`,  // v2.4.0 ROOM-ACCESS: room-label tooltip
-
-      // v2.0.1 bug fix: these v2.0 entities were never added to the render
-      // guard when their features were built — an update to any of them
-      // alone (e.g. robot_health_score recalculating, or
-      // battery_last_replaced changing after a reset_battery call) would
-      // sit in this._hass unrendered until some unrelated tracked entity
-      // happened to change and trigger a re-render that incidentally
-      // picked up the fresher data. Found while fixing a missing
-      // last-reset display on the Battery baseline maintenance row —
-      // checked the whole v2.0 entity surface for the same gap rather than
-      // only adding the one entity that prompted the check.
-      `sensor.${n}_robot_health_score`,         // C1-HEALTH
-      `sensor.${n}_wheel_last_cleaned`,         // C2-MAINT
-      `sensor.${n}_contact_last_cleaned`,       // C2-MAINT
-      `sensor.${n}_bin_last_cleaned`,           // C2-MAINT
-      `sensor.${n}_battery_last_replaced`,      // C2-MAINT (battery row)
-      `sensor.${n}_mission_progress`,           // C3-PROGRESS
-      `sensor.${n}_last_mission_result`,
-      `sensor.${n}_consecutive_mission_anomalies`,  // C5-ANOMALY (active, integration 3.0.0; disabled-by-default sensor)
-      `select.${n}_carpet_boost_select`,        // Settings panel
-      `switch.${n}_edge_clean`,                 // Settings panel
-      `switch.${n}_always_finish`,              // Settings panel
-      `binary_sensor.${n}_demand_clean_blocked`, // Header demand-blocked line
-      // Pre-existing gap, not v2.0-specific, fixed alongside the above
-      // since it was found during the same audit:
-      `sensor.${n}_optimal_clean_window`,       // F15 (⚙ tab schedule)
-
-      // ── v2.1.0 — header indicators ───────────────────────────────────────
-      `binary_sensor.${n}_cloud_connected`,     // A1: connectivity indicator
-      `binary_sensor.${n}_mqtt_stale`,          // A1: connectivity indicator
-      `sensor.${n}_firmware_version`,           // A2: firmware badge
-      `device_tracker.${n}_position`,           // A4: current-room line (room_estimate attr)
-
-      // F3b — robot selector helper (when configured)
-      ...(this.config.robot_selector_helper ? [this.config.robot_selector_helper] : []),
-    ];
-  }
 
   /** F3: Resolved list of robot entity IDs (entities[] takes precedence over entity). */
   private entityList(): string[] {
@@ -1146,6 +1077,21 @@ class RoombaPlusCard extends HTMLElement {
    *   resolved config_entry_id, so one robot's completion never reloads
    *   another's history.
    */
+  /** v2.5.0: compare HA and integration with the card's minimums once; a
+   *  notice appears at the top of the card only when something is below. */
+  private maybeCheckVersions(): void {
+    if (this.versionCheckStarted || !this._hass || typeof this._hass.callWS !== 'function') return;
+    this.versionCheckStarted = true;
+    const haVersion = this._hass.config?.version;
+    fetchIntegrationVersion(this._hass).then(integrationVersion => {
+      const problems = checkMinimums(haVersion, integrationVersion);
+      if (problems.length > 0) {
+        this.versionProblems = problems;
+        this.render();
+      }
+    });
+  }
+
   private maybeSubscribeMissionEvents(): void {
     if (this.missionEventUnsub || this.missionEventSubscribing) return;
     const conn = this._hass?.connection;
@@ -1227,9 +1173,14 @@ class RoombaPlusCard extends HTMLElement {
       this.householdData = householdData;
     } catch (e: unknown) {
       const status = (e as Error).message;
+      const lang = resolveLang(this._hass.language);
+      // v2.5.0 F10: a 404 no longer means "integration older than v1.8" —
+      // every supported integration has these routes. It means they are not
+      // registered for this robot: integration ≤ 4.2.18 registers them only
+      // in the Classic setup path, so a Prime-only install has none.
       this.historyError = status === '404'
-        ? 'History requires Roomba+ v1.8 or later'
-        : 'History temporarily unavailable';
+        ? t(lang, 'card.historyNotAvailable')
+        : t(lang, 'card.historyUnavailable');
     } finally {
       // If the user switched robots while this fetch was in flight, discard the results
       // entirely — writing to this.missionData would corrupt the newly active robot's state.
@@ -1243,7 +1194,7 @@ class RoombaPlusCard extends HTMLElement {
     if (!this.config || !this._hass) return;
 
     const caps     = detectCapabilities(this._hass, this.robotName, this.config, this.firstRecord, this.firstSummary);
-    const isMetric = this._hass.config?.unit_system?.length === 'm';
+    const isMetric = isMetricSystem(this._hass);
 
     // Wave A3 — today's mission count for status line context (local date, not UTC)
     const _td = new Date();
@@ -1255,7 +1206,7 @@ class RoombaPlusCard extends HTMLElement {
     if (this.activeTab === null) {
       this.activeTab = defaultTab(this.config, caps);
     }
-    const tabs = availableTabs(this.config, caps);
+    const tabs = availableTabs(this.config, caps, resolveLang(this._hass.language));
     // Guard: if config/caps changed such that the previously active tab no
     // longer exists (e.g. switched to a NONE-tier robot — no Map tab), fall
     // back to the resolved default rather than rendering an empty tab panel.
@@ -1296,6 +1247,8 @@ class RoombaPlusCard extends HTMLElement {
       roomPickerOpen: this.roomPickerOpen,
       selectedRoomCount: this.selectedRooms.size,
       activeRobot: this.activeRobot,
+      isSendingClean: this.isSendingClean,
+      sendError: this.sendError,
     });
 
     // v2.0: inline room picker — expands below the header when toggled via
@@ -1339,10 +1292,25 @@ class RoombaPlusCard extends HTMLElement {
     // appending the household zone as a permanent footer below every tab —
     // it's a distinct view the robot selector switches into, not a status
     // strip that's always present.
+    // v2.5.0: historyLoading already covers the household fetch (it runs
+    // inside the same loadHistory() call, same flag) — reused here rather
+    // than adding a second loading flag. Previously, switching into this
+    // view before the fetch resolved showed only the "← Back" chip with a
+    // blank area below it; now shows a pulsing skeleton matching the
+    // History tab's own renderSkeletonHeatmap() pattern. If the fetch
+    // finishes and householdData is still null (e.g. integration too old
+    // for this endpoint), the view intentionally goes back to rendering
+    // nothing beyond "← Back" — same graceful degradation as before, not
+    // a new error message: a 404 from an old integration isn't a failure
+    // to alarm about, just a feature this version doesn't have.
+    const householdBodyHtml = this.viewMode === 'household' && this.historyLoading && !this.householdData
+      ? renderHouseholdSkeleton(this._hass)
+      : renderHouseholdZone(this._hass, this.config, caps, this.householdData, isMetric);
+
     const bodyHtml = this.viewMode === 'household'
       ? `
         <button class="rpc-household-back" data-household-back>← Back</button>
-        ${renderHouseholdZone(this._hass, this.config, caps, this.householdData, isMetric)}
+        ${householdBodyHtml}
       `
       : `
         ${headerHtml}
@@ -1357,6 +1325,7 @@ class RoombaPlusCard extends HTMLElement {
       <style>${STYLES}</style>
       <div class="rpc-card">
         ${this.renderRobotSelectorBar()}
+        ${renderVersionNotice(this.versionProblems, resolveLang(this._hass.language))}
         ${bodyHtml}
       </div>
     `;
@@ -1392,28 +1361,29 @@ class RoombaPlusCard extends HTMLElement {
   private renderMaintenanceLinks(caps: import('./types.js').RobotCapabilities): string {
     if (!caps.hasMaintenanceCalendar && !this._hass.states[`sensor.${this.robotName}_battery_capacity_retention`]) return '';
 
+    const lang = resolveLang(this._hass.language);
     const n = this.robotName;
     const rows: { label: string; service: string; tsEntityId: string }[] = [];
     if (this._hass.states[`sensor.${n}_wheel_last_cleaned`])
-      rows.push({ label: 'Wheel cleaning',   service: 'roomba_plus.reset_wheel_cleaning',   tsEntityId: `sensor.${n}_wheel_last_cleaned` });
+      rows.push({ label: t(lang, 'card.maintWheelCleaning'),   service: 'roomba_plus.reset_wheel_cleaning',   tsEntityId: `sensor.${n}_wheel_last_cleaned` });
     if (this._hass.states[`sensor.${n}_contact_last_cleaned`])
-      rows.push({ label: 'Contact cleaning', service: 'roomba_plus.reset_contact_cleaning', tsEntityId: `sensor.${n}_contact_last_cleaned` });
+      rows.push({ label: t(lang, 'card.maintContactCleaning'), service: 'roomba_plus.reset_contact_cleaning', tsEntityId: `sensor.${n}_contact_last_cleaned` });
     if (this._hass.states[`sensor.${n}_bin_last_cleaned`])
-      rows.push({ label: 'Bin cleaning',     service: 'roomba_plus.reset_bin_cleaning',     tsEntityId: `sensor.${n}_bin_last_cleaned` });
+      rows.push({ label: t(lang, 'card.maintBinCleaning'),     service: 'roomba_plus.reset_bin_cleaning',     tsEntityId: `sensor.${n}_bin_last_cleaned` });
     if (this._hass.states[`sensor.${n}_battery_capacity_retention`])
-      rows.push({ label: 'Battery baseline', service: 'roomba_plus.reset_battery',          tsEntityId: `sensor.${n}_battery_last_replaced` });
+      rows.push({ label: t(lang, 'card.maintBatteryBaseline'), service: 'roomba_plus.reset_battery',          tsEntityId: `sensor.${n}_battery_last_replaced` });
 
     if (rows.length === 0) return '';
 
     return `
       <div class="rpc-settings-divider"></div>
-      <div class="rpc-zone-header">MAINTENANCE</div>
+      <div class="rpc-zone-header">${t(lang, 'card.maintenanceLabel')}</div>
       ${rows.map(r => {
         const tsEntity = this._hass.states[r.tsEntityId];
         const recorded = !!tsEntity && tsEntity.state !== 'unavailable' && tsEntity.state !== 'unknown';
         const lastReset = recorded
-          ? `Reset ${timeSince(tsEntity!.state, this._hass.language)}`
-          : 'Never recorded';
+          ? t(lang, 'card.resetTime', { time: timeSince(tsEntity!.state, this._hass.language) })
+          : t(lang, 'health.maintNeverRecorded');
         return `
           <div class="rpc-maint-link-row">
             <span class="rpc-maint-link-label">${r.label}</span>
@@ -1422,7 +1392,7 @@ class RoombaPlusCard extends HTMLElement {
           <div class="rpc-maint-link-lastreset">${lastReset}</div>
         `;
       }).join('')}
-      <div class="rpc-maint-link-hint">Trigger via Developer Tools → Services</div>
+      <div class="rpc-maint-link-hint">${t(lang, 'card.triggerViaDevTools')}</div>
     `;
   }
 
@@ -1433,6 +1403,7 @@ class RoombaPlusCard extends HTMLElement {
   private renderRobotSelectorBar(): string {
     const list = this.entityList();
     if (list.length < 2) return '';
+    const lang = resolveLang(this._hass.language);
     const options = list.map(id => {
       const name = this._hass.states[id]?.attributes?.['friendly_name'] as string ?? id;
       const sel  = this.viewMode === 'robot' && id === this.activeRobot ? ' selected' : '';
@@ -1442,9 +1413,9 @@ class RoombaPlusCard extends HTMLElement {
     return `
       <div class="rpc-robot-selector">
         <select class="rpc-robot-select" data-robot-select>
-          <optgroup label="My robots">${options}</optgroup>
-          <optgroup label="View">
-            <option value="__household__"${householdSel}>📊 Household summary</option>
+          <optgroup label="${t(lang, 'card.myRobots')}">${options}</optgroup>
+          <optgroup label="${t(lang, 'card.viewLabel')}">
+            <option value="__household__"${householdSel}>${t(lang, 'card.householdSummary')}</option>
           </optgroup>
         </select>
       </div>`;
@@ -1779,6 +1750,7 @@ class RoombaPlusCard extends HTMLElement {
   private async runCleanSelected(): Promise<void> {
     const entity = this.activeRobot;
     const n = this.robotName;
+    const lang = resolveLang(this._hass.language);
 
     this.isSendingClean = true;
     this.sendError      = null;
@@ -1789,7 +1761,7 @@ class RoombaPlusCard extends HTMLElement {
     // Safety 8s timeout
     this.cleanTimeoutTimer = setTimeout(() => {
       this.isSendingClean    = false;
-      this.sendError         = 'Start command may not have been received — check the iRobot app';
+      this.sendError         = t(lang, 'card.sendCommandUnclear');
       this.cleanTimeoutTimer = null;
       this.render();
     }, 8000);
@@ -1812,10 +1784,15 @@ class RoombaPlusCard extends HTMLElement {
       this.cleanTimeoutTimer = null;
       this.selectedRooms.clear();
       this.isSendingClean = false;
-    } catch {
+    } catch (e: unknown) {
       if (this.cleanTimeoutTimer !== null) { clearTimeout(this.cleanTimeoutTimer); this.cleanTimeoutTimer = null; }
       this.isSendingClean = false;
-      this.sendError      = 'Start command may not have been received — check the iRobot app';
+      // v2.5.0: show the integration's own (translated) reason when HA sent
+      // one — "Unknown room(s): …" is actionable, "unclear" is not.
+      const msg = (e as { message?: unknown } | null)?.message;
+      this.sendError      = typeof msg === 'string' && msg.trim() !== ''
+        ? msg
+        : t(lang, 'card.sendCommandUnclear');
     }
     this.render();
   }

@@ -1,4 +1,6 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, MissionRecord, DaySummary } from './types.js';
+import { zoneSelectId, trackerId, mapImageId, roomsOverdueId } from './entity-ids.js';
+import { favoriteEntityIds } from './favorites.js';
 
 /**
  * Detect robot capabilities from hass entity state (Tier 1) and optional
@@ -17,12 +19,15 @@ export function detectCapabilities(
   firstSummary?: DaySummary | null,
 ): RobotCapabilities {
   const e   = (key: string) => !!hass.states[`sensor.${name}_${key}`];
-  const s   = (key: string) => !!hass.states[`select.${name}_${key}`];
   const b   = (key: string) => !!hass.states[`binary_sensor.${name}_${key}`];
   const img = (key: string) => !!hass.states[`image.${name}_${key}`];
 
   const hasPad   = e('mop_pad');
   const hasBrush = e('brush_remaining_hours');
+  // v2.5.0 F3/F8: resolved, not guessed (entity-ids.ts).
+  const zoneSelect = zoneSelectId(hass, name);
+  const mapImage   = mapImageId(hass, name);
+  const mapAttrs   = mapImage ? (hass.states[mapImage]?.attributes ?? {}) : {};
 
   return {
     // ── Tier 1 — entity-based (synchronous) ──────────────────────────────
@@ -31,8 +36,13 @@ export function detectCapabilities(
     hasPad,
     hasWater:         e('mop_tank_level'),
     hasCleanBase:     e('clean_base_status'),
-    hasZones:         s('smart_zone_select') || s('zone_select'),
-    hasSmartZones:    s('smart_zone_select'),
+    // v2.5.0 F3: select.*_zone_select (EPHEMERAL) was retired by the
+    // integration in v3.2.1; with cloud credentials the SMART select is
+    // select.*_cloud_zone_{pmap_id}, one per map. Both flags now mean
+    // "a usable multi-room select exists" (smart_zone_select or the active
+    // map's cloud select).
+    hasZones:         zoneSelect !== null,
+    hasSmartZones:    zoneSelect !== null,
     hasProblemZone:   e('problem_zone'),
     hasLifetimeArea:  e('cleaning_analytics_30d'),  // SC1 (v2.7.0): was recent_area_30d
     hasWearRate:      e('filter_wear_rate'),
@@ -44,7 +54,10 @@ export function detectCapabilities(
     hasBatteryRetention:   e('battery_capacity_retention'),
     hasWifiFloor:          e('wifi_health'),  // SC1 (v2.7.0): was recent_wifi_floor — NOT a like-for-like
                                                // metric swap, see WIFI_FLOOR_MIGRATION note in alert-zone.ts
-    hasCoveragePct:        e('recent_coverage_pct'),
+    // v2.5.0 F5: sensor.*_recent_coverage_pct was removed in integration
+    // v3.0; its successor is the `coverage_pct` attribute on
+    // cleaning_performance (last mission's area vs the 60-day p75).
+    hasCoveragePct:        typeof hass.states[`sensor.${name}_cleaning_performance`]?.attributes?.coverage_pct === 'number',
     hasBatteryEol:         e('estimated_battery_eol'),
     hasConsecutiveSkips:   e('consecutive_clean_skips'),
     hasMopBehavior:        e('mop_behavior'),
@@ -80,22 +93,22 @@ export function detectCapabilities(
     // The correct entity is image.*_map (RoombaMapImage) — presence alone
     // is sufficient, same reasoning as before, just the right target now.
     hasAlignment: (() => {
-      const rooms = hass.states[`image.${name}_map`]?.attributes?.rooms;
+      const rooms = mapAttrs.rooms;
       return !!rooms && typeof rooms === 'object' && Object.keys(rooms).length > 0;
     })(),
     // v2.3.0 ZONE-OVERLAY / F24 — same image.*_map entity as hasAlignment,
     // same aligned-mode gate (integration withholds all three attributes
     // together outside aligned mode — verified against source).
     hasZoneOverlays: (() => {
-      const zones = hass.states[`image.${name}_map`]?.attributes?.zones;
+      const zones = mapAttrs.zones;
       return Array.isArray(zones) && zones.length > 0;
     })(),
     hasDoorMarkers: (() => {
-      const markers = hass.states[`image.${name}_map`]?.attributes?.door_markers;
+      const markers = mapAttrs.door_markers;
       return Array.isArray(markers) && markers.length > 0;
     })(),
     hasFurnitureShadows: (() => {
-      const candidates = hass.states[`image.${name}_map`]?.attributes?.furniture_candidates;
+      const candidates = mapAttrs.furniture_candidates;
       return Array.isArray(candidates) && candidates.length > 0;
     })(),
     // v2.4.0 ROOM-ACCESS — separate sensor entity (not image.*_map), but
@@ -105,7 +118,8 @@ export function detectCapabilities(
     // hasFavorites: at least one button.*_fav_<id> entity. Favorite IDs are
     // arbitrary per-user iRobot routine identifiers, so this scans all
     // entity_ids for the prefix rather than checking a single fixed key.
-    hasFavorites: Object.keys(hass.states).some(id => id.startsWith(`button.${name}_fav_`)),
+    // v2.5.0: Prime favourites are button.*_favorite_<id> (favorites.ts).
+    hasFavorites: favoriteEntityIds(hass, name).length > 0,
 
     // ── v2.1.0 — header indicators ───────────────────────────────────────────
     // A1: connectivity. Both are binary_sensors (verified vs integration
@@ -114,12 +128,14 @@ export function detectCapabilities(
     hasConnectivity: b('cloud_connected') || b('mqtt_stale'),
     // A2: firmware badge.
     hasFirmware: e('firmware_version'),
-    // A4: position tracker carrying room_estimate (SMART). device_tracker
-    // domain, so checked directly rather than via the sensor helper.
-    hasPositionTracker: !!hass.states[`device_tracker.${name}_position`],
+    // A4 / v2.5.0 F4: the integration names the tracker after the device
+    // alone (device_tracker.{n}); the old `_position` id only exists when a
+    // user renamed it. Resolved in entity-ids.ts.
+    hasPositionTracker: trackerId(hass, name) !== null,
 
     // ── v2.3.0 — Rooms-Overdue widget ─────────────────────────────────────
-    hasRoomsOverdue: e('rooms_overdue'),
+    // v2.5.0: also the Prime sensor (integration ≥ 4.2.19), entity-ids.ts.
+    hasRoomsOverdue: roomsOverdueId(hass, name) !== null,
     // v2.3.0 — dirt/sensor correlation. Opt-in diagnostic; presence alone
     // is sufficient (integration only registers it when the user has
     // configured correlation entities AND cloud is available).

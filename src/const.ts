@@ -1,6 +1,9 @@
 /**
  * F5: MDI icon name → emoji mapping for room chip icons.
- * Keys are the bare MDI name (no "mdi:" prefix) as stored in region_icons attribute.
+ * Keys are the bare MDI name (no "mdi:" prefix). NOTE (v2.5.0): the
+ * integration sends the FULL name ("mdi:fridge") in region_icons and in
+ * image.*_map rooms[].icon, so a direct MDI_TO_EMOJI[icon] lookup never
+ * matched and room icons never appeared — look up through mdiToEmoji().
  * Fallback: 📍 for any unmapped icon.
  */
 export const MDI_TO_EMOJI: Record<string, string> = {
@@ -40,6 +43,26 @@ export const MDI_TO_EMOJI: Record<string, string> = {
   'heart':                  '❤️',
   'office-building':        '🏢',
   'school':                 '🏫',
+  // v2.5.0 — every icon in the integration's REGION_TYPE_ICONS (const.py)
+  // that was missing above, so each iRobot room type gets an emoji.
+  'bed-king':               '🛏️',
+  'sofa-single':            '🛋️',
+  'door-open':              '🚪',
+  'archive':                '📦',
+  'asterisk':               '📍',
+  'home-floor-b':           '🏠',
+  'landslide':              '🧱',
+  'shoe-print':             '👟',
+  'sun-angle':              '☀️',
+  'teddy-bear':             '🧸',
+  'toolbox':                '🧰',
 };
+
+/** Emoji for an MDI icon name, with or without the "mdi:" prefix. */
+export function mdiToEmoji(icon: unknown, fallback = ''): string {
+  if (typeof icon !== 'string' || icon === '') return fallback;
+  const bare = icon.startsWith('mdi:') ? icon.slice(4) : icon;
+  return MDI_TO_EMOJI[bare] ?? fallback;
+}
 
 export const MDI_FALLBACK = '📍';

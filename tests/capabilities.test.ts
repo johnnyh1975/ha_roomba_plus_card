@@ -46,8 +46,24 @@ describe('detectCapabilities()', () => {
   it('hasZones true from smart_zone_select', () =>
     expect(detectCapabilities(makeHass({ [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen'] }) }), n, baseConfig).hasZones).toBe(true));
 
-  it('hasZones true from zone_select fallback', () =>
-    expect(detectCapabilities(makeHass({ [`select.${n}_zone_select`]: st('Zone1', { options: ['Zone1'] }) }), n, baseConfig).hasZones).toBe(true));
+  // v2.5.0 F3: select.*_zone_select was retired by the integration (v3.2.1);
+  // a leftover row must not light up the room picker any more.
+  it('hasZones false from a leftover zone_select (retired by the integration)', () =>
+    expect(detectCapabilities(makeHass({ [`select.${n}_zone_select`]: st('Zone1', { options: ['Zone1'] }) }), n, baseConfig).hasZones).toBe(false));
+
+  // v2.5.0 F3 — the normal cloud setup: one select per map, active one used.
+  it('hasSmartZones true from the active map\'s select.*_cloud_zone_{pmap_id}', () => {
+    const caps = detectCapabilities(makeHass({
+      [`select.${n}_cloud_zone_pmapa`]: st('Kitchen', { options: ['Kitchen'], is_active_map: true }),
+    }), n, baseConfig);
+    expect(caps.hasSmartZones).toBe(true);
+    expect(caps.hasZones).toBe(true);
+  });
+
+  it('hasSmartZones false when the only cloud_zone select is for an inactive map', () =>
+    expect(detectCapabilities(makeHass({
+      [`select.${n}_cloud_zone_pmapb`]: st('Attic', { options: ['Attic'], is_active_map: false }),
+    }), n, baseConfig).hasSmartZones).toBe(false));
 
   it('hasZones false when neither selector exists', () =>
     expect(detectCapabilities(makeHass(), n, baseConfig).hasZones).toBe(false));
@@ -305,4 +321,34 @@ describe('detectCapabilities() — v2.3.0 dirt/sensor correlation', () => {
 
   it('hasDirtCorrelation true when sensor present', () =>
     expect(detectCapabilities(makeHass({ [`sensor.${n}_dirt_weather_correlation`]: st('0.61') }), n, baseConfig).hasDirtCorrelation).toBe(true));
+});
+
+// ── v2.5.0 — resolved ids (entity-ids.ts) feed the capability flags ────────
+describe('detectCapabilities() — v2.5.0 F4/F5/F8', () => {
+  it('F4: hasPositionTracker true from device_tracker.{n} (integration naming)', () =>
+    expect(detectCapabilities(makeHass({ [`device_tracker.${n}`]: st('Kitchen') }), n, baseConfig).hasPositionTracker).toBe(true));
+
+  it('F4: hasPositionTracker still true for a user-renamed device_tracker.{n}_position', () =>
+    expect(detectCapabilities(makeHass({ [`device_tracker.${n}_position`]: st('Kitchen') }), n, baseConfig).hasPositionTracker).toBe(true));
+
+  it('F5: hasCoveragePct true from cleaning_performance.coverage_pct', () =>
+    expect(detectCapabilities(makeHass({
+      [`sensor.${n}_cleaning_performance`]: st('stable', { coverage_pct: 92.5 }),
+    }), n, baseConfig).hasCoveragePct).toBe(true));
+
+  it('F5: hasCoveragePct false from the removed recent_coverage_pct sensor alone', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_recent_coverage_pct`]: st('80') }), n, baseConfig).hasCoveragePct).toBe(false));
+
+  it('F8: hasAlignment true from image.{n}_cleaning_map (schema-21 migrated install)', () =>
+    expect(detectCapabilities(makeHass({
+      [`image.${n}_cleaning_map`]: st('idle', { rooms: { Kitchen: { outline: [[0, 0]], name: 'Kitchen', room_id: 'kitchen', icon: '', x: 0, y: 0 } } }),
+    }), n, baseConfig).hasAlignment).toBe(true));
+
+  it('hasFavorites true from a Prime button.{n}_favorite_<id>', () =>
+    expect(detectCapabilities(makeHass({ [`button.${n}_favorite_abc`]: st('unknown') }), n, baseConfig).hasFavorites).toBe(true));
+});
+
+describe('detectCapabilities() — integration 4.2.19', () => {
+  it('hasRoomsOverdue true from the Prime sensor', () =>
+    expect(detectCapabilities(makeHass({ [`sensor.${n}_prime_rooms_overdue`]: st('0') }), n, baseConfig).hasRoomsOverdue).toBe(true));
 });

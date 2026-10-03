@@ -1,6 +1,9 @@
 import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
 import { normalisedWifiFloor } from '../heatmap.js';
-import { esc } from '../utils.js';
+import { esc, formatState } from '../utils.js';
+import { READINESS } from '../slugs.js';
+import { consumableReferenceHours } from './health-zone.js';
+import { t, resolveLang } from '../i18n/index.js';
 
 /**
  * v2.0: each alert is tagged with the tab whose badge it should surface on,
@@ -33,6 +36,7 @@ export function collectAlerts(
   robotName: string,
 ): Alert[] {
   const n = robotName;
+  const lang = resolveLang(hass.language);
   const alerts: Alert[] = [];
 
   // Priority 1 — error. Tagged 'none': already live in the persistent header.
@@ -57,11 +61,11 @@ export function collectAlerts(
       && errorSensor.state !== ''
       && errorSensor.state !== 'unknown'
       && errorSensor.state !== 'unavailable') {
-    const label  = esc((errorSensor.attributes.label       as string) ?? `Error ${errorSensor.state}`);
+    const label  = esc((errorSensor.attributes.label       as string) ?? t(lang, 'alert.errorFallback', { code: errorSensor.state }));
     const desc   = esc((errorSensor.attributes.description as string) ?? '');
     const action = esc((errorSensor.attributes.action      as string) ?? '');
     const subtext = [desc, action].filter(Boolean).join(' ') || undefined;
-    alerts.push({ priority: 1, text: `Error: ${label}`, subtext, category: 'none' });
+    alerts.push({ priority: 1, text: t(lang, 'alert.errorPrefixed', { label }), subtext, category: 'none' });
   } else if (activeError) {
     // Active error but last_error_code unusable (sensor lagging behind the
     // live MQTT state, or entity disabled) — fall back to the vacuum
@@ -70,21 +74,33 @@ export function collectAlerts(
     // mapping), use the header's generic wording instead of "Error: Error".
     const code = vacuumEntity!.attributes?.error_code;
     const msg  = vacuumEntity!.attributes?.error as string | undefined;
-    const text = msg ? `Error: ${esc(msg)}`
-      : code != null ? `Error: Error ${esc(String(code))}`
-      : 'Robot error — check the iRobot app';
+    const text = msg ? t(lang, 'alert.errorPrefixed', { label: esc(msg) })
+      : code != null ? t(lang, 'alert.errorPrefixed', { label: t(lang, 'alert.errorFallback', { code: esc(String(code)) }) })
+      : t(lang, 'header.robotErrorCheckApp');
     alerts.push({ priority: 1, text, category: 'none' });
   }
 
   // Priority 2 — maintenance due (Wave A A5: readiness-specific text). Health.
   const maintenanceSensor = hass.states[`binary_sensor.${n}_maintenance_due`];
   if (maintenanceSensor && maintenanceSensor.state === 'on') {
-    const readiness = hass.states[`sensor.${n}_readiness`]?.state ?? '';
-    let alertText = 'Maintenance due';
-    if (readiness === 'bin_full' || readiness === 'Bin Full') {
-      alertText = 'Bin full — empty to continue';
-    } else if (readiness && readiness !== 'Ready' && readiness !== 'unknown' && readiness !== 'unavailable') {
-      alertText = 'Robot not ready — check the app';
+    // v2.5.0 F1 (#17): readiness is a SLUG since integration 4.1.8 —
+    // `ready`, `bin_full`, `lid_open`, … or `not_ready_<n>` for a state the
+    // integration cannot name yet. The old comparison against 'Ready' never
+    // matched, so every ready robot with maintenance due read "Robot not
+    // ready — check the app". Compared against slugs (slugs.ts, guarded by
+    // tests/slugs.test.ts); the reason is shown in the integration's own
+    // words via HA's formatter.
+    const readinessId = `sensor.${n}_readiness`;
+    const readiness = hass.states[readinessId]?.state ?? '';
+    let alertText = t(lang, 'alert.maintenanceDue');
+    if (readiness === READINESS.BIN_FULL) {
+      alertText = t(lang, 'alert.binFull');
+    } else if (readiness
+               && readiness !== READINESS.READY
+               && readiness !== READINESS.NONE
+               && readiness !== 'unknown'
+               && readiness !== 'unavailable') {
+      alertText = t(lang, 'alert.notReadyReason', { reason: esc(formatState(hass, readinessId)) });
     }
     alerts.push({ priority: 2, text: alertText, category: 'health' });
   }
@@ -94,20 +110,21 @@ export function collectAlerts(
     const filterWear = hass.states[`sensor.${n}_filter_wear_rate`];
     const filterThr  = hass.states[`sensor.${n}_filter_remaining_hours`];
     if (filterWear && filterWear.state !== 'unknown' && filterWear.state !== 'unavailable' && filterThr) {
-      const thr     = filterThr.attributes.threshold_hours as number;
-      const ratio   = parseFloat(filterWear.state) / (thr / 90);
+      // v2.5.0 F7: same reference life the Health bar uses (max_hours first).
+      const thr     = consumableReferenceHours(filterThr);
+      const ratio   = thr ? parseFloat(filterWear.state) / (thr / 90) : NaN;
       if (ratio > 1.5) {
-        alerts.push({ priority: 3, text: `Filter wearing ${ratio.toFixed(1)}× faster than normal`, subtext: 'Check for dust or debris buildup.', category: 'health' });
+        alerts.push({ priority: 3, text: t(lang, 'alert.filterWearing', { ratio: ratio.toFixed(1) }), subtext: t(lang, 'alert.filterWearingSub'), category: 'health' });
       }
     }
 
     const brushWear = hass.states[`sensor.${n}_brush_wear_rate`];
     const brushThr  = hass.states[`sensor.${n}_brush_remaining_hours`];
     if (brushWear && brushWear.state !== 'unknown' && brushWear.state !== 'unavailable' && brushThr) {
-      const thr   = brushThr.attributes.threshold_hours as number;
-      const ratio = parseFloat(brushWear.state) / (thr / 90);
+      const thr   = consumableReferenceHours(brushThr);
+      const ratio = thr ? parseFloat(brushWear.state) / (thr / 90) : NaN;
       if (ratio > 1.5) {
-        alerts.push({ priority: 4, text: `Brush wearing ${ratio.toFixed(1)}× faster than normal`, subtext: 'Check for hair tangles.', category: 'health' });
+        alerts.push({ priority: 4, text: t(lang, 'alert.brushWearing', { ratio: ratio.toFixed(1) }), subtext: t(lang, 'alert.brushWearingSub'), category: 'health' });
       }
     }
   }
@@ -124,8 +141,8 @@ export function collectAlerts(
     if (!isNaN(navQuality) && navQuality < 60) {
       alerts.push({
         priority: 5,
-        text:    `Navigation quality low (${navQuality}/100)`,
-        subtext: 'Check lighting or move obstacles in the cleaning area.',
+        text:    t(lang, 'alert.navQualityLow', { nav: navQuality }),
+        subtext: t(lang, 'alert.navQualityLowSub'),
         category: 'health',
       });
     }
@@ -137,11 +154,11 @@ export function collectAlerts(
     if (skipsEntity && skipsEntity.state !== 'unknown' && skipsEntity.state !== 'unavailable') {
       const count = parseInt(skipsEntity.state, 10);
       if (!isNaN(count) && count > 0) {
-        const text = `Robot blocked from cleaning ${count} consecutive time${count !== 1 ? 's' : ''}`;
+        const text = t(lang, 'alert.consecutiveSkips', { count });
         alerts.push({
           priority: 6,
           text,
-          subtext: 'Check blocking sensors or robot placement.',
+          subtext: t(lang, 'alert.consecutiveSkipsSub'),
           category: 'health',
         });
       }
@@ -176,8 +193,8 @@ export function collectAlerts(
       if (wifiPct < 50) {
         alerts.push({
           priority: 7,
-          text:    `Wi-Fi signal dropped to ${wifiPct}% during last mission`,
-          subtext: 'Consider moving the router or adding a Wi-Fi extender.',
+          text:    t(lang, 'alert.wifiDrop', { pct: wifiPct }),
+          subtext: t(lang, 'alert.wifiDropSub'),
           category: 'history',
         });
       }
@@ -193,8 +210,8 @@ export function collectAlerts(
   if (layoutEntity && layoutEntity.state === 'on') {
     alerts.push({
       priority: 8,
-      text:    'Room layout may have changed',
-      subtext: 'Coverage pattern diverges from this robot\u2019s learned layout — moved furniture, or a new/removed obstacle.',
+      text:    t(lang, 'alert.layoutChanged'),
+      subtext: t(lang, 'alert.layoutChangedSub'),
       category: 'health',
     });
   }

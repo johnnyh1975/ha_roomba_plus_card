@@ -14,8 +14,11 @@
  * separate lines as the original incremental plan would have produced.
  */
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary } from './types.js';
-import { esc, timeSince } from './utils.js';
-import { MDI_TO_EMOJI } from './const.js';
+import { esc, timeSince, formatState, areaSqftFromEntity, isMetricSystem } from './utils.js';
+import { PHASE, STATION_PHASES, OFFLINE_PHASES } from './slugs.js';
+import { trackerId, zoneSelectMapAttr } from './entity-ids.js';
+import { mdiToEmoji } from './const.js';
+import { t, resolveLang } from './i18n/index.js';
 
 type VacuumState = 'cleaning' | 'paused' | 'returning' | 'docked' | 'idle' | 'error' | 'unavailable';
 
@@ -39,6 +42,20 @@ export interface HeaderProps {
    *  active robot, not the configured default. Optional for back-compat —
    *  falls back to config.entity when not supplied. */
   activeRobot?: string;
+  /** v2.5.0: whether "Start selected rooms" is currently in flight.
+   *  Deliberately a SEPARATE flag from loadingAction — runCleanSelected()
+   *  already tracked this state (isSendingClean) for the ⚙ tab's own
+   *  room-targeting button (room-selector-zone.ts), but the header's
+   *  "Start selected rooms" button (rendered via the generic btn() helper,
+   *  which only checks loadingAction) never received it, so it silently
+   *  showed no sending-in-progress state at all. */
+  isSendingClean: boolean;
+  /** v2.5.0: error message from a failed/timed-out clean_room call (same
+   *  source runCleanSelected() already sets for the ⚙ tab's own button —
+   *  same bug class as isSendingClean above: never reached the header, so
+   *  a failure while the user was on any OTHER tab showed nothing at all
+   *  where they were actually looking. */
+  sendError: string | null;
 }
 
 function st(hass: HomeAssistant, entityId: string): string {
@@ -48,7 +65,9 @@ function st(hass: HomeAssistant, entityId: string): string {
 function formatArea(sqft: number, unit: 'auto' | 'sqft' | 'm2', isMetric: boolean): string {
   const useMetric = unit === 'm2' || (unit === 'auto' && isMetric);
   if (useMetric) return `${Math.round(sqft * 0.0929)} m²`;
-  return `${sqft} ft²`;
+  // v2.5.0: rounded — a sensor reported in m² arrives here converted
+  // (areaSqftFromEntity) and would otherwise print 12 decimals.
+  return `${Math.round(sqft)} ft²`;
 }
 
 /** F1: "X ago" for the most recent completed mission. */
@@ -75,16 +94,22 @@ function ordinal(n: number): string {
 }
 
 export function renderHeader(props: HeaderProps): string {
-  const { hass, config, caps, robotName, loadingAction, todayMissionCount, roomPickerOpen, selectedRoomCount } = props;
+  const { hass, config, caps, robotName, loadingAction, todayMissionCount, roomPickerOpen, selectedRoomCount, isSendingClean, sendError } = props;
+  const lang = resolveLang(hass.language);
   // v2.1.0 B1-class fix: read state from the active robot, not config.entity
   // (which is always the first/default robot in multi-robot mode).
   const entityId = props.activeRobot ?? config.entity;
   const vacState = (st(hass, entityId)) as VacuumState;
   const attrs = hass.states[entityId]?.attributes ?? {};
-  const isMetric = hass.config?.unit_system?.length === 'm';
+  const isMetric = isMetricSystem(hass);
   const unit = config.area_unit ?? 'auto';
   const unavailable = vacState === 'unavailable';
-  const anyLoading = loadingAction !== null;
+  // v2.5.0: includes isSendingClean so "Start selected rooms" (and any
+  // other header button, though only one renders per state) is disabled
+  // for the duration of the clean_room service call, not just visually
+  // spinning — matches the ⚙ tab's own room-targeting button, which
+  // already disables on `isSending`.
+  const anyLoading = loadingAction !== null || isSendingClean;
   const n = robotName;
 
   const errorSensor        = `sensor.${n}_last_error_code`;
@@ -103,6 +128,12 @@ export function renderHeader(props: HeaderProps): string {
   const friendlyName = esc((attrs.friendly_name as string) ?? entityId);
 
   const missionPhase      = hass.states[`sensor.${n}_phase`]?.state ?? '';
+  // v2.5.0 F2: the phase sensor reports slugs (integration ≥ 4.1). The
+  // header still owns its own wording for its core states; station work
+  // (pad wash/dry, tank refill) is shown in the INTEGRATION's text (P3).
+  const isOfflinePhase  = OFFLINE_PHASES.has(missionPhase);
+  const isStationPhase  = STATION_PHASES.has(missionPhase);
+  const isEmptyingBin   = missionPhase === PHASE.EMPTYING_BIN;
   const missionActiveRaw  = hass.states[`binary_sensor.${n}_mission_active`]?.state ?? '';
   const isMissionActive   = missionActiveRaw === 'on';
   const hasMissionActive  = caps.hasMissionActive;
@@ -114,7 +145,10 @@ export function renderHeader(props: HeaderProps): string {
   const resumeMin  = hasETA ? Math.max(1, Math.round((expireDate!.getTime() - Date.now()) / 60000)) : null;
 
   let isRecharging = false;
-  if (hasMissionActive) {
+  if (missionPhase === PHASE.CHARGING_MID_MISSION && vacState === 'docked') {
+    // v2.5.0 F2: the integration says so directly since 4.x — no inference.
+    isRecharging = true;
+  } else if (hasMissionActive) {
     isRecharging = vacState === 'docked' && isMissionActive;
   } else {
     const rechargeState = st(hass, rechargeTimeSensor);
@@ -132,7 +166,7 @@ export function renderHeader(props: HeaderProps): string {
     const mp = hass.states[`sensor.${n}_mission_progress`];
     const rechargeMin = mp?.attributes?.recharge_min;
     if (typeof rechargeMin === 'number') {
-      rechargeLineHtml = `<div class="rpc-recharge-line">⚡ Recharging · ${Math.round(rechargeMin)} min</div>`;
+      rechargeLineHtml = `<div class="rpc-recharge-line">⚡ ${t(lang, 'header.rechargeLine', { min: Math.round(rechargeMin) })}</div>`;
     }
   }
 
@@ -141,23 +175,34 @@ export function renderHeader(props: HeaderProps): string {
   let stateLabel = '';
   let extraClass = '';
 
-  if (missionPhase === 'evac') {
+  if (isOfflinePhase && vacState !== 'unavailable' && vacState !== 'error') {
+    // v2.5.0 F2: the integration has heard nothing from the robot (an hour
+    // of silence → `no_contact`). The vacuum entity may still show its last
+    // state; saying "Docked" about a robot nobody has heard from is the
+    // field report this phase exists for.
+    stateDot   = '—';
+    stateLabel = t(lang, 'header.stateNoContact');
+    extraClass = 'rpc-offline-state';
+  } else if (isEmptyingBin) {
     stateDot   = '⬆';
-    stateLabel = 'Emptying bin';
+    stateLabel = t(lang, 'header.stateEmptyingBin');
+  } else if (isStationPhase && vacState !== 'cleaning' && vacState !== 'error') {
+    stateDot   = '⟳';
+    stateLabel = esc(formatState(hass, `sensor.${n}_phase`));
   } else if (isRecharging) {
     stateDot   = '⚡';
     stateLabel = resumeMin !== null
-      ? `Recharging — resuming in ~${resumeMin} min`
-      : 'Recharging — mission continues';
+      ? t(lang, 'header.stateRechargingResuming', { min: resumeMin })
+      : t(lang, 'header.stateRechargingContinues');
   } else {
     switch (vacState) {
-      case 'cleaning':    stateDot = '●'; stateLabel = isMop ? 'Mopping'         : 'Cleaning';          break;
-      case 'paused':      stateDot = '⏸'; stateLabel = 'Paused';                                        break;
-      case 'returning':   stateDot = '↩'; stateLabel = 'Returning to dock';                             break;
-      case 'docked':      stateDot = '✓'; stateLabel = 'Docked';                                        break;
-      case 'idle':        stateDot = '○'; stateLabel = 'Idle';                                          break;
-      case 'error':       stateDot = '⚠'; stateLabel = 'Error'; extraClass = 'rpc-error-state';        break;
-      case 'unavailable': stateDot = '—'; stateLabel = 'Unavailable';                                   break;
+      case 'cleaning':    stateDot = '●'; stateLabel = isMop ? t(lang, 'header.stateMopping') : t(lang, 'header.stateCleaning'); break;
+      case 'paused':      stateDot = '⏸'; stateLabel = t(lang, 'header.statePaused');                                        break;
+      case 'returning':   stateDot = '↩'; stateLabel = t(lang, 'header.stateReturning');                                     break;
+      case 'docked':      stateDot = '✓'; stateLabel = t(lang, 'header.stateDocked');                                        break;
+      case 'idle':        stateDot = '○'; stateLabel = t(lang, 'header.stateIdle');                                          break;
+      case 'error':       stateDot = '⚠'; stateLabel = t(lang, 'header.stateError'); extraClass = 'rpc-error-state';        break;
+      case 'unavailable': stateDot = '—'; stateLabel = t(lang, 'header.stateUnavailable');                                   break;
     }
   }
 
@@ -166,17 +211,17 @@ export function renderHeader(props: HeaderProps): string {
   if (vacState === 'error') {
     const errEntity = hass.states[errorSensor];
     if (errEntity && errEntity.state !== '0' && errEntity.state !== '' && errEntity.state !== 'unavailable') {
-      const desc   = esc((errEntity.attributes.description as string) ?? 'Unknown error');
+      const desc   = esc((errEntity.attributes.description as string) ?? t(lang, 'header.unknownError'));
       const action = esc((errEntity.attributes.action   as string) ?? '');
       const zone   = st(hass, errorZoneSensor);
       const hasZone = zone && zone !== 'unknown' && zone !== 'unavailable';
-      stateLabel = `Error ${esc(errEntity.state)} — ${desc}`;
+      stateLabel = t(lang, 'header.errorLabel', { code: esc(errEntity.state), desc });
       errorHtml  = `
         ${action ? `<div class="rpc-error-action">${action}</div>` : ''}
-        ${hasZone ? `<div class="rpc-error-zone">Zone: ${esc(zone)}</div>` : ''}
+        ${hasZone ? `<div class="rpc-error-zone">${t(lang, 'header.errorZone', { zone: esc(zone) })}</div>` : ''}
       `;
     } else {
-      stateLabel = 'Robot error — check the iRobot app';
+      stateLabel = t(lang, 'header.robotErrorCheckApp');
     }
   }
 
@@ -186,14 +231,15 @@ export function renderHeader(props: HeaderProps): string {
     ? isMissionActive
     : (vacState === 'cleaning' || isRecharging);
   if (missionInProgress && caps.hasArea) {
-    const todayAreaRaw = parseFloat(st(hass, areaCleanedToday));
+    // v2.5.0: honour the sensor's unit (m² since integration 4.x).
+    const todayAreaRaw = areaSqftFromEntity(hass.states[areaCleanedToday]);
     if (!isNaN(todayAreaRaw) && todayAreaRaw > 0) {
       const areaStr = formatArea(todayAreaRaw, unit, isMetric);
       const currentMission = todayMissionCount !== null ? todayMissionCount + 1 : null;
       const missionCtx = currentMission !== null && currentMission > 1
-        ? ` · ${esc(ordinal(currentMission))} mission`
+        ? ` · ${t(lang, 'header.missionOrdinalSuffix', { ordinal: esc(ordinal(currentMission)) })}`
         : '';
-      areaTodayHtml = `<div class="rpc-area-today">${areaStr} already today${missionCtx}</div>`;
+      areaTodayHtml = `<div class="rpc-area-today">${t(lang, 'header.areaAlreadyToday', { area: areaStr, missionCtx })}</div>`;
     }
   }
 
@@ -232,14 +278,14 @@ export function renderHeader(props: HeaderProps): string {
         const durationMin = mp?.attributes?.mission_duration_min;
         const rechargeMin = mp?.attributes?.recharge_min;
         if (typeof durationMin === 'number' && typeof rechargeMin === 'number' && rechargeMin > 0) {
-          parts.push(`${Math.round(durationMin)} min (${Math.round(rechargeMin)} min charging)`);
+          parts.push(t(lang, 'header.durationWithRecharge', { duration: Math.round(durationMin), recharge: Math.round(rechargeMin) }));
         }
         spatialLineHtml = `<div class="rpc-spatial-line">${parts.join(' · ')}</div>`;
       }
     } else {
       const missionDest = attrs.mission_destination as string | undefined;
       if (missionDest) {
-        spatialLineHtml = `<div class="rpc-spatial-line">→ Targeting: ${esc(missionDest)}</div>`;
+        spatialLineHtml = `<div class="rpc-spatial-line">→ ${t(lang, 'header.targeting', { room: esc(missionDest) })}</div>`;
       }
     }
   }
@@ -251,13 +297,14 @@ export function renderHeader(props: HeaderProps): string {
 
     if (elapsedMin !== null) {
       const remaining = Math.max(0, Math.round(estimatedTotal - elapsedMin));
-      parts.push(`<div class="rpc-metric"><span class="rpc-metric-val">~${remaining} min</span><span class="rpc-metric-lbl">Remaining</span></div>`);
+      parts.push(`<div class="rpc-metric"><span class="rpc-metric-val">~${remaining} min</span><span class="rpc-metric-lbl">${t(lang, 'header.metricRemaining')}</span></div>`);
     }
 
     if (caps.hasArea && missionArea !== null) {
-      parts.push(`<div class="rpc-metric"><span class="rpc-metric-val">${formatArea(missionArea, unit, isMetric)}</span><span class="rpc-metric-lbl">Cleaned</span></div>`);
+      parts.push(`<div class="rpc-metric"><span class="rpc-metric-val">${formatArea(missionArea, unit, isMetric)}</span><span class="rpc-metric-lbl">${t(lang, 'header.metricCleaned')}</span></div>`);
 
-      const recentAreaRaw    = parseFloat(st(hass, `sensor.${n}_cleaning_analytics_30d`));
+      // v2.5.0: analytics area is m² (cloud) — compare like with like.
+      const recentAreaRaw    = areaSqftFromEntity(hass.states[`sensor.${n}_cleaning_analytics_30d`]);
       const missionCount30   = parseFloat(st(hass, `sensor.${n}_missions_last_30d`));
       const avgArea = (!isNaN(recentAreaRaw) && !isNaN(missionCount30) && missionCount30 >= 5)
         ? recentAreaRaw / missionCount30
@@ -267,7 +314,7 @@ export function renderHeader(props: HeaderProps): string {
         const delta  = Math.round(((missionArea - avgArea) / avgArea) * 100);
         const sign   = delta >= 0 ? '▲' : '▼';
         const cls    = delta >= 0 ? 'rpc-delta-up' : 'rpc-delta-down';
-        parts.push(`<div class="rpc-metric"><span class="rpc-metric-val ${cls}">${sign} ${Math.abs(delta)}%</span><span class="rpc-metric-lbl">vs usual</span></div>`);
+        parts.push(`<div class="rpc-metric"><span class="rpc-metric-val ${cls}">${sign} ${Math.abs(delta)}%</span><span class="rpc-metric-lbl">${t(lang, 'header.metricVsUsual')}</span></div>`);
       }
     }
 
@@ -279,10 +326,10 @@ export function renderHeader(props: HeaderProps): string {
   if (vacState === 'docked' && !isRecharging) {
     const lastCleaned = lastCleanedAgo(props.missionData, hass.language);
     if (lastCleaned) {
-      dockedHtml = `<div class="rpc-docked-since">Last cleaned: ${lastCleaned}</div>`;
+      dockedHtml = `<div class="rpc-docked-since">${t(lang, 'header.lastCleaned', { time: lastCleaned })}</div>`;
     } else {
       const lastChanged = hass.states[entityId]?.last_changed;
-      if (lastChanged) dockedHtml = `<div class="rpc-docked-since">Last mission: ${timeSince(lastChanged, hass.language)}</div>`;
+      if (lastChanged) dockedHtml = `<div class="rpc-docked-since">${t(lang, 'header.lastMission', { time: timeSince(lastChanged, hass.language) })}</div>`;
     }
   }
 
@@ -290,7 +337,7 @@ export function renderHeader(props: HeaderProps): string {
   let demandHtml = '';
   if (caps.hasDemandBlocked) {
     if (hass.states[`binary_sensor.${n}_demand_clean_blocked`]?.state === 'on') {
-      demandHtml = `<div class="rpc-demand-blocked">🧹 Floor needs cleaning — waiting for home to be empty</div>`;
+      demandHtml = `<div class="rpc-demand-blocked">🧹 ${t(lang, 'header.demandBlocked')}</div>`;
     }
   }
 
@@ -298,11 +345,13 @@ export function renderHeader(props: HeaderProps): string {
   let cleanedRoomsHtml = '';
   if (caps.hasCleanedRooms && (vacState === 'docked' || vacState === 'idle') && !isRecharging) {
     const rooms      = attrs.last_cleaned_rooms as string[] | undefined;
-    const regionIcons = attrs.region_icons as Record<string, string> | undefined;
+    // v2.5.0: region_icons lives on the zone select, never on the vacuum
+    // (the vacuum attribute read here never existed — icons never showed).
+    const regionIcons = zoneSelectMapAttr<string>(hass, n, 'region_icons');
     if (rooms && rooms.length > 0) {
       const chips = rooms.map(name => {
-        const mdi  = regionIcons?.[name];
-        const icon = mdi ? (MDI_TO_EMOJI[mdi] ?? '') : '';
+        const mdi  = regionIcons[name];
+        const icon = mdiToEmoji(mdi);
         return `<span class="rpc-cleaned-chip">${icon ? icon + '\u00a0' : ''}${esc(name)}</span>`;
       }).join('');
       cleanedRoomsHtml = `<div class="rpc-cleaned-rooms">${chips}</div>`;
@@ -322,7 +371,7 @@ export function renderHeader(props: HeaderProps): string {
     const cloudDown = cloudConnected === 'off';
     const mqttDown  = mqttStale === 'on';
     if (cloudDown || mqttDown) {
-      const label = mqttDown ? 'Robot offline' : 'Cloud offline';
+      const label = mqttDown ? t(lang, 'header.connectivityRobotOffline') : t(lang, 'header.connectivityCloudOffline');
       connectivityHtml = `<span class="rpc-connectivity rpc-connectivity-degraded" title="${esc(label)}">☁ ${esc(label)}</span>`;
     }
   }
@@ -338,7 +387,7 @@ export function renderHeader(props: HeaderProps): string {
       const changed = fw?.last_changed ? new Date(fw.last_changed).getTime() : 0;
       const within24h = changed > 0 && (Date.now() - changed) < 24 * 60 * 60 * 1000;
       if (within24h) {
-        firmwareHtml = `<span class="rpc-firmware-badge" title="Firmware updated">⬆ FW ${esc(ver)}</span>`;
+        firmwareHtml = `<span class="rpc-firmware-badge" title="${t(lang, 'header.firmwareUpdatedTitle')}">⬆ FW ${esc(ver)}</span>`;
       }
     }
   }
@@ -354,13 +403,31 @@ export function renderHeader(props: HeaderProps): string {
   // On SMART robots this delegates to the SAME resolver as mission_progress's
   // current_room, which spatialLineHtml already shows — so we suppress A4 when
   // the spatial line already rendered a room, to avoid a duplicate line.
+  //
+  // v2.5.0 F4: the tracker is device_tracker.{n} (entity-ids.ts), and the
+  // room is read from its structured `room` attribute — present only while
+  // a mission runs and a room is resolved — instead of filtering display
+  // labels out of the state. The state is a localized display string with
+  // labels in 8 languages ("Docked", "Angedockt", "Stuck", "Dock busy", …);
+  // a sentinel list could never keep up, and a missed label was shown as a
+  // room name. The state is used only as a last resort for a user-renamed
+  // `_position` tracker on integrations that predate the attribute.
   let currentRoomHtml = '';
   const A4_SENTINELS = new Set(['Docked', 'Angedockt', 'Cleaning', 'Unterwegs', 'unknown', 'unavailable']);
   const spatialAlreadyShowsRoom = spatialLineHtml !== '';
-  if (caps.hasPositionTracker && !spatialAlreadyShowsRoom &&
+  const tracker = trackerId(hass, n);
+  if (caps.hasPositionTracker && tracker && !spatialAlreadyShowsRoom &&
       (vacState === 'cleaning' || (hasMissionActive && isMissionActive))) {
-    const room = hass.states[`device_tracker.${n}_position`]?.state;
-    if (room && !A4_SENTINELS.has(room)) {
+    const tState = hass.states[tracker];
+    const attrRoom = tState?.attributes?.room;
+    let room: string | null = null;
+    if (typeof attrRoom === 'string' && attrRoom.trim() !== '') {
+      room = attrRoom;
+    } else if (attrRoom === undefined && tracker.endsWith('_position')) {
+      const legacy = tState?.state;
+      room = legacy && !A4_SENTINELS.has(legacy) ? legacy : null;
+    }
+    if (room) {
       currentRoomHtml = `<div class="rpc-current-room">📍 ${esc(room)}</div>`;
     }
   }
@@ -368,7 +435,11 @@ export function renderHeader(props: HeaderProps): string {
   const spinnerSvg = `<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>`;
 
   const btn = (action: string, label: string, display: string): string => {
-    const isLoading  = loadingAction === action;
+    // v2.5.0: "clean-selected" tracks its own sending state (isSendingClean)
+    // separately from the generic loadingAction system every other button
+    // here uses — runCleanSelected() never set loadingAction, so this
+    // button silently never showed a spinner until this was wired in.
+    const isLoading  = loadingAction === action || (action === 'clean-selected' && isSendingClean);
     const isDisabled = unavailable || anyLoading;
     return `<button class="rpc-btn${isLoading ? ' rpc-btn-loading' : ''}"
       data-action="${action}"
@@ -384,24 +455,31 @@ export function renderHeader(props: HeaderProps): string {
   const demandBlocked = caps.hasDemandBlocked
     && hass.states[`binary_sensor.${n}_demand_clean_blocked`]?.state === 'on';
 
-  if (vacState === 'cleaning' || missionPhase === 'evac') {
-    buttons = btn('pause', 'Pause', '⏸ Pause') + btn('return_home', 'Return home', '🏠 Return home');
+  if (vacState === 'cleaning') {
+    buttons = btn('pause', t(lang, 'header.pause'), `⏸ ${t(lang, 'header.pause')}`) + btn('return_home', t(lang, 'header.returnHome'), `🏠 ${t(lang, 'header.returnHome')}`);
   } else if (vacState === 'paused') {
-    buttons = btn('resume', 'Resume', '▶ Resume')
-            + btn('return_home', 'Return home', '🏠 Return home')
-            + btn('stop', 'Stop', '⏹ Stop');
+    buttons = btn('resume', t(lang, 'header.resume'), `▶ ${t(lang, 'header.resume')}`)
+            + btn('return_home', t(lang, 'header.returnHome'), `🏠 ${t(lang, 'header.returnHome')}`)
+            + btn('stop', t(lang, 'header.stop'), `⏹ ${t(lang, 'header.stop')}`);
   } else if (vacState === 'error') {
-    buttons = btn('return_home', 'Return home', '🏠 Return home') + btn('retry', 'Retry', '🔄 Retry');
+    buttons = btn('return_home', t(lang, 'header.returnHome'), `🏠 ${t(lang, 'header.returnHome')}`) + btn('retry', t(lang, 'header.retry'), `🔄 ${t(lang, 'header.retry')}`);
+  } else if (isEmptyingBin) {
+    // v2.5.0 F2: the dock is emptying the bin (10–20 s, robot on the dock;
+    // the vacuum entity reports `returning`). No action is meaningful in
+    // that window — "Return home" to a docked robot, or "Start" mid-evac,
+    // would both mislead. The pre-2.5.0 branch here (pause/return) never
+    // ran: it compared against the raw `evac`.
   } else if (isRecharging) {
-    buttons = btn('return_home', 'Cancel mission', '✕ Cancel mission');
+    buttons = btn('return_home', t(lang, 'header.cancelMission'), `✕ ${t(lang, 'header.cancelMission')}`);
   } else if (vacState !== 'returning' && !unavailable) {
     if (selectedRoomCount > 0) {
       // v2.0 C7-ROOM-BOUNDS: selection active (via header chip picker or
       // Map tab tap-to-select) — single action replaces Start + Rooms….
-      buttons = btn('clean-selected', 'Start selected rooms', `▶ Start ${selectedRoomCount} selected room${selectedRoomCount !== 1 ? 's' : ''}`);
+      const label = t(lang, 'header.startSelectedRooms', { count: selectedRoomCount });
+      buttons = btn('clean-selected', t(lang, 'header.startSelectedRoomsLabel'), `▶ ${label}`);
     } else {
-      const startLabel = demandBlocked ? '▶ Start anyway' : '▶ Start full clean';
-      buttons = btn('start', 'Start full clean', startLabel);
+      const startLabel = demandBlocked ? `▶ ${t(lang, 'header.startAnyway')}` : `▶ ${t(lang, 'header.startFullClean')}`;
+      buttons = btn('start', t(lang, 'header.startFullClean'), startLabel);
       // "Rooms…" is hidden in companion mode — XVMC owns room selection there.
       // v2.0.2 bug fix: this button opens the multi-select chip picker that
       // calls roomba_plus.clean_room — hard-blocked for non-SMART robots
@@ -411,7 +489,7 @@ export function renderHeader(props: HeaderProps): string {
       // a separate button, not multi-select + clean_room.
       if (config.mode !== 'companion' && caps.hasSmartZones) {
         buttons += `<button class="rpc-btn" data-action="toggle-room-picker" aria-expanded="${roomPickerOpen}">
-          🗺 Rooms…
+          🗺 ${t(lang, 'header.roomsEllipsis')}
         </button>`;
       }
     }
@@ -440,6 +518,7 @@ export function renderHeader(props: HeaderProps): string {
       ${demandHtml}
       ${cleanedRoomsHtml}
       ${buttons ? `<div class="rpc-actions">${buttons}</div>` : ''}
+      ${sendError ? `<div class="rpc-send-error">${esc(sendError)}</div>` : ''}
     </div>
   `;
 }

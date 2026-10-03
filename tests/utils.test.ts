@@ -50,3 +50,54 @@ describe('timeSince()', () => {
     expect(typeof timeSince(iso, 'xx-INVALID')).toBe('string');
   });
 });
+
+// ── v2.5.0 P3 — formatting through HA ───────────────────────────────────────
+import { humanizeSlug, formatState, areaSqftFromEntity, isMetricSystem } from '../src/utils';
+import { makeHass, st } from './helpers';
+
+describe('humanizeSlug()', () => {
+  it('turns a slug into readable text', () => expect(humanizeSlug('bag_full')).toBe('Bag full'));
+  it('leaves an empty string empty', () => expect(humanizeSlug('')).toBe(''));
+});
+
+describe('formatState()', () => {
+  it('uses hass.formatEntityState when HA provides it', () => {
+    const hass = makeHass({ 'sensor.x_readiness': st('lid_open') });
+    hass.formatEntityState = () => 'Deckel offen';
+    expect(formatState(hass, 'sensor.x_readiness')).toBe('Deckel offen');
+  });
+  it('passes an explicit state through to HA', () => {
+    const hass = makeHass({ 'sensor.x_readiness': st('ready') });
+    hass.formatEntityState = (_o, s) => `F(${s})`;
+    expect(formatState(hass, 'sensor.x_readiness', 'bin_full')).toBe('F(bin_full)');
+  });
+  it('falls back to the humanised slug without a formatter, or when it throws', () => {
+    const hass = makeHass({ 'sensor.x_phase': st('washing_pad') });
+    expect(formatState(hass, 'sensor.x_phase')).toBe('Washing pad');
+    hass.formatEntityState = () => { throw new Error('boom'); };
+    expect(formatState(hass, 'sensor.x_phase')).toBe('Washing pad');
+  });
+  it('missing entity → humanised explicit state, or empty', () => {
+    expect(formatState(makeHass(), 'sensor.none', 'bag_full')).toBe('Bag full');
+    expect(formatState(makeHass(), 'sensor.none')).toBe('');
+  });
+});
+
+describe('areaSqftFromEntity()', () => {
+  it('converts m² (integration ≥ 4.x) to ft²', () =>
+    expect(areaSqftFromEntity(st('10', { unit_of_measurement: 'm²' }))).toBeCloseTo(107.64, 1));
+  it('keeps ft² as is', () =>
+    expect(areaSqftFromEntity(st('100', { unit_of_measurement: 'ft²' }))).toBe(100));
+  it('no unit → pre-4.x assumption (ft²)', () => expect(areaSqftFromEntity(st('42'))).toBe(42));
+  it('non-numeric / missing → NaN', () => {
+    expect(areaSqftFromEntity(st('unknown'))).toBeNaN();
+    expect(areaSqftFromEntity(undefined)).toBeNaN();
+  });
+});
+
+describe('isMetricSystem()', () => {
+  const withLength = (length: string) => { const h = makeHass(); h.config = { unit_system: { length } }; return h; };
+  it('HA metric reports "km"', () => expect(isMetricSystem(withLength('km'))).toBe(true));
+  it('HA US customary reports "mi"', () => expect(isMetricSystem(withLength('mi'))).toBe(false));
+  it('"m" is accepted as metric too', () => expect(isMetricSystem(withLength('m'))).toBe(true));
+});

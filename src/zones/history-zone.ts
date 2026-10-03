@@ -1,33 +1,43 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord, MissionExplain, MissionPath, MissionMapPayload } from '../types.js';
-import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, mmToImagePct } from '../heatmap.js';
+import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, coverageExtentFromAttrs, coverageToImagePct, coverageToImagePctNum, coverageFrameStyles } from '../heatmap.js';
 import { renderMissionMapSvg } from '../mission-map.js';
-import { buildCalibrationTransform, calibrationToImagePct, calibrationToImagePctNum, CalibrationPoint } from '../calibration.js';
-import { esc, timeSince } from '../utils.js';
-import { MDI_TO_EMOJI } from '../const.js';
+import { esc, timeSince, areaSqftFromEntity } from '../utils.js';
+import { mapImageId, zoneSelectMapAttr } from '../entity-ids.js';
+import { mdiToEmoji } from '../const.js';
+import { t, resolveLang, WEEKDAY_LABELS } from '../i18n/index.js';
 
 // ── v2.2.0 F1 — anomaly explanation display ──────────────────────────────────
 //
-// anomaly_reason machine keys → friendly labels. Keys mirror the
+// anomaly_reason machine keys → translation keys. Keys mirror the
 // integration's MissionStore._ANOMALY_RECOMMENDATIONS. Unknown future keys
 // degrade to the raw key with underscores replaced — displayed, not hidden,
-// so a new integration-side reason is never silently dropped.
-const EXPLAIN_REASON_LABELS: Record<string, string> = {
-  obstacle_or_blockage: 'Obstacle or blockage',
-  excessive_recharge:   'Excessive recharging',
-  dirt_spike:           'Unusually dirty area',
-  incomplete_coverage:  'Incomplete coverage',
+// so a new integration-side reason is never silently dropped (and never
+// silently untranslated either — an unrecognised key just isn't in this
+// map, same fallback either way).
+const EXPLAIN_REASON_KEYS: Record<string, string> = {
+  obstacle_or_blockage: 'history.explainReasonObstacle',
+  excessive_recharge:   'history.explainReasonRecharge',
+  dirt_spike:           'history.explainReasonDirt',
+  incomplete_coverage:  'history.explainReasonIncomplete',
 };
 
-function explainReasonLabel(reason: string): string {
-  return EXPLAIN_REASON_LABELS[reason] ?? reason.replace(/_/g, ' ');
+function explainReasonLabel(reason: string, lang: string): string {
+  const key = EXPLAIN_REASON_KEYS[reason];
+  return key ? t(lang, key as Parameters<typeof t>[1]) : reason.replace(/_/g, ' ');
 }
 
-export function renderExplainPanel(data: MissionExplain): string {
+export function renderExplainPanel(data: MissionExplain, lang = 'en'): string {
   if (!data.is_anomalous) {
-    return `<div class="rpc-explain-panel rpc-explain-panel--muted">Nothing statistically unusual vs. this robot's own history — the result code above is the whole story.</div>`;
+    return `<div class="rpc-explain-panel rpc-explain-panel--muted">${t(lang, 'history.explainNothingUnusual')}</div>`;
   }
-  const reason = data.anomaly_reason ? explainReasonLabel(data.anomaly_reason) : 'Anomalous mission';
-  const lifted = data.robot_lifted ? `<div class="rpc-explain-lifted">Robot was picked up during this mission.</div>` : '';
+  const reason = data.anomaly_reason ? explainReasonLabel(data.anomaly_reason, lang) : t(lang, 'history.explainAnomalousMission');
+  // v2.5.0 F12: `pick_events` (integration ≥ 4.x) — the counter it reads
+  // (bbrun.nPicks) moves around dock contact and was found NOT to mean the
+  // robot was lifted, so the integration renamed it and kept `robot_lifted`
+  // only as an alias. Read the new key, fall back to the alias, and say what
+  // was measured rather than what was guessed.
+  const picks = data.pick_events ?? data.robot_lifted ?? false;
+  const lifted = picks ? `<div class="rpc-explain-lifted">${t(lang, 'history.explainPickEvents')}</div>` : '';
   const rec = data.recommended_action
     ? `<div class="rpc-explain-rec">${esc(data.recommended_action)}</div>`
     : '';
@@ -40,13 +50,13 @@ export function renderExplainPanel(data: MissionExplain): string {
 }
 
 // ── v2.2.0 F4 — mission path replay display ──────────────────────────────────
-export function renderReplayPanel(data: MissionPath, locale: string): string {
+export function renderReplayPanel(data: MissionPath, locale: string, lang = 'en'): string {
   if (!data.path.length) {
-    return `<div class="rpc-replay-panel rpc-explain-panel--muted">No room-level path recorded for this mission.</div>`;
+    return `<div class="rpc-replay-panel rpc-explain-panel--muted">${t(lang, 'history.replayNoPath')}</div>`;
   }
   const steps = data.path.map(step => {
-    const t = new Date(step.time).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
-    return `<span class="rpc-replay-step"><span class="rpc-replay-time">${t}</span> ${esc(step.room)}</span>`;
+    const time = new Date(step.time).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `<span class="rpc-replay-step"><span class="rpc-replay-time">${time}</span> ${esc(step.room)}</span>`;
   }).join('<span class="rpc-trav-sep">→</span>');
   return `<div class="rpc-replay-panel">${steps}</div>`;
 }
@@ -54,8 +64,8 @@ export function renderReplayPanel(data: MissionPath, locale: string): string {
 // ── v2.3.0 MISSION-MAP — coverage replay display ─────────────────────────────
 // v2.4.0 MISSION-MAP-ROTATE-PARITY: rotate passed through from
 // config.mission_map_rotate, defaulting to 0 (no rotation) when unset.
-export function renderMissionMapPanel(data: MissionMapPayload, rotate: 0 | 90 | 180 | 270 = 0): string {
-  return renderMissionMapSvg(data, rotate);
+export function renderMissionMapPanel(data: MissionMapPayload, rotate: 0 | 90 | 180 | 270 = 0, lang = 'en'): string {
+  return renderMissionMapSvg(data, rotate, lang);
 }
 
 export interface HistoryZoneState {  data: DaySummary[] | null;
@@ -97,7 +107,8 @@ export interface HistoryZoneState {  data: DaySummary[] | null;
 
 function formatArea(sqft: number, useMetric: boolean): string {
   if (useMetric) return `${Math.round(sqft * 0.0929)} m²`;
-  return `${sqft} ft²`;
+  // v2.5.0: rounded — m² sensors arrive converted (areaSqftFromEntity).
+  return `${Math.round(sqft)} ft²`;
 }
 
 /** Return emoji icon for a hazard pin by source type */
@@ -112,8 +123,6 @@ function pinIcon(source: string): string {
 // stuck_wh computation) — deliberately NOT the JS Date.getDay() convention
 // (0=Sunday). Getting this backwards would silently show every pattern one
 // day off.
-const F22_WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
 function formatF22Hour(hour: number): string {
   const period = hour < 12 ? 'am' : 'pm';
   const h12 = hour % 12 === 0 ? 12 : hour % 12;
@@ -124,20 +133,21 @@ function formatF22Hour(hour: number): string {
  *  (robot_learned/keepout pins always carry null here — uniform schema, not
  *  an error; stuck_events pins with stuck_count 3–7 also carry null, the
  *  accepted threshold gap vs. stuck_pattern()'s own 8-count minimum). */
-function formatF22Pattern(h: HazardRecord): string {
+function formatF22Pattern(h: HazardRecord, lang: string): string {
   if (h.dominant_weekday == null || h.dominant_hour == null) return '';
-  const day = F22_WEEKDAY_LABELS[h.dominant_weekday] ?? '';
-  return day ? ` · usually ${day} ~${formatF22Hour(h.dominant_hour)}` : '';
+  const labels = WEEKDAY_LABELS[lang] ?? WEEKDAY_LABELS.en;
+  const day = labels[h.dominant_weekday] ?? '';
+  return day ? ` · ${t(lang, 'history.pinUsuallyPattern', { day, hour: formatF22Hour(h.dominant_hour) })}` : '';
 }
 
 /** Build a tooltip string for a hazard pin */
-function buildPinTip(h: HazardRecord): string {
+function buildPinTip(h: HazardRecord, lang: string): string {
   const room = h.room_name ? ` · ${h.room_name}` : '';
   if (h.source === 'stuck_events')
-    return `Stuck hotspot${h.stuck_count ? ` (${h.stuck_count}×)` : ''}${room}${formatF22Pattern(h)}`;
-  if (h.source === 'robot_learned') return `Robot-detected obstacle${room}`;
-  if (h.source === 'keepout')       return `Keep-out zone${room}`;
-  return 'Hazard';
+    return `${t(lang, 'history.pinStuckHotspot')}${h.stuck_count ? ` (${h.stuck_count}×)` : ''}${room}${formatF22Pattern(h, lang)}`;
+  if (h.source === 'robot_learned') return `${t(lang, 'history.pinRobotObstacle')}${room}`;
+  if (h.source === 'keepout')       return `${t(lang, 'history.pinKeepoutZone')}${room}`;
+  return t(lang, 'history.pinHazard');
 }
 
 export function renderHistoryZone(
@@ -151,6 +161,7 @@ export function renderHistoryZone(
   if (config.show_history === false) return '';
 
   const n    = robotName;
+  const lang = resolveLang(hass.language);
   const days = config.history_days ?? 28;
   const unit = config.area_unit ?? 'auto';
   const useMetric = unit === 'm2' || (unit === 'auto' && isMetric);
@@ -159,7 +170,9 @@ export function renderHistoryZone(
   // F11/F12: vacuum entity attributes — reflect the most recent mission.
   // last_cleaned_rooms is a live attribute; it is NOT per-mission historical data.
   const vacAttrs     = hass.states[`vacuum.${n}`]?.attributes ?? {};
-  const regionIcons  = (vacAttrs.region_icons  ?? {}) as Record<string, string>;
+  // v2.5.0: region_icons lives on the zone select (entity-ids.ts), never on
+  // the vacuum — the room chips here never had icons before.
+  const regionIcons  = zoneSelectMapAttr<string>(hass, n, 'region_icons');
   const lastRooms    = (vacAttrs.last_cleaned_rooms ?? []) as string[];
   const missionDest  = (vacAttrs.mission_destination ?? null) as string | null;
 
@@ -176,8 +189,8 @@ export function renderHistoryZone(
 
   let summaryHtml = '';
   const summaryParts: string[] = [];
-  if (streakVal > 0) summaryParts.push(`🔥 ${streakVal}-day streak`);
-  if (!isNaN(completionVal)) summaryParts.push(`${completionVal}% completion rate`);
+  if (streakVal > 0) summaryParts.push(`🔥 ${t(lang, 'history.streak', { count: streakVal })}`);
+  if (!isNaN(completionVal)) summaryParts.push(t(lang, 'history.completionRate', { pct: completionVal }));
 
   // F6a — Speed trend indicator (v2.1+). Corrected from spec: belongs in History zone,
   // not Status zone — it's a 14-day analytical signal, not a real-time operational one.
@@ -188,8 +201,8 @@ export function renderHistoryZone(
   if (caps.hasCleaningSpeedTrend) {
     const perfEntity = hass.states[`sensor.${n}_cleaning_performance`];
     const trend = perfEntity?.attributes?.trend;
-    if (trend === 'declining') summaryParts.push('<span class="rpc-trend-declining">↓ Speed declining</span>');
-    else if (trend === 'improving') summaryParts.push('<span class="rpc-trend-improving">↑ Speed improving</span>');
+    if (trend === 'declining') summaryParts.push(`<span class="rpc-trend-declining">↓ ${t(lang, 'history.speedDeclining')}</span>`);
+    else if (trend === 'improving') summaryParts.push(`<span class="rpc-trend-improving">↑ ${t(lang, 'history.speedImproving')}</span>`);
     // 'stable': no indicator — normal state, no noise
   }
 
@@ -202,8 +215,8 @@ export function renderHistoryZone(
   // F7 — Tab toggle (Calendar / Coverage): only when hasCoverageImage
   const tabToggleHtml = (caps.hasCoverageImage && !suppressSubTabToggle) ? `
     <div class="rpc-history-tabs">
-      <button class="rpc-tab${historyTab === 'calendar' ? ' active' : ''}" data-history-tab="calendar">Calendar</button>
-      <button class="rpc-tab${historyTab === 'coverage' ? ' active' : ''}" data-history-tab="coverage">Coverage</button>
+      <button class="rpc-tab${historyTab === 'calendar' ? ' active' : ''}" data-history-tab="calendar">${t(lang, 'history.tabCalendar')}</button>
+      <button class="rpc-tab${historyTab === 'coverage' ? ' active' : ''}" data-history-tab="coverage">${t(lang, 'history.tabCoverage')}</button>
     </div>` : '';
 
   // F7 — Coverage panel (replaces heatmap when tab='coverage')
@@ -211,42 +224,63 @@ export function renderHistoryZone(
   if (caps.hasCoverageImage && historyTab === 'coverage') {
     const imageEntity = hass.states[`image.${n}_coverage_map`];
     const attrs       = imageEntity?.attributes ?? {};
-    const xMin        = attrs['x_min_mm'] as number | undefined;
-    const xMax        = attrs['x_max_mm'] as number | undefined;
-    const yMin        = attrs['y_min_mm'] as number | undefined;
-    const yMax        = attrs['y_max_mm'] as number | undefined;
     const entityPic   = attrs['entity_picture'] as string | undefined;
     const lastEnd     = attrs['last_mission_end'] as string | undefined;
-    const hasExtent   = xMin != null && xMax != null && yMin != null && yMax != null;
+    // v2.5.0 F11: the picture's exact frame (heatmap.ts coverageToImagePct).
+    const extent      = coverageExtentFromAttrs(attrs);
+    const hasExtent   = extent !== null;
+    // v2.5.0 F11 (#20): crop to the grid's content box, capped by viewport.
+    const frame       = coverageFrameStyles(extent);
 
-    // All three pin sources renderable (Q_coord resolved: Q6+Q_new confirmed with v2.3.0)
-    // robot_learned/keepout centroids use UMF space — UmfAligner provides pose transform.
-    // TODO v2.0: keepout polygon outlines (centroid pins only here)
+    // v2.5.0 F11: only pins in pose space can be placed on this picture
+    // (GridStore cells, dock-relative mm). Integration ≥ 4.2.19 says which
+    // frame each pin is in (`space`): obstacles and keep-outs from the cloud
+    // map are converted once the map is aligned (`pose`), else stay in map
+    // units (`umf`). Older integrations send no `space`; there only
+    // `stuck_events` are pose space — the others were always in map units
+    // and landed in the wrong place.
+    //
+    // Where the zone overlay is drawn (image.*_map `zones`), it already
+    // shows the same obstacles and keep-outs, so their pins are left out
+    // rather than drawn twice.
+    const zoneOverlayDrawn = caps.hasAlignment && caps.hasZoneOverlays && hasExtent;
+    const posePins = hazards.filter(h => {
+      const space = h.space ?? (h.source === 'stuck_events' ? 'pose' : 'umf');
+      if (space !== 'pose') return false;
+      return h.source === 'stuck_events' || !zoneOverlayDrawn;
+    });
     const pinHtml = hasExtent
-      ? hazards.map(h => {
-          const pos  = mmToImagePct(h.x_mm, h.y_mm, xMin!, xMax!, yMin!, yMax!);
-          const tip  = esc(buildPinTip(h));
+      ? posePins.map(h => {
+          const pos  = coverageToImagePct(extent!, h.x_mm, h.y_mm);
+          const tip  = esc(buildPinTip(h, lang));
           const icon = pinIcon(h.source);
           return `<div class="rpc-hazard-pin rpc-pin-${h.source}" style="left:${pos.left};top:${pos.top}" title="${tip}" aria-label="${tip}">${icon}</div>`;
         }).join('')
       : '';
 
     const noExtentNote = !hasExtent && entityPic
-      ? `<div class="rpc-coverage-note">Spatial overlay unavailable — grid accumulating</div>`
+      ? `<div class="rpc-coverage-note">${t(lang, 'history.spatialOverlayUnavailable')}</div>`
       : '';
 
     const updatedLine = lastEnd
-      ? `<div class="rpc-coverage-updated">Updated ${timeSince(lastEnd, hass.language)}</div>`
+      ? `<div class="rpc-coverage-updated">${t(lang, 'history.updated', { time: timeSince(lastEnd, hass.language) })}</div>`
       : '';
 
-    // Build legend — only show entries for pin sources that are present
-    const hasPinStuck   = hazards.some(h => h.source === 'stuck_events');
-    const hasPinRobot   = hazards.some(h => h.source === 'robot_learned');
-    const hasPinKeeout  = hazards.some(h => h.source === 'keepout');
+    // Build legend — only show entries for what the picture actually shows:
+    // pins (emoji) or, for obstacles/keep-outs, the zone overlay (swatches).
+    const hasPinStuck   = hasExtent && posePins.some(h => h.source === 'stuck_events');
+    const pinRobot      = hasExtent && posePins.some(h => h.source === 'robot_learned');
+    const pinKeepout    = hasExtent && posePins.some(h => h.source === 'keepout');
+    const zoneTypes     = new Set((zoneOverlayDrawn
+      ? ((hass.states[mapImageId(hass, n) ?? '']?.attributes?.['zones'] ?? []) as { type?: string }[])
+      : []).map(z => z?.type));
     const legendPins    = [
-      hasPinStuck  ? '<span>📍</span> Stuck hotspot'      : '',
-      hasPinRobot  ? '<span>🚧</span> Robot obstacle'      : '',
-      hasPinKeeout ? '<span>🚫</span> Keep-out zone'       : '',
+      hasPinStuck  ? `<span>📍</span> ${t(lang, 'history.pinStuckHotspot')}` : '',
+      pinRobot     ? `<span>🚧</span> ${t(lang, 'history.legendRobotObstacle')}` : '',
+      pinKeepout   ? `<span>🚫</span> ${t(lang, 'history.pinKeepoutZone')}` : '',
+      // Swatches in the overlay's own styling (amber dot / dashed red area).
+      zoneTypes.has('observed') ? `<span class="rpc-legend-swatch rpc-legend-observed"></span> ${t(lang, 'history.legendRobotObstacle')}` : '',
+      zoneTypes.has('keepout')  ? `<span class="rpc-legend-swatch rpc-legend-keepout"></span> ${t(lang, 'history.pinKeepoutZone')}` : '',
     ].filter(Boolean).join(' ');
 
     // v2.3.0 F22 — accepted threshold gap, not a bug: stuck_pattern()'s own
@@ -259,7 +293,7 @@ export function renderHistoryZone(
       && h.stuck_count >= 3 && h.stuck_count < 8
       && h.dominant_weekday == null);
     const f22FootnoteHtml = hasF22ThresholdGap
-      ? `<div class="rpc-coverage-note">Time patterns need ≥8 stuck events at one spot</div>`
+      ? `<div class="rpc-coverage-note">${t(lang, 'history.f22Footnote')}</div>`
       : '';
 
     // v2.0 C7-ROOM-BOUNDS: room polygon overlays + tap-to-select.
@@ -292,20 +326,37 @@ export function renderHistoryZone(
     let zoneOverlayHtml = '';
     let doorMarkerHtml = '';
     let furnitureHtml = '';
-    if (caps.hasAlignment) {
-      const mapAttrs = hass.states[`image.${n}_map`]?.attributes ?? {};
+    //
+    // v2.5.0 F11 — RESOLVED: the two pictures do NOT share a frame
+    // (image.*_map is a 600 px render with its own fit; the coverage map is
+    // GridStore's square heatmap), so calibration_points could not place
+    // anything on this picture. Both data sets are in the robot's pose-space
+    // millimetres, though, so the overlay now uses the coverage picture's
+    // own exact transform — the same one the hazard pins use. calibration.ts
+    // stays for 3.0.0, where the Map tab moves onto image.*_rooms_map.
+    if (caps.hasAlignment && extent) {
+      const mapId = mapImageId(hass, n);
+      const mapAttrs = (mapId ? hass.states[mapId]?.attributes : undefined) ?? {};
       const rooms = (mapAttrs['rooms'] ?? {}) as Record<string, {
         outline: [number, number][]; name: string; room_id: string; icon: string; x: number; y: number;
       }>;
-      const calPoints = mapAttrs['calibration_points'] as CalibrationPoint[] | undefined;
-      const cal = Array.isArray(calPoints) ? buildCalibrationTransform(calPoints) : null;
+      const toPctNum = (x: number, y: number) => coverageToImagePctNum(extent, x, y);
+      const toPct    = (x: number, y: number) => coverageToImagePct(extent, x, y);
+      // Rooms the robot never visited lie outside the grid's extent. SVG
+      // polygons clip at the picture edge on their own; absolutely
+      // positioned labels and markers would spill past it, so they are
+      // dropped when their anchor falls outside the picture.
+      const inFrame  = (x: number, y: number) => {
+        const p = toPctNum(x, y);
+        return p.x >= 0 && p.x <= 100 && p.y >= 0 && p.y <= 100;
+      };
 
-      if (cal) {
+      {
         const polygons = Object.values(rooms).map(room => {
           if (!room.outline || room.outline.length < 3) return '';
           const pointsAttr = room.outline
             .map(([x, y]) => {
-              const p = calibrationToImagePctNum(cal, x, y);
+              const p = toPctNum(x, y);
               return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
             })
             .join(' ');
@@ -332,15 +383,8 @@ export function renderHistoryZone(
         // or an EPHEMERAL robot with no CloudSmartZoneSelect entity at all.
         // All of these degrade to the name-only label exactly as before —
         // never an error, never a placeholder.
-        const regionAreasM2 = (() => {
-          const selectId = caps.hasSmartZones
-            ? `select.${n}_smart_zone_select`
-            : `select.${n}_zone_select`;
-          const raw = hass.states[selectId]?.attributes?.['region_areas_m2'];
-          return (raw && typeof raw === 'object' && !Array.isArray(raw))
-            ? raw as Record<string, number>
-            : {} as Record<string, number>;
-        })();
+        // v2.5.0 F3: from the resolved zone select (cloud_zone_* with cloud).
+        const regionAreasM2 = zoneSelectMapAttr<number>(hass, n, 'region_areas_m2');
 
         // v2.4.0 ROOM-ACCESS — per-room accessibility score as a label
         // tooltip (title attribute), same lightweight approach as door
@@ -373,16 +417,16 @@ export function renderHistoryZone(
         const limitingFactorLabel = (factor: string | null | undefined): string => {
           if (factor == null) return '';
           switch (factor) {
-            case 'obstacle_density': return 'obstacle density';
-            case 'narrow_passages':  return 'narrow passages';
-            case 'coverage_gap':     return 'coverage gaps';
+            case 'obstacle_density': return t(lang, 'history.limitingFactorObstacle');
+            case 'narrow_passages':  return t(lang, 'history.limitingFactorNarrow');
+            case 'coverage_gap':     return t(lang, 'history.limitingFactorCoverage');
             default:                 return factor;
           }
         };
 
-        const labels = Object.values(rooms).map(room => {
-          const pos    = calibrationToImagePct(cal, room.x, room.y);
-          const emoji  = MDI_TO_EMOJI[room.icon] ?? '';
+        const labels = Object.values(rooms).filter(room => inFrame(room.x, room.y)).map(room => {
+          const pos    = toPct(room.x, room.y);
+          const emoji  = mdiToEmoji(room.icon);
           const selected = mapSelectedRooms?.has(room.name) ?? false;
           const areaM2 = regionAreasM2[room.name];
           const areaSuffix = typeof areaM2 === 'number' && !isNaN(areaM2)
@@ -391,7 +435,7 @@ export function renderHistoryZone(
           const access = roomAccessScores[room.name];
           const factorLabel = access ? limitingFactorLabel(access.limiting_factor) : '';
           const accessTip = access
-            ? `${room.name} — access ${Math.round(access.score)}/100${factorLabel ? ` (limited by ${factorLabel})` : ''}`
+            ? `${t(lang, 'history.accessTip', { name: room.name, score: Math.round(access.score) })}${factorLabel ? t(lang, 'history.limitedBySuffix', { factor: factorLabel }) : ''}`
             : '';
           const tipAttr = accessTip ? ` title="${esc(accessTip)}" aria-label="${esc(accessTip)}"` : '';
           return `<div class="rpc-room-label${selected ? ' rpc-room-label--selected' : ''}"
@@ -400,7 +444,9 @@ export function renderHistoryZone(
           </div>`;
         }).join('');
 
-        roomOverlayHtml = `
+        // v2.5.0: no rooms (map entity absent or not aligned) → no empty
+        // overlay layer; previously implied by the missing calibration.
+        roomOverlayHtml = Object.keys(rooms).length === 0 ? '' : `
           <svg class="rpc-room-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
             ${polygons}
           </svg>
@@ -419,15 +465,15 @@ export function renderHistoryZone(
           )[];
           const zonePieces = zones.map(z => {
             if (z.type === 'observed') {
-              const p = calibrationToImagePctNum(cal, z.x, z.y);
-              return `<circle class="rpc-zone-observed" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2"><title>Robot-detected obstacle</title></circle>`;
+              const p = toPctNum(z.x, z.y);
+              return `<circle class="rpc-zone-observed" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2"><title>${t(lang, 'history.pinRobotObstacle')}</title></circle>`;
             }
             if (z.type === 'keepout' && z.polygon.length >= 3) {
               const pts = z.polygon.map(([x, y]) => {
-                const p = calibrationToImagePctNum(cal, x, y);
+                const p = toPctNum(x, y);
                 return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
               }).join(' ');
-              return `<polygon class="rpc-zone-keepout" points="${pts}"><title>Keep-out zone</title></polygon>`;
+              return `<polygon class="rpc-zone-keepout" points="${pts}"><title>${t(lang, 'history.pinKeepoutZone')}</title></polygon>`;
             }
             return '';
           }).join('');
@@ -440,9 +486,9 @@ export function renderHistoryZone(
         if (caps.hasDoorMarkers) {
           const markers = (mapAttrs['door_markers'] ?? []) as
             { id: string; cx: number; cy: number; label: string; mission_count: number }[];
-          doorMarkerHtml = markers.map(m => {
-            const pos = calibrationToImagePct(cal, m.cx, m.cy);
-            const tip = esc(`${m.label} (seen ${m.mission_count}×)`);
+          doorMarkerHtml = markers.filter(m => inFrame(m.cx, m.cy)).map(m => {
+            const pos = toPct(m.cx, m.cy);
+            const tip = esc(t(lang, 'history.doorMarkerSeen', { label: m.label, count: m.mission_count }));
             return `<div class="rpc-door-marker" style="left:${pos.left};top:${pos.top}" title="${tip}" aria-label="${tip}">🚪</div>`;
           }).join('');
         }
@@ -452,9 +498,10 @@ export function renderHistoryZone(
         // just a location — verified against source).
         if (caps.hasFurnitureShadows) {
           const candidates = (mapAttrs['furniture_candidates'] ?? []) as { x_mm: number; y_mm: number }[];
-          furnitureHtml = candidates.map(c => {
-            const pos = calibrationToImagePct(cal, c.x_mm, c.y_mm);
-            return `<div class="rpc-furniture-shadow" style="left:${pos.left};top:${pos.top}" title="Possible furniture change" aria-label="Possible furniture change"></div>`;
+          furnitureHtml = candidates.filter(c => inFrame(c.x_mm, c.y_mm)).map(c => {
+            const pos = toPct(c.x_mm, c.y_mm);
+            const tip = esc(t(lang, 'history.possibleFurnitureChange'));
+            return `<div class="rpc-furniture-shadow" style="left:${pos.left};top:${pos.top}" title="${tip}" aria-label="${tip}"></div>`;
           }).join('');
         }
       }
@@ -462,8 +509,8 @@ export function renderHistoryZone(
 
     coveragePanelHtml = entityPic ? `
       <div class="rpc-coverage-panel">
-        <div class="rpc-coverage-image-wrap">
-          <img class="rpc-coverage-img" src="${entityPic}" alt="Coverage map" />
+        <div class="rpc-coverage-image-wrap" style="${frame.wrap}">
+          <img class="rpc-coverage-img" style="${frame.img}" src="${entityPic}" alt="${t(lang, 'history.coverageMapAlt')}" />
           ${roomOverlayHtml}
           ${zoneOverlayHtml}
           ${doorMarkerHtml}
@@ -472,26 +519,26 @@ export function renderHistoryZone(
         </div>
         ${noExtentNote}
         <div class="rpc-coverage-legend">
-          <span style="color:var(--rpc-green)">●</span> High coverage
-          <span style="color:var(--rpc-grey-mid,#9ca3af)">●</span> Rarely cleaned
+          <span style="color:var(--rpc-green)">●</span> ${t(lang, 'history.highCoverage')}
+          <span style="color:var(--rpc-grey-mid,#9ca3af)">●</span> ${t(lang, 'history.rarelyCleaned')}
           ${legendPins}
         </div>
         ${f22FootnoteHtml}
         ${updatedLine}
-      </div>` : `<div class="rpc-history-error">Coverage map unavailable</div>`;
+      </div>` : `<div class="rpc-history-error">${t(lang, 'history.coverageMapUnavailable')}</div>`;
   }
 
   // Heatmap area
   let heatmapHtml = '';
   if (state.loading && !state.data) {
-    heatmapHtml = renderSkeletonHeatmap(Math.ceil(days / 7));
+    heatmapHtml = renderSkeletonHeatmap(Math.ceil(days / 7), lang);
   } else if (state.error) {
     heatmapHtml = `<div class="rpc-history-error">${esc(state.error)}</div>`;
   } else if (state.data) {
-    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language, caps.hasDirtDensity);
+    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language, caps.hasDirtDensity, lang);
     // Show partial message if API returned fewer calendar days than requested
     if (state.data.length < days) {
-      heatmapHtml += `<div class="rpc-history-partial">Showing ${state.data.length} of ${days} days — full history builds over time</div>`;
+      heatmapHtml += `<div class="rpc-history-partial">${t(lang, 'history.partialDays', { shown: state.data.length, days })}</div>`;
     }
   }
 
@@ -503,7 +550,7 @@ export function renderHistoryZone(
     if (pzEntity && pzEntity.state !== 'unknown' && pzEntity.state !== 'unavailable') {
       const count = stuckEntity ? parseInt(stuckEntity.state, 10) : 0;
       if (count > 0) {
-        problemHtml = `<div class="rpc-problem-zone">⚠ ${esc(pzEntity.state)} — stuck ${count}× in 30 days</div>`;
+        problemHtml = `<div class="rpc-problem-zone">⚠ ${t(lang, 'history.problemZone', { zone: esc(pzEntity.state), count })}</div>`;
       }
     }
   }
@@ -521,7 +568,7 @@ export function renderHistoryZone(
     if (missions === null) {
       missionRows = ''; // still loading (shouldn't happen)
     } else if (summary && summary.total === 0) {
-      missionRows = '<div class="rpc-day-empty">No missions this day</div>';
+      missionRows = `<div class="rpc-day-empty">${t(lang, 'history.noMissionsThisDay')}</div>`;
     } else if (missions.length > 0) {
       // Real per-mission data from API
       missionRows = missions.map((m, index) => {
@@ -563,12 +610,12 @@ export function renderHistoryZone(
         const zones = m.zones?.map(z => esc(z)).join(' · ') ?? '';
         // C2 — dirt events (opt-in, requires integration ≥ v2.0 with dirt_events in record)
         const dirtPart = config.show_dirt_events && m.dirt_events != null && m.dirt_events > 0
-          ? `${m.dirt_events} dirt event${m.dirt_events !== 1 ? 's' : ''}`
+          ? t(lang, 'history.dirtEvents', { count: m.dirt_events })
           : '';
         const meta = [zones, dirtPart].filter(Boolean).join(' · ');
         // F1 spec — demand initiator badge: robot cleaned because floor was dirty
         const demandBadge = m.initiator === 'demand'
-          ? `<span class="rpc-initiator-badge">demand</span>`
+          ? `<span class="rpc-initiator-badge">${t(lang, 'history.demandBadge')}</span>`
           : '';
 
         // F6b — WiFi signal display (v2.1+ cloud records with wifi_signal array).
@@ -591,11 +638,11 @@ export function renderHistoryZone(
           if (isHistogram) {
             const quality = wifiQualityFromHistogram(m.wifi_signal);
             if (quality !== null) {
-              wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal quality: ${quality}% average during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${quality}% avg</span></div>`;
+              wifiHtml = `<div class="rpc-day-wifi" aria-label="${t(lang, 'history.wifiQualityLabel', { pct: quality })}"><span aria-hidden="true">📶</span>${sparkSvg}<span>${t(lang, 'history.wifiAvg', { pct: quality })}</span></div>`;
             }
           } else {
             const minWifi = Math.min(...barHeights);
-            wifiHtml = `<div class="rpc-day-wifi" aria-label="Wi-Fi signal: minimum ${minWifi}% during mission"><span aria-hidden="true">📶</span>${sparkSvg}<span>${minWifi}% min</span></div>`;
+            wifiHtml = `<div class="rpc-day-wifi" aria-label="${t(lang, 'history.wifiMinLabel', { pct: minWifi })}"><span aria-hidden="true">📶</span>${sparkSvg}<span>${t(lang, 'history.wifiMin', { pct: minWifi })}</span></div>`;
           }
         }
 
@@ -607,11 +654,11 @@ export function renderHistoryZone(
         if (isLastMissionToday && lastRooms.length > 0) {
           const chips = lastRooms.map(name => {
             const mdi  = regionIcons[name];
-            const icon = mdi ? (MDI_TO_EMOJI[mdi] ?? '') : '';
+            const icon = mdiToEmoji(mdi);
             return `<span class="rpc-trav-room">${icon ? icon + '\u00a0' : ''}${esc(name)}</span>`;
           }).join('<span class="rpc-trav-sep">→</span>');
           const destLine = missionDest
-            ? `<div class="rpc-mission-dest-popover">→ Final: ${esc(missionDest)}</div>`
+            ? `<div class="rpc-mission-dest-popover">${t(lang, 'history.finalDest', { dest: esc(missionDest) })}</div>`
             : '';
           sequenceHtml = `<div class="rpc-traversal-row">${chips}</div>${destLine}`;
         }
@@ -632,7 +679,7 @@ export function renderHistoryZone(
         let alignmentNote = '';
         if (m.alignment_confidence != null && m.alignment_confidence < 0.85) {
           const confPct = Math.round(m.alignment_confidence * 100);
-          alignmentNote = `<div class="rpc-alignment-note">* Coverage estimates (alignment confidence: ${confPct}%)</div>`;
+          alignmentNote = `<div class="rpc-alignment-note">${t(lang, 'history.alignmentNote', { pct: confPct })}</div>`;
         }
 
         // v2.2.0 F1 — "Why?" explanation (integration ≥ 3.2.0 ANOMALY-EXPLAIN).
@@ -663,15 +710,15 @@ export function renderHistoryZone(
         let explainHtml = '';
         if (tier !== 'success') {
           const open = state.openExplain?.missionId === m.id ? state.openExplain : null;
-          const btn = `<button class="rpc-explain-btn" data-explain="${esc(m.id)}" aria-expanded="${!!open}">Why?</button>`;
+          const btn = `<button class="rpc-explain-btn" data-explain="${esc(m.id)}" aria-expanded="${!!open}">${t(lang, 'history.whyButton')}</button>`;
           let panel = '';
           if (open) {
             if (open.error) {
-              panel = `<div class="rpc-explain-panel rpc-explain-panel--muted">Explanation not available for this mission.</div>`;
+              panel = `<div class="rpc-explain-panel rpc-explain-panel--muted">${t(lang, 'history.explainNotAvailable')}</div>`;
             } else if (open.data === null) {
-              panel = `<div class="rpc-explain-panel rpc-explain-panel--muted">Analysing…</div>`;
+              panel = `<div class="rpc-explain-panel rpc-explain-panel--muted">${t(lang, 'history.analysing')}</div>`;
             } else {
-              panel = renderExplainPanel(open.data);
+              panel = renderExplainPanel(open.data, lang);
             }
           }
           explainHtml = `${btn}${panel}`;
@@ -686,15 +733,15 @@ export function renderHistoryZone(
         let replayHtml = '';
         if (m.n_mssn != null) {
           const open = state.openReplay?.nMssn === m.n_mssn ? state.openReplay : null;
-          const btn = `<button class="rpc-explain-btn" data-replay="${m.n_mssn}" aria-expanded="${!!open}">Route</button>`;
+          const btn = `<button class="rpc-explain-btn" data-replay="${m.n_mssn}" aria-expanded="${!!open}">${t(lang, 'history.routeButton')}</button>`;
           let panel = '';
           if (open) {
             if (open.error) {
-              panel = `<div class="rpc-replay-panel rpc-explain-panel--muted">Path not available for this mission.</div>`;
+              panel = `<div class="rpc-replay-panel rpc-explain-panel--muted">${t(lang, 'history.pathNotAvailable')}</div>`;
             } else if (open.data === null) {
-              panel = `<div class="rpc-replay-panel rpc-explain-panel--muted">Loading…</div>`;
+              panel = `<div class="rpc-replay-panel rpc-explain-panel--muted">${t(lang, 'history.loading')}</div>`;
             } else {
-              panel = renderReplayPanel(open.data, hass.language);
+              panel = renderReplayPanel(open.data, hass.language, lang);
             }
           }
           replayHtml = `${btn}${panel}`;
@@ -727,17 +774,17 @@ export function renderHistoryZone(
         let mapHtml = '';
         if (m.n_mssn != null) {
           const open = state.openMissionMap?.recordId === m.id ? state.openMissionMap : null;
-          const btn = `<button class="rpc-explain-btn" data-map="${esc(m.id)}" aria-expanded="${!!open}">Map</button>`;
+          const btn = `<button class="rpc-explain-btn" data-map="${esc(m.id)}" aria-expanded="${!!open}">${t(lang, 'history.mapButton')}</button>`;
           let panel = '';
           if (open) {
             if (open.status === 'absent') {
-              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">No coverage map for this mission.</div>`;
+              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">${t(lang, 'history.noCoverageMap')}</div>`;
             } else if (open.status === 'error') {
-              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">Couldn't load the map — try again.</div>`;
+              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">${t(lang, 'history.couldntLoadMap')}</div>`;
             } else if (open.data === null) {
-              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">Loading…</div>`;
+              panel = `<div class="rpc-map-panel rpc-explain-panel--muted">${t(lang, 'history.loading')}</div>`;
             } else {
-              panel = renderMissionMapPanel(open.data, config.mission_map_rotate ?? 0);
+              panel = renderMissionMapPanel(open.data, config.mission_map_rotate ?? 0, lang);
             }
           }
           mapHtml = `${btn}${panel}`;
@@ -765,9 +812,9 @@ export function renderHistoryZone(
       const areaStr = summary.area_sqft !== null ? formatArea(summary.area_sqft, useMetric) : null;
       missionRows = `
         <div class="rpc-day-aggregate">
-          <div>${summary.total} mission${summary.total > 1 ? 's' : ''} · ${esc(summary.result)}
-            ${areaStr ? ` · ${areaStr} total` : ''}</div>
-          <div class="rpc-day-no-detail">Per-mission detail not available</div>
+          <div>${t(lang, 'history.aggregateMissionCount', { count: summary.total })} · ${esc(summary.result)}
+            ${areaStr ? t(lang, 'history.aggregateAreaTotal', { area: areaStr }) : ''}</div>
+          <div class="rpc-day-no-detail">${t(lang, 'history.noPerMissionDetail')}</div>
         </div>`;
     }
 
@@ -776,11 +823,11 @@ export function renderHistoryZone(
       <div class="rpc-popover rpc-day-popover">
         <div class="rpc-popover-header">
           <span>${esc(dateLabel)}</span>
-          <button class="rpc-popover-close" data-close-day="true" aria-label="Close">×</button>
+          <button class="rpc-popover-close" data-close-day="true" aria-label="${t(lang, 'history.close')}">×</button>
         </div>
         <div class="rpc-popover-divider"></div>
         ${missionCount > 0 && missions && missions.length > 0
-          ? `<div class="rpc-day-count">${missionCount} mission${missionCount > 1 ? 's' : ''}</div>`
+          ? `<div class="rpc-day-count">${t(lang, 'history.aggregateMissionCount', { count: missionCount })}</div>`
           : ''}
         ${missionRows}
       </div>
@@ -813,9 +860,9 @@ export function renderHistoryZone(
       const raw = analyticsEntity?.attributes?.time_h;
       return typeof raw === 'number' ? raw : NaN;
     })();
-    // cleaning_analytics_30d state is m² (cloud API is metric) — pass raw value
-    // and always format as m² regardless of user unit preference.
-    const areaM2   = analyticsEntity ? parseFloat(analyticsEntity.state) : NaN;
+    // v2.5.0: honour the sensor's unit (m², or ft² if HA converted it) and
+    // show it in the user's unit like every other area in the card.
+    const areaSqft = areaSqftFromEntity(analyticsEntity);
 
     // v2.2.0 A2 — lifetime dirt-detection counters (integration ≥ 3.0,
     // i/s-series bbrun/runtimeStats fields). All three sensors are
@@ -834,34 +881,34 @@ export function renderHistoryZone(
     const piezo   = numState(`sensor.${n}_piezo_dirt_detections`);
     const scrubs  = numState(`sensor.${n}_scrubs_count`);
 
-    const hasAny   = !isNaN(missions) || !isNaN(hours) || !isNaN(areaM2)
+    const hasAny   = !isNaN(missions) || !isNaN(hours) || !isNaN(areaSqft)
       || !isNaN(optical) || !isNaN(piezo) || !isNaN(scrubs);
 
     if (hasAny) {
       const dirtParts = [
-        !isNaN(optical) ? `${optical.toLocaleString()} optical` : '',
-        !isNaN(piezo)   ? `${piezo.toLocaleString()} piezo` : '',
-        !isNaN(scrubs)  ? `${scrubs.toLocaleString()} scrub events` : '',
+        !isNaN(optical) ? t(lang, 'history.dirtOptical', { count: optical.toLocaleString() }) : '',
+        !isNaN(piezo)   ? t(lang, 'history.dirtPiezo', { count: piezo.toLocaleString() }) : '',
+        !isNaN(scrubs)  ? t(lang, 'history.dirtScrubEvents', { count: scrubs.toLocaleString() }) : '',
       ].filter(Boolean);
       const dirtLine = dirtParts.length
         ? `<div class="rpc-lifetime-stats rpc-lifetime-dirt">
             <span class="rpc-lifetime-arrow">→</span>
-            <span>Dirt detect: ${dirtParts.join(' · ')}</span>
+            <span>${t(lang, 'history.dirtDetectLabel', { parts: dirtParts.join(' · ') })}</span>
           </div>`
         : '';
 
       const expandedContent = state.lifetimeExpanded ? `
         <div class="rpc-lifetime-stats">
           <span class="rpc-lifetime-arrow">→</span>
-          ${!isNaN(missions) ? `<span>${missions.toLocaleString()} missions</span>` : ''}
-          ${!isNaN(areaM2)   ? `<span>${areaM2.toLocaleString()} m²</span>` : ''}
-          ${!isNaN(hours)    ? `<span>${hours.toLocaleString()} h (30 d)</span>` : ''}
+          ${!isNaN(missions) ? `<span>${t(lang, 'history.lifetimeMissions', { count: missions.toLocaleString() })}</span>` : ''}
+          ${!isNaN(areaSqft) ? `<span>${formatArea(areaSqft, useMetric)}</span>` : ''}
+          ${!isNaN(hours)    ? `<span>${t(lang, 'history.lifetimeHours', { hours: hours.toLocaleString() })}</span>` : ''}
         </div>${dirtLine}` : '';
 
       lifetimeHtml = `
         <div class="rpc-lifetime-divider"></div>
         <button class="rpc-lifetime-toggle" data-lifetime-toggle aria-expanded="${state.lifetimeExpanded}">
-          Stats ${state.lifetimeExpanded ? '▲' : '▼'}
+          ${t(lang, 'history.statsToggle')} ${state.lifetimeExpanded ? '▲' : '▼'}
         </button>
         ${expandedContent}
       `;
@@ -870,7 +917,7 @@ export function renderHistoryZone(
 
   return `
     <div class="rpc-zone rpc-zone6">
-      ${!isMapContext ? `<div class="rpc-zone-header">LAST ${days} DAYS</div>` : ''}
+      ${!isMapContext ? `<div class="rpc-zone-header">${t(lang, 'history.zoneHeaderDays', { days })}</div>` : ''}
       ${!isMapContext ? summaryHtml : ''}
       ${tabToggleHtml}
       <div class="rpc-heatmap-wrap" data-heatmap>

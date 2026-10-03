@@ -698,26 +698,34 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
     expect(html).toContain('📍');
   });
 
-  it('robot_learned pins rendered with 🚧 icon (Q_coord resolved)', () => {
-    const hazards = [{ gx: null, gy: null, x_mm: 400, y_mm: 200, stuck_count: null,
-      room_name: null, bearing_deg: 90, distance_mm: 450, source: 'robot_learned' as const, dominant_weekday: null, dominant_hour: null }];
+  // v2.5.0 F11 (bug hunt): robot_learned / keepout centroids come from the
+  // hazards endpoint in UMF units, not in the coverage picture's pose frame,
+  // so they cannot be placed on it. They are drawn by the zone overlay
+  // (image.*_map `zones`, converted by the integration) instead.
+  it('robot_learned / keepout pins (UMF space) are not placed on the coverage picture', () => {
+    const hazards = [
+      { gx: null, gy: null, x_mm: 400, y_mm: 200, stuck_count: null,
+        room_name: null, bearing_deg: 90, distance_mm: 450, source: 'robot_learned' as const, dominant_weekday: null, dominant_hour: null },
+      { gx: null, gy: null, x_mm: -300, y_mm: 500, stuck_count: null,
+        room_name: 'Hallway', bearing_deg: 270, distance_mm: 583, source: 'keepout' as const, dominant_weekday: null, dominant_hour: null },
+    ];
     const html = renderWithCoverage(
       { [`image.${n}_coverage_map`]: imageState },
       { historyTab: 'coverage', hazards },
     );
-    expect(html).toContain('rpc-pin-robot_learned');
-    expect(html).toContain('🚧');
+    expect(html).not.toContain('rpc-pin-robot_learned');
+    expect(html).not.toContain('rpc-pin-keepout');
+    expect(html).not.toContain('🚧');
   });
 
-  it('keepout pins rendered with 🚫 icon (Q_coord resolved)', () => {
-    const hazards = [{ gx: null, gy: null, x_mm: -300, y_mm: 500, stuck_count: null,
-      room_name: 'Hallway', bearing_deg: 270, distance_mm: 583, source: 'keepout' as const, dominant_weekday: null, dominant_hour: null }];
+  it('stuck_events pins (pose space) are still placed', () => {
+    const hazards = [{ gx: 1, gy: 1, x_mm: 225, y_mm: 225, stuck_count: 4,
+      room_name: null, bearing_deg: 45, distance_mm: 318, source: 'stuck_events' as const, dominant_weekday: null, dominant_hour: null }];
     const html = renderWithCoverage(
       { [`image.${n}_coverage_map`]: imageState },
       { historyTab: 'coverage', hazards },
     );
-    expect(html).toContain('rpc-pin-keepout');
-    expect(html).toContain('🚫');
+    expect(html).toContain('rpc-pin-stuck_events');
   });
 
   it('coverage panel renders without pins when hazards=[]', () => {
@@ -890,7 +898,10 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
       expect(hallwayPoly).not.toContain('rpc-room-poly--selected');
     });
 
-    it('omits room overlay when calibration_points are absent (graceful degradation — no transform to derive)', () => {
+    // v2.5.0 F11: the overlay is placed in the COVERAGE picture's own frame
+    // (heatmap.ts coverageToImagePct) — image.*_map's calibration_points
+    // describe a different 600 px picture and are no longer needed here.
+    it('renders room overlay without calibration_points (coverage frame, v2.5.0 F11)', () => {
       const noCalMapState = st('idle', { rooms: roomsAttr });
       const html = renderHistoryZone(
         makeHass({
@@ -900,7 +911,32 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
         baseConfig, { ...coverageCaps, hasAlignment: true }, n,
         { ...emptyState, historyTab: 'coverage' }, false,
       );
+      expect(html).toContain('rpc-room-overlay');
+      expect(html).toContain('data-room-poly="Kitchen"');
+    });
+
+    it('omits room overlay when the coverage picture has no extent (nothing to place it against)', () => {
+      const html = renderHistoryZone(
+        makeHass({
+          [`image.${n}_coverage_map`]: st('idle', { entity_picture: '/api/image/serve/abc/512x512' }),
+          [`image.${n}_map`]: mapImageState,
+        }),
+        baseConfig, { ...coverageCaps, hasAlignment: true }, n,
+        { ...emptyState, historyTab: 'coverage' }, false,
+      );
       expect(html).not.toContain('rpc-room-overlay');
+    });
+
+    it('v2.5.0 F8: reads rooms from image.*_cleaning_map on schema-21-migrated installs', () => {
+      const html = renderHistoryZone(
+        makeHass({
+          [`image.${n}_coverage_map`]: coverageImageState,
+          [`image.${n}_cleaning_map`]: mapImageState,
+        }),
+        baseConfig, { ...coverageCaps, hasAlignment: true }, n,
+        { ...emptyState, historyTab: 'coverage' }, false,
+      );
+      expect(html).toContain('data-room-label="Kitchen"');
     });
 
     it('omits room overlay when image.*_map itself is entirely absent', () => {
@@ -1108,14 +1144,17 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
         expect(html).not.toContain('m²');
       });
 
-      it('falls back to zone_select entity id when hasSmartZones is false', () => {
+      // v2.5.0 F3: with cloud credentials the areas live on the active map's
+      // select.*_cloud_zone_{pmap_id} (smart_zone_select does not exist then).
+      // Replaces the old zone_select fallback — retired by the integration.
+      it('reads region_areas_m2 from the active cloud_zone select (v2.5.0 F3)', () => {
         const html = renderHistoryZone(
           makeHass({
             [`image.${n}_coverage_map`]: coverageImageState,
             [`image.${n}_map`]: mapImageState,
-            [`select.${n}_zone_select`]: st('Kitchen', { options: ['Kitchen'], region_areas_m2: { Kitchen: 15.5 } }),
+            [`select.${n}_cloud_zone_abc123`]: st('Kitchen', { options: ['Kitchen'], is_active_map: true, region_areas_m2: { Kitchen: 15.5 } }),
           }),
-          baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: false }, n,
+          baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
           { ...emptyState, historyTab: 'coverage' }, false,
         );
         const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
@@ -1487,8 +1526,34 @@ describe('renderHistoryZone() — v2.2.0 F1 "Why?" explanation', () => {
       } },
     });
     expect(html).toContain('Obstacle or blockage');
-    expect(html).toContain('picked up during this mission');
+    // v2.5.0 F12: old integrations send only the alias — still shown, but
+    // worded as what was measured (the integration retracted "lifted").
+    expect(html).toContain('Pick-up or dock-contact events were recorded');
+    expect(html).not.toContain('picked up during this mission');
     expect(html).toContain('Check for cords, rugs, or furniture.');
+  });
+
+  it('v2.5.0 F12: reads pick_events (integration ≥ 4.x) — it wins over the robot_lifted alias', () => {
+    const withPicks = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m2', 'error')],
+      openExplain: { missionId: 'm2', data: {
+        mission_id: 'm2', is_anomalous: true, anomaly_reason: 'obstacle_or_blockage',
+        pick_events: true, error_code: 2, recommended_action: null,
+      } },
+    });
+    expect(withPicks).toContain('Pick-up or dock-contact events were recorded');
+
+    // Negative control: pick_events=false must not be overridden by a stale alias.
+    const noPicks = render({}, {
+      openDay: '2025-05-14', openDaySummary: summary,
+      dayMissions: [mk('m2', 'error')],
+      openExplain: { missionId: 'm2', data: {
+        mission_id: 'm2', is_anomalous: true, anomaly_reason: 'obstacle_or_blockage',
+        pick_events: false, robot_lifted: true, error_code: 2, recommended_action: null,
+      } },
+    });
+    expect(noPicks).not.toContain('Pick-up or dock-contact events');
   });
 
   it('is_anomalous=false renders the "nothing unusual" answer', () => {
@@ -1754,5 +1819,103 @@ describe('renderHistoryZone() — v2.3.0 MISSION-MAP coverage replay', () => {
     });
     expect(html).toContain('data-map="m1"');
     expect(html).not.toContain('No coverage map for this mission');
+  });
+});
+
+describe('renderHistoryZone() — v2.5.0 overlay framing (bug hunt)', () => {
+  const n = 'roomba';
+  it('drops room labels whose anchor lies outside the coverage picture', () => {
+    const hass = makeHass({
+      [`image.${n}_coverage_map`]: st('idle', {
+        entity_picture: '/x.png', x_min_mm: 0, x_max_mm: 1000, y_min_mm: 0, y_max_mm: 1000, cell_size_mm: 150,
+      }),
+      [`image.${n}_map`]: st('idle', { rooms: {
+        Inside:  { outline: [[0, 0], [500, 0], [500, 500]], name: 'Inside',  room_id: 'i', icon: '', x: 300, y: 300 },
+        Outside: { outline: [[5000, 0], [6000, 0], [6000, 500]], name: 'Outside', room_id: 'o', icon: '', x: 5500, y: 300 },
+      } }),
+    });
+    const html = renderHistoryZone(hass, baseConfig,
+      { ...defaultCaps, hasCoverageImage: true, hasAlignment: true }, n,
+      { ...emptyState, historyTab: 'coverage' }, false);
+    expect(html).toContain('data-room-label="Inside"');
+    expect(html).not.toContain('data-room-label="Outside"');
+  });
+});
+
+describe('renderHistoryZone() — v2.5.0 zone legend + marker framing (bug hunt 2)', () => {
+  const n = 'roomba';
+  const cov = st('idle', { entity_picture: '/x.png', x_min_mm: 0, x_max_mm: 1000, y_min_mm: 0, y_max_mm: 1000, cell_size_mm: 150 });
+  const caps = { ...defaultCaps, hasCoverageImage: true, hasAlignment: true, hasZoneOverlays: true, hasDoorMarkers: true, hasFurnitureShadows: true };
+  const rooms = { K: { outline: [[0, 0], [500, 0], [500, 500]], name: 'K', room_id: 'k', icon: '', x: 200, y: 200 } };
+
+  it('legend shows overlay swatches (not the retired 🚧/🚫 pins) when zones are drawn', () => {
+    const html = renderHistoryZone(makeHass({
+      [`image.${n}_coverage_map`]: cov,
+      [`image.${n}_map`]: st('idle', { rooms, zones: [{ type: 'observed', x: 300, y: 300 }, { type: 'keepout', polygon: [[0, 0], [100, 0], [100, 100]] }] }),
+    }), baseConfig, caps, n, { ...emptyState, historyTab: 'coverage' }, false);
+    expect(html).toContain('rpc-legend-observed');
+    expect(html).toContain('rpc-legend-keepout');
+    expect(html).not.toContain('🚧');
+    expect(html).not.toContain('🚫');
+  });
+
+  it('drops door markers and furniture outside the picture', () => {
+    const html = renderHistoryZone(makeHass({
+      [`image.${n}_coverage_map`]: cov,
+      [`image.${n}_map`]: st('idle', {
+        rooms,
+        door_markers: [{ id: 'in', cx: 300, cy: 300, label: 'Inner', mission_count: 3 }, { id: 'out', cx: 9000, cy: 300, label: 'Far', mission_count: 3 }],
+        furniture_candidates: [{ x_mm: 9000, y_mm: 9000 }],
+      }),
+    }), baseConfig, caps, n, { ...emptyState, historyTab: 'coverage' }, false);
+    expect(html).toContain('Inner');
+    expect(html).not.toContain('Far');
+    expect(html).not.toContain('rpc-furniture-shadow');
+  });
+});
+
+// ── Integration 4.2.19 (I9): hazards carry their coordinate frame ──────────
+describe('renderHistoryZone() — hazard pins by `space` (integration 4.2.19)', () => {
+  const n = 'roomba';
+  const cov = st('idle', { entity_picture: '/x.png', x_min_mm: 0, x_max_mm: 2000, y_min_mm: 0, y_max_mm: 2000, cell_size_mm: 150 });
+  const pin = (source: 'stuck_events' | 'robot_learned' | 'keepout', space?: 'pose' | 'umf') => ({
+    gx: null, gy: null, x_mm: 500, y_mm: 500, stuck_count: source === 'stuck_events' ? 4 : null,
+    room_name: null, bearing_deg: space === 'umf' ? null : 45, distance_mm: space === 'umf' ? null : 700,
+    source, dominant_weekday: null, dominant_hour: null, ...(space ? { space } : {}),
+  });
+  const render = (hazards: ReturnType<typeof pin>[], extraCaps = {}, extraStates = {}) => renderHistoryZone(
+    makeHass({ [`image.${n}_coverage_map`]: cov, ...extraStates }), baseConfig,
+    { ...defaultCaps, hasCoverageImage: true, ...extraCaps }, n,
+    { ...emptyState, historyTab: 'coverage', hazards }, false);
+
+  it('pose-space obstacle and keep-out pins are placed when no zone overlay shows them', () => {
+    const html = render([pin('robot_learned', 'pose'), pin('keepout', 'pose')]);
+    expect(html).toContain('rpc-pin-robot_learned');
+    expect(html).toContain('rpc-pin-keepout');
+    expect(html).toContain('🚧');
+  });
+
+  it('umf-space pins (map not aligned yet) are never placed', () => {
+    const html = render([pin('robot_learned', 'umf'), pin('keepout', 'umf')]);
+    expect(html).not.toContain('rpc-pin-robot_learned');
+    expect(html).not.toContain('rpc-pin-keepout');
+  });
+
+  it('no duplicate: pose pins are left out when the zone overlay draws the same data', () => {
+    const html = render([pin('robot_learned', 'pose'), pin('stuck_events', 'pose')],
+      { hasAlignment: true, hasZoneOverlays: true },
+      { [`image.${n}_map`]: st('idle', {
+        rooms: { K: { outline: [[0, 0], [900, 0], [900, 900]], name: 'K', room_id: 'k', icon: '', x: 300, y: 300 } },
+        zones: [{ type: 'observed', x: 500, y: 500 }],
+      }) });
+    expect(html).not.toContain('rpc-pin-robot_learned');
+    expect(html).toContain('rpc-zone-observed');
+    expect(html).toContain('rpc-pin-stuck_events');
+  });
+
+  it('older integrations (no `space`): stuck pins placed, map-sourced pins not', () => {
+    const html = render([pin('stuck_events'), pin('keepout')]);
+    expect(html).toContain('rpc-pin-stuck_events');
+    expect(html).not.toContain('rpc-pin-keepout');
   });
 });

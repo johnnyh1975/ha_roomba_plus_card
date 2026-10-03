@@ -11,6 +11,8 @@
  */
 import { CardConfig, RobotCapabilities, HomeAssistant } from './types.js';
 import { hasAlertForTab } from './zones/alert-zone.js';
+import { t } from './i18n/index.js';
+import { roomsOverdueId } from './entity-ids.js';
 
 export type TabId = 'map' | 'history' | 'health' | 'settings';
 
@@ -21,12 +23,12 @@ export interface TabDef {
 }
 
 /** Resolved list of tabs for the current config + capability tier. */
-export function availableTabs(config: CardConfig, caps: RobotCapabilities): TabDef[] {
+export function availableTabs(config: CardConfig, caps: RobotCapabilities, lang = 'en'): TabDef[] {
   const tabs: TabDef[] = [];
   const showMap = config.mode !== 'companion' && caps.hasCoverageImage;
-  if (showMap) tabs.push({ id: 'map', icon: '🗺', label: 'Map' });
-  tabs.push({ id: 'history', icon: '📅', label: 'History' });
-  tabs.push({ id: 'health', icon: '❤', label: 'Health' });
+  if (showMap) tabs.push({ id: 'map', icon: '🗺', label: t(lang, 'tabs.map') });
+  tabs.push({ id: 'history', icon: '📅', label: t(lang, 'tabs.history') });
+  tabs.push({ id: 'health', icon: '❤', label: t(lang, 'tabs.health') });
   tabs.push({ id: 'settings', icon: '⚙', label: '' });
   return tabs;
 }
@@ -76,7 +78,7 @@ export function healthTabHasBadge(
   // v2.3.0 — Rooms-Overdue: same "needs attention" badge philosophy as the
   // health-score/maintenance checks above.
   if (caps.hasRoomsOverdue) {
-    const entity = hass.states[`sensor.${n}_rooms_overdue`];
+    const entity = hass.states[roomsOverdueId(hass, n) ?? ''];
     if (entity && entity.state !== 'unknown' && entity.state !== 'unavailable') {
       const count = parseFloat(entity.state);
       if (!isNaN(count) && count > 0) return true;

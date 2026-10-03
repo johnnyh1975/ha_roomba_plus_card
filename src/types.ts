@@ -76,7 +76,9 @@ export interface RobotCapabilities {
    *  The floor concept's actual successor is the `weakest_bucket_observed`
    *  attribute (0–4 int, not a percentage) — see alert-zone.ts for the read. */
   hasWifiFloor: boolean;
-  /** sensor.*_recent_coverage_pct — percentage of floor covered last mission */
+  /** v2.5.0 F5: `coverage_pct` attribute on sensor.*_cleaning_performance
+   *  (sensor.*_recent_coverage_pct was removed in integration v3.0 — the bar
+   *  had silently never rendered since). */
   hasCoveragePct: boolean;
   /** sensor.*_estimated_battery_eol — days remaining; 0 = end of life.
    *  Only rendered inside the battery retention popover; requires hasBatteryRetention. */
@@ -169,8 +171,10 @@ export interface RobotCapabilities {
   hasConnectivity: boolean;
   /** sensor.*_firmware_version present. A2: gates the firmware badge. */
   hasFirmware: boolean;
-  /** device_tracker.*_position present (carries room_estimate attribute).
-   *  A4: gates the current-room header line during active SMART missions. */
+  /** v2.5.0 F4: the robot's device_tracker is present — `device_tracker.{n}`
+   *  (the integration names it after the device alone), with the
+   *  user-renamed `device_tracker.{n}_position` as fallback. Its `room`
+   *  attribute gates the current-room header line during a mission. */
   hasPositionTracker: boolean;
 
   // ── v2.3.0 — Rooms-Overdue widget (integration v3.3.0 ROOM-SCHED) ─────────
@@ -233,12 +237,20 @@ export type RoomCoverage = Record<string, number>;
 export interface HazardRecord {
   gx: number | null;              // GridStore grid cell x; null for robot_learned source
   gy: number | null;              // GridStore grid cell y; null for robot_learned source
-  x_mm: number;                   // Dock-relative mm (pose space for stuck_events; UMF space for robot_learned until v2.3 F8)
+  x_mm: number;                   // see `space`
   y_mm: number;
+  /** Integration ≥ 4.2.19: the frame of x_mm/y_mm. `pose` = dock-relative
+   *  mm, the coverage map's frame; `umf` = the cloud map's own units (an
+   *  obstacle/keep-out before the map is aligned). Absent on older
+   *  integrations: there only `stuck_events` pins are pose space. */
+  space?: 'pose' | 'umf';
+  /** Integration ≥ 4.2.19: the cloud-map coordinates of a map-sourced pin. */
+  x_umf?: number;
+  y_umf?: number;
   stuck_count: number | null;     // null for robot_learned source
   room_name: string | null;       // null when UMF alignment absent
-  bearing_deg: number;            // 0–359, compass from dock
-  distance_mm: number;            // Euclidean distance from dock in mm
+  bearing_deg: number | null;     // 0–359, compass from dock; null for a `umf` pin (4.2.19)
+  distance_mm: number | null;     // Euclidean distance from dock in mm; null for a `umf` pin
   source: 'stuck_events' | 'robot_learned' | 'keepout';
   /** v2.3.0 F22 — GridStore.stuck_pattern()'s dominant weekday, present on
    *  every pin (all sources), null when not applicable or no pattern found.
@@ -293,7 +305,11 @@ export interface MissionExplain {
   mission_id: string;
   is_anomalous: boolean;
   anomaly_reason: string | null;
-  robot_lifted: boolean;
+  /** v2.5.0 F12: integration ≥ 4.x — bbrun.nPicks moved during the mission
+   *  (pick-up OR dock contact; the integration no longer claims "lifted"). */
+  pick_events?: boolean;
+  /** Deprecated alias of pick_events, kept by the integration for now. */
+  robot_lifted?: boolean;
   error_code: number | null;
   recommended_action: string | null;
 }
@@ -360,6 +376,13 @@ export interface HouseholdRobotSummary {
   completed: number;
   completion_pct: number;
   area_sqft: number | null;
+  /** v2.5.0 FLEET-1 (integration ≥ 3.4.3) — optional: absent entirely on
+   *  older integrations rather than null, since the endpoint simply
+   *  doesn't add these keys pre-3.4.3 (verified against source). */
+  health_trend?: 'improving' | 'stable' | 'declining' | null;
+  battery_capacity_retention_pct?: number | null;
+  maintenance_due?: boolean;
+  needs_attention?: boolean;
 }
 
 /** Per-floor row in GET /api/roomba_plus/household */
@@ -382,6 +405,13 @@ export interface HouseholdSummary {
   robots: HouseholdRobotSummary[];
   /** Present when any robot has a floor label configured */
   floors?: HouseholdFloorSummary[];
+  /** v2.5.0 FLEET-1 (integration ≥ 3.4.3) — absent entirely on older
+   *  integrations, same reasoning as the per-robot fields above. Derived
+   *  from those same per-robot `needs_attention` fields server-side. */
+  fleet_health?: {
+    robot_count: number;
+    robots_needing_attention: string[];
+  };
 }
 
 export interface HomeAssistant {
@@ -390,7 +420,17 @@ export interface HomeAssistant {
   callWS(msg: Record<string, unknown>): Promise<unknown>;
   fetchWithAuth(url: string, init?: RequestInit): Promise<Response>;
   language: string;
-  config: { unit_system: { length: string } };
+  /** `version` (HA core version) is part of HA's frontend config; optional
+   *  only for test harnesses. Used by version-check.ts (v2.5.0). */
+  config: { unit_system: { length: string }; version?: string };
+  /** v2.5.0 P3: HA frontend's own state formatter (HA ≥ 2024.1). Renders a
+   *  slug state (`ready`, `emptying_bin`, `reusable_wet`) in the user's
+   *  language using the INTEGRATION's translations — the card never maps
+   *  slugs to display text itself. Optional so test harnesses and very old
+   *  frontends fall back to a humanised slug (see utils.ts formatState). */
+  formatEntityState?(stateObj: HAState, state?: string): string;
+  /** v2.5.0 P3: attribute counterpart of formatEntityState. */
+  formatEntityAttributeValue?(stateObj: HAState, attribute: string, value?: unknown): string;
   /** v2.1.0 A5: WebSocket connection for event subscriptions. Optional —
    *  absent in some test harnesses and very old HA frontends; the card falls
    *  back to the mission_active state-transition trigger when missing. */

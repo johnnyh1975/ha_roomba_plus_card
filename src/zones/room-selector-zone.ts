@@ -1,6 +1,8 @@
 import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
-import { esc } from '../utils.js';
-import { MDI_TO_EMOJI, MDI_FALLBACK } from '../const.js';
+import { esc, formatState } from '../utils.js';
+import { zoneSelectId, zoneSelectMapAttr } from '../entity-ids.js';
+import { mdiToEmoji, MDI_FALLBACK } from '../const.js';
+import { t, resolveLang } from '../i18n/index.js';
 
 export interface RoomSelectorProps {
   hass: HomeAssistant;
@@ -52,16 +54,27 @@ export function renderSettingsPanel(
 ): string {
   if (config.show_settings === false) return '';
 
+  const lang = resolveLang(hass.language);
   const n = robotName;
   const edgeCleanEntity   = hass.states[`switch.${n}_edge_clean`];
   const alwaysFinishEntity = hass.states[`switch.${n}_always_finish`];
-  const carpetBoostEntity  = hass.states[`select.${n}_carpet_boost_select`];
-  if (!edgeCleanEntity && !alwaysFinishEntity && !carpetBoostEntity) return '';
+  // v2.5.0 F9: since integration 4.2.15 the carpet-boost select exists only
+  // when the robot reports cap.carpetBoost == 1, and stale rows are removed.
+  // A row left behind on an install whose robot had no capability block yet
+  // stays `unavailable` forever — treated as absent, not as a dead control.
+  const carpetBoostRaw     = hass.states[`select.${n}_carpet_boost_select`];
+  const carpetBoostEntity  = carpetBoostRaw && carpetBoostRaw.state !== 'unavailable' ? carpetBoostRaw : undefined;
+  // v2.5.0 GENTLE-MODE (integration v3.4.3) — same simple on/off shape as
+  // edge_clean/always_finish above, confirmed present across multiple i7
+  // firmware generations; only appears for robots that actually report it.
+  const gentleModeEntity   = hass.states[`switch.${n}_gentle_mode`];
+  if (!edgeCleanEntity && !alwaysFinishEntity && !carpetBoostEntity && !gentleModeEntity) return '';
 
   let panelHtml = '';
   if (settingsPanelOpen) {
     const edgeOn   = edgeCleanEntity?.state === 'on';
     const finishOn = alwaysFinishEntity?.state === 'on';
+    const gentleOn = gentleModeEntity?.state === 'on';
     const carpetOptions: string[] = carpetBoostEntity
       ? (carpetBoostEntity.attributes.options as string[] ?? [])
       : [];
@@ -70,7 +83,7 @@ export function renderSettingsPanel(
       <div class="rpc-settings-panel">
         ${edgeCleanEntity ? `
           <div class="rpc-setting-item">
-            <span class="rpc-setting-label">Edge clean</span>
+            <span class="rpc-setting-label">${t(lang, 'settings.edgeClean')}</span>
             <button class="rpc-setting-toggle${edgeOn ? ' rpc-setting-on' : ''}"
                     data-switch-entity="switch.${n}_edge_clean"
                     aria-pressed="${edgeOn}">
@@ -79,21 +92,30 @@ export function renderSettingsPanel(
           </div>` : ''}
         ${alwaysFinishEntity ? `
           <div class="rpc-setting-item">
-            <span class="rpc-setting-label">Always finish</span>
+            <span class="rpc-setting-label">${t(lang, 'settings.alwaysFinish')}</span>
             <button class="rpc-setting-toggle${finishOn ? ' rpc-setting-on' : ''}"
                     data-switch-entity="switch.${n}_always_finish"
                     aria-pressed="${finishOn}">
               ${finishOn ? '●' : '○'}
             </button>
           </div>` : ''}
+        ${gentleModeEntity ? `
+          <div class="rpc-setting-item">
+            <span class="rpc-setting-label">${t(lang, 'settings.gentleMode')}</span>
+            <button class="rpc-setting-toggle${gentleOn ? ' rpc-setting-on' : ''}"
+                    data-switch-entity="switch.${n}_gentle_mode"
+                    aria-pressed="${gentleOn}">
+              ${gentleOn ? '●' : '○'}
+            </button>
+          </div>` : ''}
         ${carpetBoostEntity ? `
           <div class="rpc-setting-item">
-            <span class="rpc-setting-label">Carpet boost</span>
+            <span class="rpc-setting-label">${t(lang, 'settings.carpetBoost')}</span>
             <button class="rpc-setting-cycle"
                     data-cycle-entity="select.${n}_carpet_boost_select"
                     data-cycle-options="${esc(JSON.stringify(carpetOptions))}"
                     data-cycle-current="${esc(carpetBoostEntity.state)}">
-              ${esc(carpetBoostEntity.state)} ▼
+              ${esc(formatState(hass, `select.${n}_carpet_boost_select`))} ▼
             </button>
           </div>` : ''}
       </div>
@@ -104,7 +126,7 @@ export function renderSettingsPanel(
     ? '<div class="rpc-settings-divider rpc-settings-divider--compact"></div>'
     : '<div class="rpc-settings-divider"></div>';
   const contextLabel = inStatusZone
-    ? '<div class="rpc-zone-header rpc-controls-label">CONTROLS</div>'
+    ? `<div class="rpc-zone-header rpc-controls-label">${t(lang, 'settings.controlsLabel')}</div>`
     : '';
 
   return `
@@ -112,7 +134,7 @@ export function renderSettingsPanel(
     ${contextLabel}
     <button class="rpc-settings-row" data-settings-toggle aria-expanded="${settingsPanelOpen}">
       <span class="rpc-settings-icon">⚙</span>
-      <span class="rpc-settings-label">Settings</span>
+      <span class="rpc-settings-label">${t(lang, 'settings.settingsLabel')}</span>
       <span class="rpc-settings-arrow">${settingsPanelOpen ? '▲' : '▼'}</span>
     </button>
     ${panelHtml}
@@ -141,8 +163,12 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
   if (!caps.hasSmartZones) return '';
   if (config.show_rooms === false) return '';
 
+  const lang = resolveLang(hass.language);
   const n = robotName;
-  const selector = hass.states[`select.${n}_smart_zone_select`];
+  // v2.5.0 F3: smart_zone_select (no cloud) or the active map's
+  // select.*_cloud_zone_{pmap_id} (cloud credentials — the normal setup).
+  const selectorId = zoneSelectId(hass, n);
+  const selector = selectorId ? hass.states[selectorId] : undefined;
   if (!selector) return '';
 
   const options: string[] = (selector.attributes.options as string[]) ?? [];
@@ -153,25 +179,17 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
   const passesEntity = hass.states[`select.${n}_cleaning_passes`];
 
   const isMop      = caps.isMop;
-  const cleanLabel = isMop ? '▶ Mop selected rooms' : '▶ Clean selected rooms';
+  const cleanLabel = isMop ? `▶ ${t(lang, 'roomSelector.mopSelected')}` : `▶ ${t(lang, 'roomSelector.cleanSelected')}`;
   const count      = selectedRooms.size;
   const spinnerSvg = `<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>`;
 
   // F5: region_icons attribute — maps room name → MDI icon name (no "mdi:" prefix)
-  const regionIcons = (() => {
-    const selectId = caps.hasSmartZones
-      ? `select.${robotName}_smart_zone_select`
-      : `select.${robotName}_zone_select`;
-    const raw = hass.states[selectId]?.attributes?.['region_icons'];
-    return (raw && typeof raw === 'object' && !Array.isArray(raw))
-      ? raw as Record<string, string>
-      : {} as Record<string, string>;
-  })();
+  const regionIcons = zoneSelectMapAttr<string>(hass, robotName, 'region_icons');
 
   const chipsHtml = options.map(room => {
     const sel  = selectedRooms.has(room);
     const mdi  = regionIcons[room];
-    const icon = mdi ? (MDI_TO_EMOJI[mdi] ?? MDI_FALLBACK) : '';
+    const icon = mdi ? mdiToEmoji(mdi, MDI_FALLBACK) : '';
     const label = icon ? `${icon} ${esc(room)}` : esc(room);
     return `<button class="rpc-room-chip${sel ? ' rpc-room-chip--selected' : ''}"
       data-room="${esc(room)}" aria-pressed="${sel}">${label}</button>`;
@@ -182,7 +200,7 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
     const activeChip = passes;
     passesHtml = `
       <div class="rpc-passes-row">
-        <span class="rpc-passes-label">Passes:</span>
+        <span class="rpc-passes-label">${t(lang, 'roomSelector.passesLabel')}</span>
         ${['Auto', '×1', '×2'].map(p =>
           `<button class="rpc-pass-chip${activeChip === p ? ' rpc-pass-chip--selected' : ''}"
             data-pass="${p}"
@@ -204,10 +222,10 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
 
   return `
     <div class="rpc-zone rpc-zone2">
-      <div class="rpc-zone-header">ROOMS</div>
+      <div class="rpc-zone-header">${t(lang, 'roomSelector.zoneHeader')}</div>
       <div class="rpc-chips-row">
         ${chipsHtml}
-        ${count > 0 ? `<span class="rpc-selected-count">${count} selected</span>` : ''}
+        ${count > 0 ? `<span class="rpc-selected-count">${t(lang, 'roomSelector.selectedCount', { count })}</span>` : ''}
       </div>
       ${passesHtml}
       <div class="rpc-room-actions">
@@ -215,9 +233,9 @@ export function renderRoomSelectorZone(props: RoomSelectorProps): string {
                 data-action="clean-selected"
                 ${count === 0 || isSending ? 'disabled' : ''}
                 aria-label="${cleanLabel}">
-          ${isSending ? spinnerSvg + ' Sending…' : cleanLabel}
+          ${isSending ? spinnerSvg + ' ' + t(lang, 'roomSelector.sending') : cleanLabel}
         </button>
-        ${canRepeat ? `<button class="rpc-btn-text" data-action="repeat-last">↩ Repeat last</button>` : ''}
+        ${canRepeat ? `<button class="rpc-btn-text" data-action="repeat-last">↩ ${t(lang, 'roomSelector.repeatLast')}</button>` : ''}
       </div>
       ${sendError ? `<div class="rpc-send-error">${esc(sendError)}</div>` : ''}
       ${settingsHtml}

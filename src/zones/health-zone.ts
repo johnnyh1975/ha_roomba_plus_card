@@ -1,12 +1,20 @@
-import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
-import { esc, timeSince } from '../utils.js';
+import { HomeAssistant, CardConfig, RobotCapabilities, HAState } from '../types.js';
+import { esc, timeSince, formatState } from '../utils.js';
+import { CLEAN_BASE_PROBLEMS } from '../slugs.js';
+import { batterySensorId, roomsOverdueId } from '../entity-ids.js';
+import { t, resolveLang } from '../i18n/index.js';
 
 interface Bar {
   key: string;
   label: string;
   sensorId: string;
-  thresholdAttr: string | null;
-  type: 'consumable' | 'tank' | 'battery' | 'cleanbase';
+  /** Consumables only: whether the bar needs a reference life (hours).
+   *  v2.5.0 F7: the reference is read by consumableReferenceHours() —
+   *  `max_hours` first, `threshold_hours` second — not from a fixed attr. */
+  needsReference: boolean;
+  /** 'days' (v2.5.0 F6): a remaining-days value with no reference life —
+   *  sensor.*_pad_days_until_due. Shown as a coloured value, not a bar. */
+  type: 'consumable' | 'tank' | 'battery' | 'cleanbase' | 'days';
   wearSensorId?: string;
   resetService?: string;
   lastReplacedId?: string;
@@ -62,14 +70,52 @@ function trendArrow(wearRate: number, threshold: number): string {
 }
 
 
-/** Convert Clean Base sensor state to "~N uses remaining" display */
-function cleanBaseDisplay(state: string): string {
-  const n = parseInt(state, 10);
-  if (!isNaN(n) && n >= 0) return `~${n} use${n !== 1 ? 's' : ''} remaining`;
-  // Text states from integration (Full, Empty, etc.)
-  if (state === 'Empty') return 'Bag full — replace soon';
-  if (state === 'Full')  return 'Bag has capacity';
-  return esc(state);
+/**
+ * v2.5.0 F7 — the reference life a consumable's remaining hours are measured
+ * against. Integration ≥ 4.2 reads remaining hours from iRobot's own counter
+ * when the cloud has one, and publishes the matching full life as
+ * `max_hours`; `threshold_hours` stays the LOCAL option. Dividing the cloud
+ * remainder by the local threshold could pin the bar at 100% or misstate
+ * wear, so `max_hours` wins when present. Exported for the wear alerts.
+ */
+export function consumableReferenceHours(entity: HAState | undefined): number | null {
+  const attrs = entity?.attributes ?? {};
+  for (const key of ['max_hours', 'threshold_hours']) {
+    const v = attrs[key];
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+  }
+  return null;
+}
+
+/** Remaining hours of a DURATION consumable sensor, honouring a display
+ *  unit the user may have changed in HA (the reference life attributes stay
+ *  in hours). NaN when not numeric. */
+export function remainingHoursFromEntity(entity: HAState | undefined): number {
+  const v = parseFloat(entity?.state ?? '');
+  if (isNaN(v)) return NaN;
+  switch (String(entity?.attributes?.unit_of_measurement ?? 'h')) {
+    case 'min': return v / 60;
+    case 's':   return v / 3600;
+    case 'd':   return v * 24;
+    case 'w':   return v * 24 * 7;
+    case 'ms':  return v / 3_600_000;
+    case 'μs':  return v / 3_600_000_000;
+    case 'h':   return v;
+    default:    return NaN;   // unknown unit: hide rather than mis-scale
+  }
+}
+
+/**
+ * Clean Base status text. v2.5.0 F6: the sensor reports slugs (`ready`,
+ * `empty`, `bag_full`, …) since integration 4.x; the old comparison against
+ * 'Empty' never matched (and mapped it to "Bag full", the opposite of what
+ * `empty` — 302/303, "bin emptied" — means). Display text is now the
+ * integration's own, via HA's formatter. A numeric state (very old
+ * integrations reported remaining uses) keeps its "~N uses" text.
+ */
+function cleanBaseDisplay(hass: HomeAssistant, entityId: string, state: string, lang: string): string {
+  if (/^\d+$/.test(state)) return t(lang, 'health.cleanBaseUses', { count: parseInt(state, 10) });
+  return esc(formatState(hass, entityId, state));
 }
 
 // ── v2.0 C1-HEALTH — robot health score ──────────────────────────────────────
@@ -92,10 +138,10 @@ function healthScoreColour(score: number): string {
   return 'var(--rpc-red)';
 }
 
-function healthScoreBand(score: number): string {
-  if (score >= 80) return 'GOOD';
-  if (score >= 60) return 'FAIR';
-  return 'NEEDS ATTENTION';
+function healthScoreBand(score: number, lang: string): string {
+  if (score >= 80) return t(lang, 'health.bandGood');
+  if (score >= 60) return t(lang, 'health.bandFair');
+  return t(lang, 'health.bandNeedsAttention');
 }
 
 function renderHealthScore(
@@ -109,15 +155,16 @@ function renderHealthScore(
   const entity = hass.states[`sensor.${n}_robot_health_score`];
   if (!entity) return '';
 
+  const lang = resolveLang(hass.language);
   const isCalibrating = entity.state === 'unknown' || entity.state === 'unavailable';
   if (isCalibrating) {
     return `
       <div class="rpc-health-score rpc-health-score--calibrating">
-        <span class="rpc-health-score-label">ROBOT HEALTH</span>
-        <span class="rpc-health-score-calibrating">Calibrating… (needs more mission history)</span>
+        <span class="rpc-health-score-label">${t(lang, 'health.robotHealthLabel')}</span>
+        <span class="rpc-health-score-calibrating">${t(lang, 'health.calibrating')}</span>
       </div>
       <button class="rpc-health-details-toggle" data-health-details-toggle aria-expanded="${expanded}">
-        ${expanded ? 'Hide details ▲' : 'Show details ▼'}
+        ${expanded ? t(lang, 'health.hideDetails') : t(lang, 'health.showDetails')}
       </button>
     `;
   }
@@ -125,7 +172,7 @@ function renderHealthScore(
   const score = Math.round(parseFloat(entity.state));
   if (isNaN(score)) return '';
   const colour = healthScoreColour(score);
-  const band   = healthScoreBand(score);
+  const band   = healthScoreBand(score, lang);
 
   // v2.2.0 F2 (PLAIN-STATUS, integration ≥ 3.1.0) — the integration derives
   // a plain-language status_text/recommendation from the score breakdown's
@@ -141,15 +188,15 @@ function renderHealthScore(
     : '';
 
   return `
-    <div class="rpc-health-score" aria-label="Robot health ${score} out of 100, ${band}">
-      <span class="rpc-health-score-label">ROBOT HEALTH</span>
+    <div class="rpc-health-score" aria-label="${t(lang, 'health.robotHealthAriaLabel', { score, band })}">
+      <span class="rpc-health-score-label">${t(lang, 'health.robotHealthLabel')}</span>
       <span class="rpc-health-score-value" style="color:${colour}">${score}</span>
       <span class="rpc-health-score-band" style="color:${colour}">● ${band}</span>
       ${renderHealthTrend(hass, n)}
     </div>
     ${plainStatusHtml}
     <button class="rpc-health-details-toggle" data-health-details-toggle aria-expanded="${expanded}">
-      ${expanded ? 'Hide details ▲' : 'Show details ▼'}
+      ${expanded ? t(lang, 'health.hideDetails') : t(lang, 'health.showDetails')}
     </button>
   `;
 }
@@ -171,15 +218,16 @@ function renderHealthScore(
 function renderHealthTrend(hass: HomeAssistant, n: string): string {
   const trend = hass.states[`sensor.${n}_health_score_trend`];
   if (!trend) return '';
+  const lang = resolveLang(hass.language);
 
   if (trend.state === 'improving' || trend.state === 'stable' || trend.state === 'declining') {
     const map = {
-      improving: { icon: '↗', colour: 'var(--rpc-green, #4ade80)', label: 'improving' },
-      stable:    { icon: '→', colour: 'var(--secondary-text-color)', label: 'stable' },
-      declining: { icon: '↘', colour: '#d97706', label: 'declining' },
+      improving: { icon: '↗', colour: 'var(--rpc-green, #4ade80)', label: t(lang, 'health.trendImproving') },
+      stable:    { icon: '→', colour: 'var(--secondary-text-color)', label: t(lang, 'health.trendStable') },
+      declining: { icon: '↘', colour: '#d97706', label: t(lang, 'health.trendDeclining') },
     } as const;
-    const t = map[trend.state];
-    return `<span class="rpc-health-trend" style="color:${t.colour}" aria-label="Health trend: ${t.label}">${t.icon} ${t.label}</span>`;
+    const tr = map[trend.state];
+    return `<span class="rpc-health-trend" style="color:${tr.colour}" aria-label="${t(lang, 'health.trendAriaLabel', { label: tr.label })}">${tr.icon} ${tr.label}</span>`;
   }
 
   // Calibrating — show the countdown the integration exposes for exactly
@@ -188,7 +236,7 @@ function renderHealthTrend(hass: HomeAssistant, n: string): string {
   // attached to the trend, never mixed into the score's calibrating text.
   const daysLeft = trend.attributes?.days_until_ready;
   if (typeof daysLeft === 'number' && daysLeft > 0) {
-    return `<span class="rpc-health-trend rpc-health-trend--calibrating">trend in ~${daysLeft}d</span>`;
+    return `<span class="rpc-health-trend rpc-health-trend--calibrating">${t(lang, 'health.trendCalibrating', { days: daysLeft })}</span>`;
   }
   return '';
 }
@@ -212,10 +260,11 @@ function renderAnomalyBanner(hass: HomeAssistant, n: string): string {
   if (!entity) return '';
   const consecutive = Number(entity.state);
   if (!Number.isFinite(consecutive) || consecutive < 3) return '';
+  const lang = resolveLang(hass.language);
 
   return `
     <div class="rpc-anomaly-banner" role="alert">
-      ⚠ Last ${consecutive} missions were anomalous — check brushes and filter
+      ${t(lang, 'health.anomalyBanner', { count: consecutive })}
     </div>
   `;
 }
@@ -239,6 +288,7 @@ function renderNavHealth(
   expanded: boolean,
 ): string {
   if (!caps.hasNavStats) return '';
+  const lang = resolveLang(hass.language);
 
   const numOrNull = (key: string): number | null => {
     const e = hass.states[`sensor.${n}_${key}`];
@@ -261,20 +311,20 @@ function renderNavHealth(
 
   const factors: string[] = [];
   if (panics !== null) {
-    factors.push(`<div class="rpc-nav-factor" title="How often navigation failed and the robot had to recover">
-        <span class="rpc-nav-factor-label">Panic events</span>
+    factors.push(`<div class="rpc-nav-factor" title="${t(lang, 'health.navPanicsTitle')}">
+        <span class="rpc-nav-factor-label">${t(lang, 'health.navPanicsLabel')}</span>
         <span class="rpc-nav-factor-value">${panics}</span>
       </div>`);
   }
   if (landmarkQ !== null) {
-    factors.push(`<div class="rpc-nav-factor" title="Match-tracking quality of visual landmarks (higher is better)">
-        <span class="rpc-nav-factor-label">Landmark quality</span>
+    factors.push(`<div class="rpc-nav-factor" title="${t(lang, 'health.navLandmarkTitle')}">
+        <span class="rpc-nav-factor-label">${t(lang, 'health.navLandmarkLabel')}</span>
         <span class="rpc-nav-factor-value">${landmarkQ}</span>
       </div>`);
   }
   if (goodLmks !== null) {
-    factors.push(`<div class="rpc-nav-factor" title="Number of reliable visual landmarks the robot is tracking">
-        <span class="rpc-nav-factor-label">Good landmarks</span>
+    factors.push(`<div class="rpc-nav-factor" title="${t(lang, 'health.navGoodLandmarksTitle')}">
+        <span class="rpc-nav-factor-label">${t(lang, 'health.navGoodLandmarksLabel')}</span>
         <span class="rpc-nav-factor-value">${goodLmks}</span>
       </div>`);
   }
@@ -282,10 +332,10 @@ function renderNavHealth(
   return `
     <div class="rpc-nav-health">
       <div class="rpc-nav-header">
-        <span class="rpc-nav-label">NAVIGATION</span>
+        <span class="rpc-nav-label">${t(lang, 'health.navHeader')}</span>
         <span class="rpc-nav-score">${scoreHtml}</span>
         <button class="rpc-nav-toggle" data-nav-details-toggle aria-expanded="${expanded}">
-          ${expanded ? 'Hide ▲' : 'Details ▼'}
+          ${expanded ? t(lang, 'health.navHide') : t(lang, 'health.navDetails')}
         </button>
       </div>
       ${expanded && factors.length > 0 ? `<div class="rpc-nav-factors">${factors.join('')}</div>` : ''}
@@ -302,11 +352,12 @@ function renderMaintenanceCalendar(
   state: HealthZoneState,
 ): string {
   if (!caps.hasMaintenanceCalendar) return '';
+  const lang = resolveLang(hass.language);
 
   const rows: { key: string; label: string; entityId: string; service: string }[] = [
-    { key: 'wheel',   label: 'Wheels',   entityId: `sensor.${n}_wheel_last_cleaned`,   service: 'roomba_plus.reset_wheel_cleaning' },
-    { key: 'contact', label: 'Contacts', entityId: `sensor.${n}_contact_last_cleaned`, service: 'roomba_plus.reset_contact_cleaning' },
-    { key: 'bin',     label: 'Bin',      entityId: `sensor.${n}_bin_last_cleaned`,     service: 'roomba_plus.reset_bin_cleaning' },
+    { key: 'wheel',   label: t(lang, 'health.maintWheels'),   entityId: `sensor.${n}_wheel_last_cleaned`,   service: 'roomba_plus.reset_wheel_cleaning' },
+    { key: 'contact', label: t(lang, 'health.maintContacts'), entityId: `sensor.${n}_contact_last_cleaned`, service: 'roomba_plus.reset_contact_cleaning' },
+    { key: 'bin',     label: t(lang, 'health.maintBin'),      entityId: `sensor.${n}_bin_last_cleaned`,     service: 'roomba_plus.reset_bin_cleaning' },
   ].filter(r => !!hass.states[r.entityId]);
 
   if (rows.length === 0) return '';
@@ -316,8 +367,8 @@ function renderMaintenanceCalendar(
     const isOpen = state.openMaintPopover === r.key;
     const recorded = entity.state !== 'unavailable' && entity.state !== 'unknown';
     const displayVal = recorded
-      ? `Cleaned ${timeSince(entity.state, hass.language)}`
-      : 'Never recorded';
+      ? t(lang, 'health.maintCleaned', { time: timeSince(entity.state, hass.language) })
+      : t(lang, 'health.maintNeverRecorded');
 
     return `
       <div class="rpc-maint-row" data-maint="${r.key}" role="button" aria-expanded="${isOpen}" tabindex="0"
@@ -329,10 +380,10 @@ function renderMaintenanceCalendar(
         <div class="rpc-popover">
           <div class="rpc-popover-header">
             <span>${r.label}</span>
-            <button class="rpc-popover-close" data-close-maint="${r.key}" aria-label="Close">×</button>
+            <button class="rpc-popover-close" data-close-maint="${r.key}" aria-label="${t(lang, 'history.close')}">×</button>
           </div>
           <div class="rpc-popover-divider"></div>
-          <div class="rpc-popover-sub">Reset via Developer Tools → Services:</div>
+          <div class="rpc-popover-sub">${t(lang, 'health.resetViaDevTools')}</div>
           <div class="rpc-maint-service">${r.service}</div>
         </div>
       ` : ''}
@@ -341,7 +392,7 @@ function renderMaintenanceCalendar(
 
   return `
     <div class="rpc-maint-divider"></div>
-    <div class="rpc-maint-header">Other maintenance</div>
+    <div class="rpc-maint-header">${t(lang, 'health.otherMaintenance')}</div>
     ${rowsHtml}
   `;
 }
@@ -356,6 +407,7 @@ function renderMaintenanceCalendar(
 // section renders whatever subset exists, and renders nothing at all
 // (including for the 980, which has no Clean Base) when none do.
 function renderDockHealth(hass: HomeAssistant, n: string): string {
+  const lang = resolveLang(hass.language);
   const read = (id: string): number | null => {
     const e = hass.states[id];
     if (!e || e.state === 'unknown' || e.state === 'unavailable') return null;
@@ -370,21 +422,21 @@ function renderDockHealth(hass: HomeAssistant, n: string): string {
   if (tank === null && knockoffs === null && aborts === null && chatters === null) return '';
 
   const tankHtml = tank !== null
-    ? `<div class="rpc-dock-tank">Tank level ${Math.round(tank)}%</div>`
+    ? `<div class="rpc-dock-tank">${t(lang, 'health.dockTankLevel', { pct: Math.round(tank) })}</div>`
     : '';
   const counterParts = [
-    knockoffs !== null ? `${knockoffs.toLocaleString()} knockoffs` : '',
-    aborts    !== null ? `${aborts.toLocaleString()} charge aborts` : '',
-    chatters  !== null ? `${chatters.toLocaleString()} contact chatters` : '',
+    knockoffs !== null ? t(lang, 'health.dockKnockoffs', { count: knockoffs.toLocaleString() }) : '',
+    aborts    !== null ? t(lang, 'health.dockChargeAborts', { count: aborts.toLocaleString() }) : '',
+    chatters  !== null ? t(lang, 'health.dockContactChatters', { count: chatters.toLocaleString() }) : '',
   ].filter(Boolean);
   const countersHtml = counterParts.length
-    ? `<div class="rpc-dock-counters">${counterParts.join(' · ')} <span class="rpc-dock-lifetime-note">(lifetime)</span></div>`
+    ? `<div class="rpc-dock-counters">${counterParts.join(' · ')} <span class="rpc-dock-lifetime-note">${t(lang, 'health.dockLifetimeNote')}</span></div>`
     : '';
 
   return `
     <div class="rpc-health-divider"></div>
     <div class="rpc-dock-health">
-      <div class="rpc-dock-label">DOCK</div>
+      <div class="rpc-dock-label">${t(lang, 'health.dockLabel')}</div>
       ${tankHtml}
       ${countersHtml}
     </div>
@@ -412,7 +464,7 @@ function renderDockHealth(hass: HomeAssistant, n: string): string {
 function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: string, state: HealthZoneState): string {
   if (!caps.hasRoomsOverdue) return '';
 
-  const entity = hass.states[`sensor.${n}_rooms_overdue`];
+  const entity = hass.states[roomsOverdueId(hass, n) ?? ''];
   if (!entity) return '';
   // Bug-hunt round 1: an unavailable/unknown sensor must not read as "0
   // overdue" — HA clears attributes on unavailable entities, and this
@@ -422,6 +474,7 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
   // file (renderDockHealth, maintenance calendar, health score).
   if (entity.state === 'unknown' || entity.state === 'unavailable') return '';
 
+  const lang = resolveLang(hass.language);
   const attrs = entity.attributes ?? {};
   const rooms = (attrs['rooms'] ?? {}) as Record<string, {
     days_since_last: number; expected_interval_days: number | null;
@@ -432,7 +485,7 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
 
   let bodyHtml: string;
   if (overdueRooms.length === 0) {
-    bodyHtml = `<div class="rpc-rooms-overdue-row rpc-rooms-overdue-row--muted">All rooms in rhythm</div>`;
+    bodyHtml = `<div class="rpc-rooms-overdue-row rpc-rooms-overdue-row--muted">${t(lang, 'health.allRoomsInRhythm')}</div>`;
   } else {
     // overdue_rooms arrives pre-sorted worst-first (overdue_factor desc) —
     // rendered in that order as-is, not re-sorted here.
@@ -441,13 +494,13 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
       if (!info) return '';   // defensive: name in overdue_rooms but missing from rooms dict
       const days = Math.round(info.days_since_last);
       const expected = info.expected_interval_days != null ? Math.round(info.expected_interval_days) : null;
-      const expectedStr = expected != null ? ` (expected ~${expected}d)` : '';
-      return `<div class="rpc-rooms-overdue-row">${esc(name)} — ${days}d since last clean${expectedStr}</div>`;
+      const expectedStr = expected != null ? t(lang, 'health.expectedInterval', { days: expected }) : '';
+      return `<div class="rpc-rooms-overdue-row">${t(lang, 'health.roomOverdueRow', { name: esc(name), days, expected: expectedStr })}</div>`;
     }).join('');
   }
 
   const dailyHtml = dailySuggested.length > 0
-    ? `<div class="rpc-rooms-overdue-daily">${dailySuggested.map(esc).join(', ')} could use daily cleaning</div>`
+    ? `<div class="rpc-rooms-overdue-daily">${t(lang, 'health.dailySuggested', { names: dailySuggested.map(esc).join(', ') })}</div>`
     : '';
 
   // v2.4.0 — Suggested cleaning intervals (RobotProfileStore DIRT-VEL).
@@ -467,7 +520,7 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
     .sort((a, b) => a[1] - b[1]);
   const suggestedHtml = suggestedEntries.length > 0
     ? `<div class="rpc-rooms-suggested">${suggestedEntries.map(([name, days]) =>
-        `<div class="rpc-rooms-suggested-row">${esc(name)}: suggested every ${days.toFixed(1)}d</div>`
+        `<div class="rpc-rooms-suggested-row">${t(lang, 'health.suggestedInterval', { name: esc(name), days: days.toFixed(1) })}</div>`
       ).join('')}</div>`
     : '';
 
@@ -483,9 +536,9 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
     <button class="rpc-btn rpc-btn-secondary rpc-rooms-overdue-btn${isCleaning ? ' rpc-btn-loading' : ''}"
             data-reset="overdue-clean" data-service="clean_overdue_rooms"
             ${isCleaning ? 'disabled' : ''}>
-      ${isCleaning ? '<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>' : 'Clean overdue'}
+      ${isCleaning ? '<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>' : t(lang, 'health.cleanOverdueBtn')}
     </button>
-    ${state.resetError === 'overdue-clean' ? `<div class="rpc-send-error">Couldn't start — try again</div>` : ''}
+    ${state.resetError === 'overdue-clean' ? `<div class="rpc-send-error">${t(lang, 'health.couldntStart')}</div>` : ''}
   ` : '';
 
   // v2.4.0 — "Auto-clean dirty rooms" trigger (integration's SMART-ORDER
@@ -506,15 +559,15 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
     <button class="rpc-btn rpc-btn-secondary rpc-rooms-overdue-btn${isAutoCleaningDirty ? ' rpc-btn-loading' : ''}"
             data-reset="auto-clean-dirty" data-service="auto_clean_dirty_rooms"
             ${isAutoCleaningDirty ? 'disabled' : ''}>
-      ${isAutoCleaningDirty ? '<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>' : 'Auto-clean dirty rooms'}
+      ${isAutoCleaningDirty ? '<svg class="rpc-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="31 63"/></svg>' : t(lang, 'health.autoCleanDirtyBtn')}
     </button>
-    ${state.resetError === 'auto-clean-dirty' ? `<div class="rpc-send-error">Couldn't start — try again</div>` : ''}
+    ${state.resetError === 'auto-clean-dirty' ? `<div class="rpc-send-error">${t(lang, 'health.couldntStart')}</div>` : ''}
   `;
 
   return `
     <div class="rpc-health-divider"></div>
     <div class="rpc-rooms-overdue">
-      <div class="rpc-dock-label">ROOMS</div>
+      <div class="rpc-dock-label">${t(lang, 'health.roomsLabel')}</div>
       ${bodyHtml}
       ${dailyHtml}
       ${suggestedHtml}
@@ -549,6 +602,7 @@ function renderDirtCorrelation(hass: HomeAssistant, caps: RobotCapabilities, n: 
   // report as unavailable except a genuinely dead entity) means hide.
   if (entity.state === 'unavailable') return '';
 
+  const lang = resolveLang(hass.language);
   const attrs = entity.attributes ?? {};
   const byEntity = (attrs['by_entity'] ?? {}) as Record<string, { r: number | null; n: number }>;
   const strongestEntity = (attrs['strongest_entity'] ?? null) as string | null;
@@ -559,18 +613,18 @@ function renderDirtCorrelation(hass: HomeAssistant, caps: RobotCapabilities, n: 
   let bodyHtml: string;
   const strongestInfo = strongestEntity ? byEntity[strongestEntity] : undefined;
   if (strongestEntity && strongestInfo?.r != null) {
-    bodyHtml = `<div class="rpc-dirt-corr-row">Strongest link: ${esc(friendlyName(strongestEntity))} (r = ${strongestInfo.r.toFixed(2)})</div>`;
+    bodyHtml = `<div class="rpc-dirt-corr-row">${t(lang, 'health.strongestLink', { name: esc(friendlyName(strongestEntity)), r: strongestInfo.r.toFixed(2) })}</div>`;
   } else {
     const entries = Object.entries(byEntity);
     if (entries.length === 0) {
-      bodyHtml = `<div class="rpc-dirt-corr-row rpc-dirt-corr-row--muted">Collecting data…</div>`;
+      bodyHtml = `<div class="rpc-dirt-corr-row rpc-dirt-corr-row--muted">${t(lang, 'health.collectingData')}</div>`;
     } else {
       // v3.3.0 CROSS-CORR — _CORR_MIN_SAMPLES threshold (verified against
       // source): correlation is only computed from 30 samples onwards;
       // below that, show progress toward it rather than nothing.
       bodyHtml = entries.map(([eid, info]) => {
         const nCount = typeof info?.n === 'number' ? info.n : 0;
-        return `<div class="rpc-dirt-corr-row rpc-dirt-corr-row--muted">${esc(friendlyName(eid))}: ${nCount}/30 missions</div>`;
+        return `<div class="rpc-dirt-corr-row rpc-dirt-corr-row--muted">${t(lang, 'health.corrProgress', { name: esc(friendlyName(eid)), count: nCount })}</div>`;
       }).join('');
     }
   }
@@ -578,7 +632,7 @@ function renderDirtCorrelation(hass: HomeAssistant, caps: RobotCapabilities, n: 
   return `
     <div class="rpc-health-divider"></div>
     <div class="rpc-dirt-corr">
-      <div class="rpc-dock-label">DIRT CORRELATION</div>
+      <div class="rpc-dock-label">${t(lang, 'health.dirtCorrelationLabel')}</div>
       ${bodyHtml}
     </div>
   `;
@@ -594,14 +648,15 @@ export function renderHealthZone(
   if (config.show_health === false) return '';
 
   const n = robotName;
+  const lang = resolveLang(hass.language);
   const bars: Bar[] = [];
 
   // Filter — all robots
   if (hass.states[`sensor.${n}_filter_remaining_hours`]) {
     bars.push({
-      key: 'filter', label: 'Filter',
+      key: 'filter', label: t(lang, 'health.barFilter'),
       sensorId:     `sensor.${n}_filter_remaining_hours`,
-      thresholdAttr: 'threshold_hours',
+      needsReference: true,
       type: 'consumable',
       wearSensorId:  caps.hasWearRate ? `sensor.${n}_filter_wear_rate` : undefined,
       resetService:  'reset_filter',
@@ -612,9 +667,9 @@ export function renderHealthZone(
   // Brush — vacuums only
   if (caps.hasBrush && hass.states[`sensor.${n}_brush_remaining_hours`]) {
     bars.push({
-      key: 'brush', label: 'Brush',
+      key: 'brush', label: t(lang, 'health.barBrush'),
       sensorId:     `sensor.${n}_brush_remaining_hours`,
-      thresholdAttr: 'threshold_hours',
+      needsReference: true,
       type: 'consumable',
       wearSensorId:  caps.hasWearRate ? `sensor.${n}_brush_wear_rate` : undefined,
       resetService:  'reset_brush',
@@ -622,13 +677,16 @@ export function renderHealthZone(
     });
   }
 
-  // Pad — Braava only
+  // Pad — Braava / Combo. v2.5.0 F6: rendered as days remaining. The bar
+  // expected a `threshold_days` attribute the integration never had, so it
+  // never rendered at all; the sensor is a forecast in days with no
+  // reference life to draw a percentage against.
   if (caps.hasPad && hass.states[`sensor.${n}_pad_days_until_due`]) {
     bars.push({
-      key: 'pad', label: 'Pad',
+      key: 'pad', label: t(lang, 'health.barPad'),
       sensorId:      `sensor.${n}_pad_days_until_due`,
-      thresholdAttr: 'threshold_days',
-      type: 'consumable',
+      needsReference: false,
+      type: 'days',
       unit: 'd',
       wearSensorId:  caps.hasWearRate ? `sensor.${n}_pad_wear_rate` : undefined,
       resetService:  'reset_pad',
@@ -639,25 +697,25 @@ export function renderHealthZone(
   // Tank — Braava only
   if (caps.hasWater && hass.states[`sensor.${n}_mop_tank_level`]) {
     bars.push({
-      key: 'tank', label: 'Tank',
+      key: 'tank', label: t(lang, 'health.barTank'),
       sensorId:     `sensor.${n}_mop_tank_level`,
-      thresholdAttr: null,
+      needsReference: false,
       type: 'tank',
     });
   }
 
-  // Battery — dedicated sensor preferred, vacuum attribute fallback
-  const batSensorId =
-    hass.states[`sensor.${n}_battery`] ? `sensor.${n}_battery` : null;
+  // Battery — dedicated sensor preferred, vacuum attribute fallback.
+  // v2.5.0 F8: _battery (fresh) or _battery_level (schema-21 migrated).
+  const batSensorId = batterySensorId(hass, n);
   const vacBatPct = !batSensorId
     ? (hass.states[`vacuum.${n}`]?.attributes?.battery_level as number | undefined)
     : undefined;
 
   if (batSensorId || vacBatPct !== undefined) {
     bars.push({
-      key: 'battery', label: 'Battery',
+      key: 'battery', label: t(lang, 'health.barBattery'),
       sensorId:     batSensorId ?? '',
-      thresholdAttr: null,
+      needsReference: false,
       type: 'battery',
       rawPct: vacBatPct,
     });
@@ -666,9 +724,9 @@ export function renderHealthZone(
   // Clean Base — s9+ only
   if (caps.hasCleanBase && hass.states[`sensor.${n}_clean_base_status`]) {
     bars.push({
-      key: 'cleanbase', label: 'Clean Base',
+      key: 'cleanbase', label: t(lang, 'health.barCleanBase'),
       sensorId:     `sensor.${n}_clean_base_status`,
-      thresholdAttr: null,
+      needsReference: false,
       type: 'cleanbase',
     });
   }
@@ -707,13 +765,14 @@ export function renderHealthZone(
         && errSensor.state !== ''
         && errSensor.state !== 'unknown'
         && errSensor.state !== 'unavailable') {
-      const label = esc((errSensor.attributes.label as string) ?? `Error ${errSensor.state}`);
+      const label = esc((errSensor.attributes.label as string) ?? t(lang, 'alert.errorFallback', { code: errSensor.state }));
       const atState = hass.states[`sensor.${n}_last_error_at`]?.state;
       const ago = (atState && atState !== 'unknown' && atState !== 'unavailable')
         ? timeSince(atState, hass.language)
         : '';
+      const agoSuffix = ago ? t(lang, 'health.lastErrorAgoSuffix', { ago: esc(ago) }) : '';
       lastErrorHtml = `
-        <div class="rpc-last-error-info">Last error: ${label}${ago ? ` · ${esc(ago)} (resolved)` : ' (resolved)'}</div>
+        <div class="rpc-last-error-info">${t(lang, 'health.lastError', { label, agoSuffix })}</div>
       `;
     }
   }
@@ -739,7 +798,9 @@ export function renderHealthZone(
   // v2.2.0 A3: dockHealthHtml likewise.
   if (bars.length === 0 && !caps.hasRobotHealthScore && !caps.hasMaintenanceCalendar
       && !anomalyHtml && !navHealthHtml && !caps.hasBatteryRetention && !caps.hasCoveragePct
-      && !lastErrorHtml && !dockHealthHtml && !roomsOverdueHtml && !dirtCorrelationHtml) return '';
+      && !lastErrorHtml && !dockHealthHtml && !roomsOverdueHtml && !dirtCorrelationHtml
+      // v2.5.0: the mop pad / intensity line is real content on its own too.
+      && !(caps.isMop && (hass.states[`sensor.${n}_mop_pad`] || hass.states[`sensor.${n}_mop_behavior`]))) return '';
 
   const barsHtml = bars.map(bar => renderBar(bar, hass, n, state)).join('');
 
@@ -755,7 +816,7 @@ export function renderHealthZone(
         const colour = retPct > 85 ? 'var(--rpc-green)' : retPct > 70 ? 'var(--rpc-amber)' : 'var(--rpc-red)';
         const cyclesEntity = hass.states[`sensor.${n}_battery_cycles`];
         const cyclesVal    = cyclesEntity ? parseInt(cyclesEntity.state, 10) : NaN;
-        const cycleText    = !isNaN(cyclesVal) ? `${cyclesVal} charge cycle${cyclesVal !== 1 ? 's' : ''}` : '';
+        const cycleText    = !isNaN(cyclesVal) ? t(lang, 'health.chargeCycles', { count: cyclesVal }) : '';
 
         let eolHtml = '';
         if (caps.hasBatteryEol) {
@@ -764,8 +825,8 @@ export function renderHealthZone(
             const eolDays = parseInt(eolEntity.state, 10);
             if (!isNaN(eolDays)) {
               eolHtml = eolDays > 0
-                ? `<div class="rpc-retention-eol">Battery life: ~${eolDays} days remaining</div>`
-                : `<div class="rpc-retention-eol rpc-retention-eol--warn">Consider replacing — battery at end of life</div>`;
+                ? `<div class="rpc-retention-eol">${t(lang, 'health.batteryLifeRemaining', { days: eolDays })}</div>`
+                : `<div class="rpc-retention-eol rpc-retention-eol--warn">${t(lang, 'health.batteryEol')}</div>`;
             }
           }
         }
@@ -776,21 +837,21 @@ export function renderHealthZone(
         const popover = isOpen ? `
           <div class="rpc-popover">
             <div class="rpc-popover-header">
-              <span>Battery Health</span>
-              <button class="rpc-popover-close" data-close="retention" aria-label="Close">×</button>
+              <span>${t(lang, 'health.batteryHealthTitle')}</span>
+              <button class="rpc-popover-close" data-close="retention" aria-label="${t(lang, 'history.close')}">×</button>
             </div>
             <div class="rpc-popover-divider"></div>
             <div class="rpc-popover-body">
-              <div>${retPct}% of original capacity</div>
+              <div>${t(lang, 'health.originalCapacity', { pct: retPct })}</div>
               ${cycleText ? `<div class="rpc-popover-sub">${cycleText}</div>` : ''}
               ${eolHtml}
             </div>
             <button class="rpc-btn rpc-btn-secondary${isResetting ? ' rpc-btn-loading' : ''}"
                     data-reset="retention" data-service="reset_battery"
                     ${isResetting ? 'disabled' : ''}>
-              ${isResetting ? spinnerSvg : 'Mark as replaced'}
+              ${isResetting ? spinnerSvg : t(lang, 'health.markAsReplaced')}
             </button>
-            ${state.resetError === 'retention' ? `<div class="rpc-send-error">Reset failed — try again</div>` : ''}
+            ${state.resetError === 'retention' ? `<div class="rpc-send-error">${t(lang, 'health.resetFailed')}</div>` : ''}
           </div>` : '';
 
         // v2.0.2 bug fix (UX report): this row previously omitted the
@@ -803,8 +864,8 @@ export function renderHealthZone(
         // track width and percent column with every other bar in this tab.
         retentionBarHtml = `
           <div class="rpc-bar-row" data-bar="retention" role="button" aria-expanded="${isOpen}" tabindex="0"
-               aria-label="Bat. Health — ${retPct}%">
-            <span class="rpc-bar-label">Bat. Health</span>
+               aria-label="${t(lang, 'health.batHealthAriaLabel', { pct: retPct })}">
+            <span class="rpc-bar-label">${t(lang, 'health.batHealthLabel')}</span>
             <div class="rpc-bar-track"><div class="rpc-bar-fill" style="width:${retPct}%;background:${colour}"></div></div>
             <span class="rpc-bar-pct" style="color:${colour}">${retPct}%</span>
             <span class="rpc-bar-hours"></span>
@@ -817,44 +878,50 @@ export function renderHealthZone(
   // F6a — Coverage percentage bar (v2.1+)
   let coverageBarHtml = '';
   if (caps.hasCoveragePct) {
-    const covEntity = hass.states[`sensor.${n}_recent_coverage_pct`];
-    if (covEntity && covEntity.state !== 'unavailable' && covEntity.state !== 'unknown') {
+    // v2.5.0 F5: `coverage_pct` attribute on cleaning_performance (the
+    // standalone recent_coverage_pct sensor was removed in integration v3.0).
+    // It is the last mission's area against the 60-day typical (p75), so it
+    // can exceed 100 — the bar is clamped, the number is not.
+    const perfEntity = hass.states[`sensor.${n}_cleaning_performance`];
+    const covRaw = perfEntity?.attributes?.coverage_pct;
+    if (perfEntity && typeof covRaw === 'number' && Number.isFinite(covRaw)) {
       const missionCountEntity = hass.states[`sensor.${n}_missions_last_30d`];
       const missionCount       = missionCountEntity ? parseInt(missionCountEntity.state, 10) : NaN;
       if (isNaN(missionCount) || missionCount < 10) {
         coverageBarHtml = `
           <div class="rpc-bar-row rpc-bar-row--static">
-            <span class="rpc-bar-label">Coverage</span>
-            <span class="rpc-coverage-building">Building history…</span>
+            <span class="rpc-bar-label">${t(lang, 'health.coverageLabel')}</span>
+            <span class="rpc-coverage-building">${t(lang, 'health.buildingHistory')}</span>
           </div>`;
       } else {
-        const covPct = Math.min(100, Math.round(parseFloat(covEntity.state)));
-        if (!isNaN(covPct)) {
+        const covPct = Math.max(0, Math.round(covRaw));
+        const covBar = Math.min(100, covPct);
+        {
           const colour  = covPct >= 85 ? 'var(--rpc-green)' : covPct >= 65 ? 'var(--rpc-amber)' : 'var(--rpc-red)';
           const isOpen  = state.openPopover === 'coverage';
           const missionText = !isNaN(missionCount)
-            ? `Based on ${missionCount} mission${missionCount !== 1 ? 's' : ''} in the last 30 days.`
+            ? t(lang, 'health.basedOnMissions', { count: missionCount })
             : '';
           const popover = isOpen ? `
             <div class="rpc-popover">
               <div class="rpc-popover-header">
-                <span>Floor Coverage</span>
-                <button class="rpc-popover-close" data-close="coverage" aria-label="Close">×</button>
+                <span>${t(lang, 'health.floorCoverageTitle')}</span>
+                <button class="rpc-popover-close" data-close="coverage" aria-label="${t(lang, 'history.close')}">×</button>
               </div>
               <div class="rpc-popover-divider"></div>
               <div class="rpc-popover-body">
-                <div>${covPct}% of floor area covered on the last mission.</div>
+                <div>${t(lang, 'health.floorAreaCovered', { pct: covPct })}</div>
                 ${missionText ? `<div class="rpc-popover-sub">${missionText}</div>` : ''}
-                <div class="rpc-popover-sub">Low coverage may indicate obstacles, map drift, or a missed room.</div>
+                <div class="rpc-popover-sub">${t(lang, 'health.lowCoverageNote')}</div>
               </div>
             </div>` : '';
           coverageBarHtml = `
             <div class="rpc-bar-row" data-bar="coverage" role="button" aria-expanded="${isOpen}" tabindex="0"
-                 aria-label="Coverage ${covPct}% last mission">
-              <span class="rpc-bar-label">Coverage</span>
-              <div class="rpc-bar-track"><div class="rpc-bar-fill" style="width:${covPct}%;background:${colour}"></div></div>
+                 aria-label="${t(lang, 'health.coverageAriaLabel', { pct: covPct })}">
+              <span class="rpc-bar-label">${t(lang, 'health.coverageLabel')}</span>
+              <div class="rpc-bar-track"><div class="rpc-bar-fill" style="width:${covBar}%;background:${colour}"></div></div>
               <span class="rpc-bar-pct" style="color:${colour}">${covPct}%</span>
-              <span class="rpc-bar-hours">last mission</span>
+              <span class="rpc-bar-hours">${t(lang, 'health.lastMissionText')}</span>
             </div>
             ${popover}`;
         }
@@ -877,24 +944,25 @@ export function renderHealthZone(
         const cyclesEntity = hass.states[`sensor.${n}_battery_cycles`];
         const cyclesVal    = cyclesEntity ? parseInt(cyclesEntity.state, 10) : NaN;
         const isOpen = state.openPopover === 'energy';
+        const cyclesSuffix = !isNaN(cyclesVal) ? t(lang, 'health.energyCyclesSuffix', { cycles: cyclesVal }) : '';
         const popover = isOpen ? `
           <div class="rpc-popover">
             <div class="rpc-popover-header">
-              <span>Energy</span>
-              <button class="rpc-popover-close" data-close="energy" aria-label="Close">×</button>
+              <span>${t(lang, 'health.energyTitle')}</span>
+              <button class="rpc-popover-close" data-close="energy" aria-label="${t(lang, 'history.close')}">×</button>
             </div>
             <div class="rpc-popover-divider"></div>
             <div class="rpc-popover-body">
-              <div>~${kwh.toFixed(1)} kWh used${!isNaN(cyclesVal) ? ` over ${cyclesVal} charge cycles` : ''}</div>
-              <div class="rpc-popover-sub">Estimated from battery capacity and cycle count.</div>
-              <div class="rpc-popover-sub">Connect to the HA Energy dashboard for home-wide monitoring.</div>
+              <div>${t(lang, 'health.energyUsed', { kwh: kwh.toFixed(1), cyclesSuffix })}</div>
+              <div class="rpc-popover-sub">${t(lang, 'health.energyEstimateNote')}</div>
+              <div class="rpc-popover-sub">${t(lang, 'health.energyDashboardNote')}</div>
             </div>
           </div>` : '';
         energyHtml = `
           <div class="rpc-bar-row" data-bar="energy" role="button" aria-expanded="${isOpen}" tabindex="0"
-               aria-label="Lifetime energy ~${kwh.toFixed(1)} kWh">
-            <span class="rpc-bar-label">Energy</span>
-            <span class="rpc-energy-val">~${kwh.toFixed(1)} kWh lifetime</span>
+               aria-label="${t(lang, 'health.energyAriaLabel', { kwh: kwh.toFixed(1) })}">
+            <span class="rpc-bar-label">${t(lang, 'health.energyLabel')}</span>
+            <span class="rpc-energy-val">${t(lang, 'health.energyLifetime', { kwh: kwh.toFixed(1) })}</span>
           </div>
           ${popover}`;
       }
@@ -907,8 +975,9 @@ export function renderHealthZone(
     const padType   = hass.states[`sensor.${n}_mop_pad`];
     const mopBehav  = caps.hasMopBehavior ? hass.states[`sensor.${n}_mop_behavior`] : null;
     const parts: string[] = [];
-    if (padType  && padType.state  !== 'unknown' && padType.state  !== 'unavailable') parts.push(esc(padType.state));
-    if (mopBehav && mopBehav.state !== 'unknown' && mopBehav.state !== 'unavailable') parts.push(`${esc(mopBehav.state)} intensity`);
+    // v2.5.0 F6: slugs (`reusable_wet`, `standard`) — integration's text.
+    if (padType  && padType.state  !== 'unknown' && padType.state  !== 'unavailable') parts.push(esc(formatState(hass, `sensor.${n}_mop_pad`)));
+    if (mopBehav && mopBehav.state !== 'unknown' && mopBehav.state !== 'unavailable') parts.push(t(lang, 'health.mopIntensity', { state: esc(formatState(hass, `sensor.${n}_mop_behavior`)) }));
     if (parts.length) {
       mopConfigHtml = `
         <div class="rpc-health-divider"></div>
@@ -919,7 +988,7 @@ export function renderHealthZone(
 
   return `
     <div class="rpc-zone rpc-zone3">
-      <div class="rpc-zone-header">HEALTH</div>
+      <div class="rpc-zone-header">${t(lang, 'health.zoneHeader')}</div>
       ${anomalyHtml}
       ${lastErrorHtml}
       ${renderHealthScore(hass, caps, n, state.healthDetailsExpanded)}
@@ -945,13 +1014,36 @@ function renderBar(bar: Bar, hass: HomeAssistant, _n: string, state: HealthZoneS
   if (bar.type === 'cleanbase') {
     const entity = hass.states[bar.sensorId];
     if (!entity) return '';
+    const lang = resolveLang(hass.language);
+    const text = cleanBaseDisplay(hass, bar.sensorId, entity.state, lang);
+    const warn = CLEAN_BASE_PROBLEMS.has(entity.state);
     return `
       <div class="rpc-bar-row" data-bar="${bar.key}" role="button" aria-expanded="${isOpen}" tabindex="0"
            aria-label="${bar.label}">
         <span class="rpc-bar-label">${bar.label}</span>
-        <span class="rpc-bar-cleanbase-state">${cleanBaseDisplay(entity.state)}</span>
+        <span class="rpc-bar-cleanbase-state${warn ? ' rpc-bar-cleanbase-state--warn' : ''}">${text}</span>
       </div>
-      ${isOpen ? renderCleanBasePopover(bar.label, entity.state) : ''}
+      ${isOpen ? renderCleanBasePopover(bar.label, text, lang) : ''}
+    `;
+  }
+
+  // v2.5.0 F6 — days-remaining row (pad): coloured value, no percentage.
+  if (bar.type === 'days') {
+    const entity = hass.states[bar.sensorId];
+    if (!entity) return '';
+    const days = parseFloat(entity.state);
+    if (isNaN(days)) return '';
+    const lang = resolveLang(hass.language);
+    const d = Math.max(0, Math.round(days));
+    const colour = d <= 3 ? 'var(--rpc-red)' : d <= 10 ? 'var(--rpc-amber)' : 'var(--rpc-green)';
+    const text = d === 0 ? t(lang, 'health.dueNow') : t(lang, 'health.daysLeft', { count: d });
+    return `
+      <div class="rpc-bar-row" data-bar="${bar.key}" role="button" aria-expanded="${isOpen}" tabindex="0"
+           aria-label="${bar.label} — ${text}">
+        <span class="rpc-bar-label">${bar.label}</span>
+        <span class="rpc-bar-days" style="color:${colour}">${text}</span>
+      </div>
+      ${isOpen ? renderConsumablePopover(bar, entity, null, hass, state) : ''}
     `;
   }
 
@@ -968,15 +1060,15 @@ function renderBar(bar: Bar, hass: HomeAssistant, _n: string, state: HealthZoneS
   } else {
     const entity = hass.states[bar.sensorId];
     if (!entity) return '';
-    const raw = parseFloat(entity.state);
+    const raw = bar.needsReference ? remainingHoursFromEntity(entity) : parseFloat(entity.state);
     if (isNaN(raw)) return '';
 
     if (bar.type === 'tank' || bar.type === 'battery') {
       barPct     = Math.min(100, Math.max(0, raw));
       displayVal = `${Math.round(barPct)}%`;
     } else {
-      // consumable — needs threshold
-      threshold  = bar.thresholdAttr ? (entity.attributes[bar.thresholdAttr] as number) : null;
+      // consumable — needs a reference life (v2.5.0 F7: max_hours first)
+      threshold  = bar.needsReference ? consumableReferenceHours(entity) : null;
       if (!threshold) return '';
       barPct       = pct(raw, threshold);
       displayVal   = `${barPct}%`;
@@ -1022,8 +1114,12 @@ function renderConsumablePopover(
   hass: HomeAssistant,
   state: HealthZoneState
 ): string {
-  const remaining = parseFloat(entity.state);
+  const lang = resolveLang(hass.language);
+  const remaining = bar.needsReference
+    ? remainingHoursFromEntity(entity as HAState)
+    : parseFloat(entity.state);
   const barPct    = threshold ? pct(remaining, threshold) : Math.min(100, Math.max(0, remaining));
+  const isDays    = bar.type === 'days';
   const colour    = barColour(barPct, bar.type);
   const isResetting = state.resetting === bar.key;
 
@@ -1035,7 +1131,7 @@ function renderConsumablePopover(
     const d = new Date(lastReplacedEntity.state);
     lastReplacedHtml = `
       <div class="rpc-popover-row">
-        <span>Last replaced</span>
+        <span>${t(lang, 'health.lastReplaced')}</span>
         <span>${d.toLocaleDateString(hass.language)} (${timeSince(lastReplacedEntity.state, hass.language)})</span>
       </div>`;
   }
@@ -1047,10 +1143,10 @@ function renderConsumablePopover(
     if (wearEntity && wearEntity.state !== 'unknown' && wearEntity.state !== 'unavailable') {
       wearLegendHtml = `
         <div class="rpc-wear-legend" data-wear-legend>
-          <span class="rpc-wear-legend-title">Wear trend</span>
-          <span>↑ wearing faster than normal</span>
-          <span>→ wearing at normal rate</span>
-          <span>↓ wearing slower than normal</span>
+          <span class="rpc-wear-legend-title">${t(lang, 'health.wearTrendTitle')}</span>
+          <span>${t(lang, 'health.wearFaster')}</span>
+          <span>${t(lang, 'health.wearNormal')}</span>
+          <span>${t(lang, 'health.wearSlower')}</span>
         </div>`;
     }
   }
@@ -1061,38 +1157,39 @@ function renderConsumablePopover(
     <div class="rpc-popover">
       <div class="rpc-popover-header">
         <span>${esc(bar.label)}</span>
-        <button class="rpc-popover-close" data-close="${bar.key}" aria-label="Close">×</button>
+        <button class="rpc-popover-close" data-close="${bar.key}" aria-label="${t(lang, 'history.close')}">×</button>
       </div>
       <div class="rpc-popover-divider"></div>
       ${lastReplacedHtml}
-      ${threshold ? `<div class="rpc-popover-row"><span>Threshold</span><span>${threshold} ${bar.unit ?? 'h'}</span></div>` : ''}
-      ${threshold ? `<div class="rpc-popover-row"><span>Remaining</span><span>${Math.round(remaining)} ${bar.unit ?? 'h'} (${barPct}%)</span></div>` : ''}
+      ${threshold ? `<div class="rpc-popover-row"><span>${t(lang, 'health.thresholdLabel')}</span><span>${threshold} ${bar.unit ?? 'h'}</span></div>` : ''}
+      ${threshold ? `<div class="rpc-popover-row"><span>${t(lang, 'health.remainingLabel')}</span><span>${Math.round(remaining)} ${bar.unit ?? 'h'} (${barPct}%)</span></div>` : ''}
+      ${isDays ? `<div class="rpc-popover-row"><span>${t(lang, 'health.remainingLabel')}</span><span>${isNaN(remaining) ? '—' : t(lang, 'health.daysLeft', { count: Math.max(0, Math.round(remaining)) })}</span></div>` : `
       <div class="rpc-popover-bar-track">
         <div class="rpc-popover-bar-fill" style="width:${barPct}%;background:${colour}"></div>
-      </div>
+      </div>`}
       ${wearLegendHtml}
       ${bar.resetService ? `
         <button class="rpc-btn rpc-btn-secondary${isResetting ? ' rpc-btn-loading' : ''}"
                 data-reset="${bar.key}" data-service="${bar.resetService}"
                 ${isResetting ? 'disabled' : ''}>
-          ${isResetting ? spinnerSvg : 'Mark as replaced'}
+          ${isResetting ? spinnerSvg : t(lang, 'health.markAsReplaced')}
         </button>
-        ${state.resetError === bar.key ? `<div class="rpc-send-error">Reset failed — try again</div>` : ''}
+        ${state.resetError === bar.key ? `<div class="rpc-send-error">${t(lang, 'health.resetFailed')}</div>` : ''}
       ` : ''}
     </div>
   `;
 }
 
-function renderCleanBasePopover(label: string, rawState: string): string {
+function renderCleanBasePopover(label: string, statusText: string, lang: string): string {
   return `
     <div class="rpc-popover">
       <div class="rpc-popover-header">
         <span>${esc(label)}</span>
-        <button class="rpc-popover-close" data-close="cleanbase" aria-label="Close">×</button>
+        <button class="rpc-popover-close" data-close="cleanbase" aria-label="${t(lang, 'history.close')}">×</button>
       </div>
       <div class="rpc-popover-divider"></div>
-      <div class="rpc-popover-row"><span>Status</span><span>${cleanBaseDisplay(rawState)}</span></div>
-      <div class="rpc-popover-row"><span>Function</span><span>Auto-empties bin after missions</span></div>
+      <div class="rpc-popover-row"><span>${t(lang, 'health.statusLabel')}</span><span>${statusText}</span></div>
+      <div class="rpc-popover-row"><span>${t(lang, 'health.functionLabel')}</span><span>${t(lang, 'health.cleanBaseFunction')}</span></div>
     </div>
   `;
 }

@@ -1,5 +1,6 @@
 import { MissionMapPayload } from './types.js';
 import { esc } from './utils.js';
+import { t } from './i18n/index.js';
 
 /**
  * v2.3.0 MISSION-MAP — client-side coverage replay for one finished mission.
@@ -130,10 +131,10 @@ export function buildMissionMapGeometry(payload: MissionMapPayload): MissionMapG
  * around the viewBox centre — lossless, and no change to
  * buildMissionMapGeometry()'s point/polygon math at all.
  */
-export function renderMissionMapSvg(payload: MissionMapPayload, rotate: 0 | 90 | 180 | 270 = 0): string {
+export function renderMissionMapSvg(payload: MissionMapPayload, rotate: 0 | 90 | 180 | 270 = 0, lang = 'en'): string {
   const geo = buildMissionMapGeometry(payload);
   if (geo.empty) {
-    return `<div class="rpc-map-panel rpc-explain-panel--muted">No coverage data to draw for this mission.</div>`;
+    return `<div class="rpc-map-panel rpc-explain-panel--muted">${t(lang, 'missionMap.noData')}</div>`;
   }
   const roomPolys = geo.rooms
     .map(r => `<polygon class="rpc-map-room" points="${esc(r.points)}"><title>${esc(r.name)}</title></polygon>`)
@@ -148,7 +149,7 @@ export function renderMissionMapSvg(payload: MissionMapPayload, rotate: 0 | 90 |
     : content;
   return `
     <div class="rpc-map-panel">
-      <svg class="rpc-map-svg" viewBox="0 0 ${SVG_SIZE} ${SVG_SIZE}" width="${SVG_SIZE}" height="${SVG_SIZE}" role="img" aria-label="Mission coverage map">
+      <svg class="rpc-map-svg" viewBox="0 0 ${SVG_SIZE} ${SVG_SIZE}" width="${SVG_SIZE}" height="${SVG_SIZE}" role="img" aria-label="${t(lang, 'aria.missionMapLabel')}">
         ${rotated}
       </svg>
     </div>`;

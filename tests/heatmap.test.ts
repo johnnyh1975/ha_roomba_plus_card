@@ -342,3 +342,82 @@ describe('renderHeatmap() — F16 dirt density opacity', () => {
     expect(html).not.toContain('opacity=');
   });
 });
+
+// ── v2.5.0 F11 — exact coverage-map frame ────────────────────────────────────
+import { coverageExtentFromAttrs, coverageToImagePct, coverageToImagePctNum, coverageContentBox, coverageFrameStyles } from '../src/heatmap';
+
+describe('coverageToImagePctNum() — mirrors GridStore.render_heatmap', () => {
+  // A wide, short floor: 6000 × 2000 mm of cell centres, 150 mm cells.
+  // Renderer: square canvas of side 6150 mm (max span + cell), grid anchored
+  // top-left, so the content box is 6150 × 2150 mm and the rest transparent.
+  const ext = coverageExtentFromAttrs({
+    x_min_mm: 75, x_max_mm: 6075, y_min_mm: 75, y_max_mm: 2075, cell_size_mm: 150,
+  })!;
+
+  it('reads extent and cell size from the entity attributes', () =>
+    expect(ext).toEqual({ xMin: 75, xMax: 6075, yMin: 75, yMax: 2075, cellMm: 150 }));
+
+  it('content box = span + one cell per axis; square side = the larger', () =>
+    expect(coverageContentBox(ext)).toEqual({ wMm: 6150, hMm: 2150, totalMm: 6150 }));
+
+  it('the top-left cell centre sits half a cell in from the content corner', () => {
+    const p = coverageToImagePctNum(ext, 75, 2075);
+    expect(p.x).toBeCloseTo(75 / 6150 * 100, 6);
+    expect(p.y).toBeCloseTo(75 / 2150 * 100, 6);
+  });
+
+  it('the bottom-right cell centre sits half a cell in from the opposite corner', () => {
+    const p = coverageToImagePctNum(ext, 6075, 75);
+    expect(p.x).toBeCloseTo(6075 / 6150 * 100, 6);
+    expect(p.y).toBeCloseTo(2075 / 2150 * 100, 6);
+  });
+
+  it('negative control: without cell size the old per-axis stretch is used', () => {
+    const old = coverageToImagePctNum({ ...ext, cellMm: null }, 6075, 75);
+    expect(old.y).toBeCloseTo(100, 6);
+    expect(old.x).toBeCloseTo(100, 6);
+  });
+
+  it('y is flipped (north up), like the renderer', () => {
+    const top = coverageToImagePctNum(ext, 1000, 2000);
+    const bottom = coverageToImagePctNum(ext, 1000, 100);
+    expect(top.y).toBeLessThan(bottom.y);
+  });
+
+  it('a single-cell grid does not divide by zero', () => {
+    const one = coverageExtentFromAttrs({ x_min_mm: 75, x_max_mm: 75, y_min_mm: 75, y_max_mm: 75, cell_size_mm: 150 })!;
+    const p = coverageToImagePctNum(one, 75, 75);
+    expect(p.x).toBeCloseTo(25, 6);   // (0 + 75) / (150 + 150)
+    expect(p.y).toBeCloseTo(25, 6);
+  });
+
+  it('CSS variant formats as percentages', () =>
+    expect(coverageToImagePct(ext, 75, 2075)).toEqual({ left: '1.2%', top: '3.5%' }));
+
+  it('incomplete extent → null (no overlay rather than a wrong one)', () => {
+    expect(coverageExtentFromAttrs({ x_min_mm: 0, x_max_mm: 1 })).toBeNull();
+    expect(coverageExtentFromAttrs(undefined)).toBeNull();
+    expect(coverageExtentFromAttrs({ x_min_mm: 0, x_max_mm: 1, y_min_mm: 0, y_max_mm: 1, cell_size_mm: 0 })!.cellMm).toBeNull();
+  });
+});
+
+describe('coverageFrameStyles() — #20 crop + viewport cap', () => {
+  it('wide floor: wrapper takes the content aspect, picture scaled so content fills it', () => {
+    const ext = coverageExtentFromAttrs({ x_min_mm: 75, x_max_mm: 6075, y_min_mm: 75, y_max_mm: 2075, cell_size_mm: 150 })!;
+    const f = coverageFrameStyles(ext);
+    expect(f.wrap).toContain('aspect-ratio:2.8605');
+    expect(f.wrap).toContain('calc(70vh * 2.8605)');
+    expect(f.img).toBe('width:100.000%;height:auto');   // square side == content width
+  });
+
+  it('tall floor: picture wider than the wrapper, right part cropped', () => {
+    const ext = coverageExtentFromAttrs({ x_min_mm: 75, x_max_mm: 1575, y_min_mm: 75, y_max_mm: 6075, cell_size_mm: 150 })!;
+    const f = coverageFrameStyles(ext);
+    expect(f.wrap).toContain('aspect-ratio:0.2683');
+    expect(f.img).toBe(`width:${(6150 / 1650 * 100).toFixed(3)}%;height:auto`);
+  });
+
+  it('no extent / no cell size → the full square, capped at 70vh', () => {
+    expect(coverageFrameStyles(null).wrap).toBe('aspect-ratio:1 / 1;width:min(100%, 70vh)');
+  });
+});

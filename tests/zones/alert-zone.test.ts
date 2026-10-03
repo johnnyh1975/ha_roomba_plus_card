@@ -107,20 +107,56 @@ describe('renderAlertZone()', () => {
     expect(html).not.toContain('Maintenance due');
   });
 
-  it('Wave A5: generic readiness → "Robot not ready — check the app"', () => {
-    const html = render({
+  // v2.5.0 F1 (#17): readiness is a SLUG (`ready`, `lid_open`, …). The old
+  // fixture used 'Ready' — the display text the integration stopped sending
+  // in 4.1.8 — which is why the broken comparison passed CI. Fixtures now
+  // use the real slugs; the reason text comes from HA's formatter.
+  it('v2.5.0 F1: not-ready slug → "Robot not ready: <integration text>"', () => {
+    const hass = makeHass({
       [`binary_sensor.${n}_maintenance_due`]: st('on'),
-      [`sensor.${n}_readiness`]:             st('some_other_state'),
+      [`sensor.${n}_readiness`]:             st('lid_open'),
     });
-    expect(html).toContain('Robot not ready');
+    const html = renderAlertZone(hass, baseConfig, defaultCaps, n);
+    // No formatEntityState in the harness → humanised slug fallback.
+    expect(html).toContain('Robot not ready: Lid open');
   });
 
-  it('Wave A5: readiness "Ready" → generic "Maintenance due"', () => {
+  it('v2.5.0 F1: reason text comes from hass.formatEntityState when HA provides it', () => {
+    const hass = makeHass({
+      [`binary_sensor.${n}_maintenance_due`]: st('on'),
+      [`sensor.${n}_readiness`]:             st('lid_open'),
+    });
+    hass.formatEntityState = (obj) => obj.state === 'lid_open' ? 'Deckel offen' : obj.state;
+    expect(renderAlertZone(hass, baseConfig, defaultCaps, n)).toContain('Deckel offen');
+  });
+
+  it('v2.5.0 F1 (#17): readiness `ready` → generic "Maintenance due", never "not ready"', () => {
+    const html = render({
+      [`binary_sensor.${n}_maintenance_due`]: st('on'),
+      [`sensor.${n}_readiness`]:             st('ready'),
+    });
+    expect(html).toContain('Maintenance due');
+    expect(html).not.toContain('not ready');
+  });
+
+  it('v2.5.0 F1: readiness `none` is treated like ready', () => {
+    const html = render({
+      [`binary_sensor.${n}_maintenance_due`]: st('on'),
+      [`sensor.${n}_readiness`]:             st('none'),
+    });
+    expect(html).toContain('Maintenance due');
+  });
+
+  // Negative control for #17: the pre-2.5.0 display string is NOT a slug the
+  // integration sends — if someone reintroduces a comparison against it, the
+  // `ready` test above goes red; this one documents that 'Ready' itself is
+  // just an unknown value now (shown, not silently treated as ready).
+  it('v2.5.0 F1: the legacy display string "Ready" is not treated as the ready slug', () => {
     const html = render({
       [`binary_sensor.${n}_maintenance_due`]: st('on'),
       [`sensor.${n}_readiness`]:             st('Ready'),
     });
-    expect(html).toContain('Maintenance due');
+    expect(html).toContain('Robot not ready');
   });
 
   // ── Priority ordering ───────────────────────────
@@ -167,6 +203,17 @@ describe('renderAlertZone()', () => {
       [`sensor.${n}_brush_remaining_hours`]:  st('50', { threshold_hours: 200 }),
     }, { ...defaultCaps, hasWearRate: true });
     expect(html).toContain('Brush wearing');
+  });
+
+  // v2.5.0 F7: max_hours (cloud full life) is the reference when present.
+  it('v2.5.0 F7: wear ratio uses max_hours over threshold_hours', () => {
+    // 3.5 h/day vs max_hours 400 → baseline 4.44 → ratio 0.79 → no alert.
+    // Against threshold_hours 200 alone it would be 1.57 → alert.
+    const html = render({
+      [`sensor.${n}_filter_wear_rate`]:       st('3.5'),
+      [`sensor.${n}_filter_remaining_hours`]: st('50', { threshold_hours: 200, max_hours: 400 }),
+    }, { ...defaultCaps, hasWearRate: true });
+    expect(html).not.toContain('Filter wearing');
   });
 
   // ── Priority 5 — nav quality (Wave B4) ─────────

@@ -1,4 +1,5 @@
 import { DaySummary } from './types.js';
+import { t, WEEKDAY_LABELS_SHORT } from './i18n/index.js';
 
 // ── Heatmap cell colours (semantic — intentionally not theme-variable mapped)
 // These are data-meaning colours, not brand colours. They must be consistent
@@ -61,6 +62,7 @@ export function renderHeatmap(
   _areaUnit: 'auto' | 'sqft' | 'm2',
   locale = 'en-US',
   showDirtDensity = false,   // F16: modulate cell opacity by relative_to_baseline
+  lang = 'en',
 ): string {
   // Build date map
   const byDate = new Map<string, DaySummary>();
@@ -87,10 +89,10 @@ export function renderHeatmap(
 
   const W = svgW();
   const H = svgH(numWeeks);
-  const dayLabels = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+  const dayLabels = WEEKDAY_LABELS_SHORT[lang] ?? WEEKDAY_LABELS_SHORT.en;
 
   // SVG has explicit width/height — renders at natural size, no CSS stretching
-  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="grid" aria-label="Cleaning history heatmap">`;
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="grid" aria-label="${t(lang, 'aria.heatmapLabel')}">`;
 
   // Day column headers — compact, centred into each column
   for (let d = 0; d < 7; d++) {
@@ -275,6 +277,112 @@ export function mmToImagePctNum(
 }
 
 /**
+ * v2.5.0 F11 — the coverage map's exact pixel frame.
+ *
+ * image.*_coverage_map is drawn by the integration's GridStore.render_heatmap
+ * onto a SQUARE canvas (verified against 4.2.18 / 4.3.0b6):
+ *
+ *   span_x = max(x_max - x_min, cell)      span_y = max(y_max - y_min, cell)
+ *   scale  = size / (max(span_x, span_y) + cell)
+ *   px     = (x_cell_centre - x_min) * scale          ← cell's LEFT edge
+ *   py     = (y_max - y_cell_centre) * scale          ← cell's TOP edge (y-flip)
+ *
+ * The x/y_min/max_mm attributes are cell CENTRES, unpadded. mmToImagePct()
+ * above stretched each axis independently over 0–100 %, which is only right
+ * for a square floor plan — on any other shape everything drawn on top
+ * (hazard pins, room outlines) drifted along the shorter axis, and sat half
+ * a cell off on both. This reproduces the renderer instead: one shared
+ * scale, the +cell padding, and the half-cell offset of a point inside its
+ * cell. `cell_size_mm` is published on the same entity.
+ *
+ * Every overlay drawn on the coverage picture uses this transform. Room
+ * outlines, keep-out zones, door markers and furniture candidates from
+ * image.*_map are in the same pose-space millimetres as the grid cells
+ * (both come from the robot's own pose stream), so they share the frame.
+ * They were previously placed with image.*_map's calibration_points — the
+ * pixel frame of a DIFFERENT, 600 px picture — which is why they never
+ * lined up with the heatmap underneath.
+ */
+export interface CoverageExtent {
+  xMin: number; xMax: number; yMin: number; yMax: number;
+  /** GridStore cell edge in mm; absent on very old integrations. */
+  cellMm: number | null;
+}
+
+/** Read the extent from image.*_coverage_map attributes, or null. */
+export function coverageExtentFromAttrs(attrs: Record<string, unknown> | undefined): CoverageExtent | null {
+  const a = attrs ?? {};
+  const num = (k: string): number | null => {
+    const v = a[k];
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  };
+  const xMin = num('x_min_mm'), xMax = num('x_max_mm'), yMin = num('y_min_mm'), yMax = num('y_max_mm');
+  if (xMin === null || xMax === null || yMin === null || yMax === null) return null;
+  const cell = num('cell_size_mm');
+  return { xMin, xMax, yMin, yMax, cellMm: cell !== null && cell > 0 ? cell : null };
+}
+
+/**
+ * The part of the square picture the grid actually covers. The renderer
+ * anchors the grid at the top-left corner, so on a non-square floor plan the
+ * rest of the square is transparent — on a wide, short home most of it.
+ * v2.5.0 shows only this content box (the picture is cropped to it), and
+ * every overlay is positioned in % of it. Null without a cell size (very old
+ * integrations): the full square is shown as before.
+ */
+export interface CoverageContentBox {
+  /** Content width / height in mm (span + one cell). */
+  wMm: number; hMm: number;
+  /** Side of the full square in mm (max span + one cell). */
+  totalMm: number;
+}
+
+export function coverageContentBox(ext: CoverageExtent): CoverageContentBox | null {
+  if (ext.cellMm === null) return null;
+  const cell  = ext.cellMm;
+  const wMm   = Math.max(ext.xMax - ext.xMin, cell) + cell;
+  const hMm   = Math.max(ext.yMax - ext.yMin, cell) + cell;
+  return { wMm, hMm, totalMm: Math.max(wMm, hMm) };
+}
+
+/** Numeric percentage position of a pose-mm point within the content box
+ *  (or within the full picture when there is no cell size). */
+export function coverageToImagePctNum(ext: CoverageExtent, xMm: number, yMm: number): { x: number; y: number } {
+  const box = coverageContentBox(ext);
+  if (box === null) {
+    // No cell size: the pre-2.5.0 linear stretch over the whole picture.
+    return mmToImagePctNum(xMm, yMm, ext.xMin, ext.xMax, ext.yMin, ext.yMax);
+  }
+  const half = ext.cellMm! / 2;
+  return {
+    x: (xMm - ext.xMin + half) / box.wMm * 100,
+    y: (ext.yMax - yMm + half) / box.hMm * 100,
+  };
+}
+
+/** Inline styles for the wrapper (aspect ratio, viewport cap) and the
+ *  picture inside it (scaled so the content box fills the wrapper, anchored
+ *  top-left, the transparent remainder cropped by overflow:hidden). */
+export function coverageFrameStyles(ext: CoverageExtent | null): { wrap: string; img: string } {
+  const box = ext ? coverageContentBox(ext) : null;
+  if (box === null) {
+    return { wrap: 'aspect-ratio:1 / 1;width:min(100%, 70vh)', img: 'width:100%;height:100%' };
+  }
+  const aspect = box.wMm / box.hMm;
+  const scale  = box.totalMm / box.wMm * 100;   // picture width in % of wrapper
+  return {
+    wrap: `aspect-ratio:${aspect.toFixed(4)};width:min(100%, calc(70vh * ${aspect.toFixed(4)}))`,
+    img:  `width:${scale.toFixed(3)}%;height:auto`,
+  };
+}
+
+/** CSS {left, top} variant for absolutely positioned pins/labels. */
+export function coverageToImagePct(ext: CoverageExtent, xMm: number, yMm: number): { left: string; top: string } {
+  const p = coverageToImagePctNum(ext, xMm, yMm);
+  return { left: p.x.toFixed(1) + '%', top: p.y.toFixed(1) + '%' };
+}
+
+/**
  * Normalise a single wlBars sensor state value to percentage.
  * Same heuristic: ≤ 4 → multiply by 25; already % → pass through.
  */
@@ -322,10 +430,10 @@ export function renderSparkline(readings: number[], minVal: number): string {
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:inline-block;vertical-align:middle;flex-shrink:0">${rects}</svg>`;
 }
 
-export function renderSkeletonHeatmap(numWeeks = 4): string {
+export function renderSkeletonHeatmap(numWeeks = 4, lang = 'en'): string {
   const W = svgW();
   const H = svgH(numWeeks);
-  const dayLabels = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+  const dayLabels = WEEKDAY_LABELS_SHORT[lang] ?? WEEKDAY_LABELS_SHORT.en;
 
   let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
   svg += `<style>@keyframes rpc-pulse{0%,100%{opacity:.35}50%{opacity:.7}}.rpc-skel{animation:rpc-pulse 1.5s ease-in-out infinite}</style>`;

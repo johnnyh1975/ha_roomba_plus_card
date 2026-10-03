@@ -19,98 +19,17 @@
  */
 import { describe, it, expect } from 'vitest';
 
-// ── Derive the watched list from the same constants the card uses ─────────────
-// Rather than instantiating the full web component (which requires DOM), we
-// replicate the logic of relevantEntityIds() here and assert the set contains
-// all required IDs. If the card's implementation diverges, the full render
-// tests would catch it.
+// v2.5.0: the watch list now lives in src/relevant-entity-ids.ts and these
+// tests call THE REAL FUNCTION. Until 2.4.x this file replicated the list by
+// hand, and the replica had drifted: it asserted `average_area_30d` and
+// `mission_count_30d`, which production never watched (it watches
+// `cleaning_analytics_30d` and `missions_last_30d`) — green tests for a
+// list nobody ran.
+import { relevantEntityIds as realRelevantEntityIds } from '../src/relevant-entity-ids';
+import { makeHass, st } from './helpers';
 
 function relevantEntityIds(robotName: string, activeRobot: string, helperEntity?: string): string[] {
-  const n = robotName;
-  return [
-    activeRobot,
-    `sensor.${n}_last_error_code`,
-    `sensor.${n}_last_error_zone`,
-    `sensor.${n}_phase`,               // v2.2.0 R1 fix: replica had drifted — production watches `_phase`, not `_mission_phase`
-    `binary_sensor.${n}_mission_active`,
-    `binary_sensor.${n}_maintenance_due`,
-    `sensor.${n}_readiness`,
-    `binary_sensor.${n}_schedule_hold_active`,
-    `sensor.${n}_next_clean`,
-    `sensor.${n}_filter_remaining_hours`,
-    `sensor.${n}_brush_remaining_hours`,
-    `sensor.${n}_mop_pad`,
-    `sensor.${n}_mop_tank_level`,
-    `sensor.${n}_mop_behavior`,
-    `sensor.${n}_clean_base_status`,
-    `sensor.${n}_nav_quality`,
-    `sensor.${n}_nav_panics`,
-    `sensor.${n}_nav_landmark_quality`,
-    `sensor.${n}_nav_good_landmarks`,
-    `sensor.${n}_next_likely_clean_window`,
-    `sensor.${n}_presence_clean_opportunities_7d`,
-    `sensor.${n}_presence_clean_utilisation_7d`,
-    `sensor.${n}_cleaning_passes`,
-    `select.${n}_cleaning_passes`,
-    `select.${n}_smart_zone_select`,
-    `select.${n}_zone_select`,
-    `sensor.${n}_clean_streak`,
-    `sensor.${n}_completion_rate_30d`,
-    `sensor.${n}_lifetime_missions`,
-    // SC1 (integration v2.7.0): recent_area_30d / recent_time_30d deprecated,
-    // removed in v3.0 — consolidated into cleaning_analytics_30d.
-    `sensor.${n}_cleaning_analytics_30d`,
-    `sensor.${n}_battery_capacity_retention`,
-    `sensor.${n}_estimated_battery_eol`,
-    // SC1 (integration v2.7.0): recent_wifi_floor deprecated, removed in v3.0.
-    `sensor.${n}_wifi_health`,
-    `sensor.${n}_recent_coverage_pct`,
-    `sensor.${n}_missions_last_30d`,
-    // SC1 (integration v2.7.0): cleaning_speed_trend deprecated, removed in v3.0.
-    `sensor.${n}_cleaning_performance`,
-    `binary_sensor.${n}_consecutive_clean_skips`,
-    `sensor.${n}_area_cleaned_today`,
-    `sensor.${n}_mission_expire_time`,
-    `sensor.${n}_average_area_30d`,
-    `sensor.${n}_mission_count_30d`,
-    `binary_sensor.${n}_demand_clean_blocked`,
-    `image.${n}_coverage_map`,
-    `image.${n}_map`,
-    // v2.0.1: kept in sync with the production list after a render-guard
-    // gap was found — these v2.0 entities were missing from both places.
-    `sensor.${n}_robot_health_score`,
-    `sensor.${n}_wheel_last_cleaned`,
-    `sensor.${n}_contact_last_cleaned`,
-    `sensor.${n}_bin_last_cleaned`,
-    `sensor.${n}_battery_last_replaced`,
-    `sensor.${n}_mission_progress`,
-    `sensor.${n}_last_mission_result`,
-    `sensor.${n}_consecutive_mission_anomalies`,
-    `select.${n}_carpet_boost_select`,
-    `switch.${n}_edge_clean`,
-    `switch.${n}_always_finish`,
-    `sensor.${n}_optimal_clean_window`,
-    // v2.1.0 — header indicators
-    `binary_sensor.${n}_cloud_connected`,
-    `binary_sensor.${n}_mqtt_stale`,
-    `sensor.${n}_firmware_version`,
-    `device_tracker.${n}_position`,
-    // v2.2.0 — B1/F3/A2/A3 additions
-    `sensor.${n}_last_error_at`,
-    `sensor.${n}_health_score_trend`,
-    `binary_sensor.${n}_layout_change_detected`,
-    `sensor.${n}_optical_dirt_detections`,
-    `sensor.${n}_piezo_dirt_detections`,
-    `sensor.${n}_scrubs_count`,
-    `sensor.${n}_dock_tank_level`,
-    `sensor.${n}_dock_knockoffs`,
-    `sensor.${n}_dock_charge_aborts`,
-    `sensor.${n}_dock_contact_chatters`,
-    `sensor.${n}_rooms_overdue`,       // v2.3.0 ROOM-SCHED
-    `sensor.${n}_dirt_weather_correlation`, // v2.3.0 CROSS-CORR
-    `sensor.${n}_room_accessibility_scores`, // v2.4.0 ROOM-ACCESS
-    ...(helperEntity ? [helperEntity] : []),
-  ];
+  return realRelevantEntityIds(makeHass(), robotName, activeRobot, helperEntity);
 }
 
 const n = 'roomba';
@@ -149,11 +68,11 @@ describe('relevantEntityIds() — B2: previously missing entity IDs now watched'
   it('watches last_error_zone (error details in status)', () =>
     expect(has(`sensor.${n}_last_error_zone`)).toBe(true));
 
-  it('watches average_area_30d (vs-usual delta)', () =>
-    expect(has(`sensor.${n}_average_area_30d`)).toBe(true));
+  it('watches cleaning_analytics_30d (vs-usual delta)', () =>
+    expect(has(`sensor.${n}_cleaning_analytics_30d`)).toBe(true));
 
-  it('watches mission_count_30d (gates vs-usual delta)', () =>
-    expect(has(`sensor.${n}_mission_count_30d`)).toBe(true));
+  it('watches missions_last_30d (gates vs-usual delta)', () =>
+    expect(has(`sensor.${n}_missions_last_30d`)).toBe(true));
 
   it('watches mop_pad (Braava pad consumable)', () =>
     expect(has(`sensor.${n}_mop_pad`)).toBe(true));
@@ -222,8 +141,6 @@ describe('relevantEntityIds() — B2: previously missing entity IDs now watched'
   it('watches firmware_version (A2 firmware badge)', () =>
     expect(has(`sensor.${n}_firmware_version`)).toBe(true));
 
-  it('watches device_tracker position (A4 current-room line)', () =>
-    expect(has(`device_tracker.${n}_position`)).toBe(true));
 });
 
 describe('relevantEntityIds() — robot_selector_helper', () => {
@@ -268,4 +185,45 @@ describe('relevantEntityIds() — v2.4.0 additions watched', () => {
   const ids = relevantEntityIds('roomba', 'vacuum.roomba');
   it('watches sensor.roomba_room_accessibility_scores', () =>
     expect(ids).toContain('sensor.roomba_room_accessibility_scores'));
+});
+
+describe('relevantEntityIds() — v2.5.0 additions watched', () => {
+  const ids = relevantEntityIds('roomba', 'vacuum.roomba');
+  it('watches switch.roomba_gentle_mode', () =>
+    expect(ids).toContain('switch.roomba_gentle_mode'));
+  it('watches the pad days row and wear-rate sensors (rendered, never watched before)', () => {
+    expect(ids).toContain('sensor.roomba_pad_days_until_due');
+    expect(ids).toContain('sensor.roomba_filter_wear_rate');
+  });
+  it('no longer watches the removed recent_coverage_pct / retired zone_select', () => {
+    expect(ids).not.toContain('sensor.roomba_recent_coverage_pct');
+    expect(ids).not.toContain('select.roomba_zone_select');
+  });
+  it('returns no duplicates', () => expect(new Set(ids).size).toBe(ids.length));
+});
+
+// v2.5.0 F3/F4/F8: resolved ids are watched — whichever exist on this install.
+describe('relevantEntityIds() — v2.5.0 resolved ids', () => {
+  const hass = makeHass({
+    'select.roomba_cloud_zone_p1': st('Kitchen', { is_active_map: true }),
+    'select.roomba_cloud_zone_p2': st('Attic', { is_active_map: false }),
+    'device_tracker.roomba': st('Kitchen', { room: 'Kitchen' }),
+    'sensor.roomba_battery_level': st('80'),
+    'image.roomba_cleaning_map': st('idle', { rooms: { K: {} } }),
+    'select.roomba_upstairs_cloud_zone_p9': st('Bath', { is_active_map: true }),
+  });
+  const ids = realRelevantEntityIds(hass, 'roomba', 'vacuum.roomba');
+
+  it('watches every cloud zone select of THIS robot', () => {
+    expect(ids).toContain('select.roomba_cloud_zone_p1');
+    expect(ids).toContain('select.roomba_cloud_zone_p2');
+    expect(ids).not.toContain('select.roomba_upstairs_cloud_zone_p9');
+  });
+  it('watches device_tracker.{n} (F4)', () => expect(ids).toContain('device_tracker.roomba'));
+  it('watches the migrated battery and map ids (F8)', () => {
+    expect(ids).toContain('sensor.roomba_battery_level');
+    expect(ids).toContain('image.roomba_cleaning_map');
+  });
+  it('without hass, only the static list (no crash)', () =>
+    expect(realRelevantEntityIds(undefined, 'roomba', 'vacuum.roomba')).not.toContain('device_tracker.roomba'));
 });

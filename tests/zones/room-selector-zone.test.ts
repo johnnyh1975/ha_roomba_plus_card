@@ -334,6 +334,30 @@ describe('renderSettingsPanel()', () => {
     expect(html).toContain('data-cycle-entity');
   });
 
+  // v2.5.0 GENTLE-MODE
+  it('renders toggle row when gentle_mode entity present', () => {
+    const hass = makeHass({ [`switch.${n}_gentle_mode`]: st('on') });
+    const html = renderSettingsPanel(hass, cfg, n, true);
+    expect(html).toContain('Gentle mode');
+    expect(html).toContain(`data-switch-entity="switch.${n}_gentle_mode"`);
+    expect(html).toContain('aria-pressed="true"');
+  });
+
+  it('gentle_mode toggle reflects off state', () => {
+    const hass = makeHass({ [`switch.${n}_gentle_mode`]: st('off') });
+    const html = renderSettingsPanel(hass, cfg, n, true);
+    const row = html.match(/<button[^>]*data-switch-entity="switch\.roomba_gentle_mode"[^>]*>/)?.[0] ?? '';
+    expect(row).toContain('aria-pressed="false"');
+    expect(row).not.toContain('rpc-setting-on');
+  });
+
+  it('panel still renders (via gentle_mode alone) even when edge_clean/always_finish/carpet_boost are all absent', () => {
+    const hass = makeHass({ [`switch.${n}_gentle_mode`]: st('on') });
+    const html = renderSettingsPanel(hass, cfg, n, true);
+    expect(html).not.toBe('');
+    expect(html).toContain('Gentle mode');
+  });
+
   it('panel collapsed when settingsPanelOpen is false', () => {
     const hass = makeHass({ [`switch.${n}_edge_clean`]: st('on') });
     const html = renderSettingsPanel(hass, cfg, n, false);
@@ -375,5 +399,47 @@ describe('renderRoomSelectorZone() — v2.0 includeSettingsPanel', () => {
     expect(html).not.toContain('data-settings-toggle');
     // Room chips themselves must still render — only the settings panel is suppressed
     expect(html).toContain('rpc-room-chip');
+  });
+});
+
+// ── v2.5.0 F3 — room picker on cloud installs (select.*_cloud_zone_*) ────────
+describe('renderRoomSelectorZone() — v2.5.0 F3 cloud zone select', () => {
+  const caps = { hasZones: true, hasSmartZones: true };
+
+  it('renders chips from the active map\'s cloud select', () => {
+    const html = renderRoomSelectorZone(props(caps, {
+      [`select.${n}_cloud_zone_p1`]: st('Kitchen', {
+        options: ['Kitchen', 'Bath'], is_active_map: true,
+        region_icons: { Kitchen: 'mdi:fridge' },
+      }),
+    }));
+    expect(html).toContain('data-room="Kitchen"');
+    expect(html).toContain('data-room="Bath"');
+    // icons use the integration's full "mdi:" names
+    expect(html).toContain('🧊 Kitchen');
+  });
+
+  it('ignores an inactive map\'s select (negative control)', () => {
+    expect(renderRoomSelectorZone(props(caps, {
+      [`select.${n}_cloud_zone_p2`]: st('Attic', { options: ['Attic'], is_active_map: false }),
+    }))).toBe('');
+  });
+});
+
+// ── v2.5.0 F9 — carpet boost ─────────────────────────────────────────────────
+describe('renderSettingsPanel() — v2.5.0 F9 carpet boost', () => {
+  it('a stale, unavailable carpet-boost row is treated as absent', () => {
+    const hass = makeHass({ [`select.${n}_carpet_boost_select`]: st('unavailable', { options: [] }) });
+    expect(renderSettingsPanel(hass, baseConfig, n, true)).toBe('');
+  });
+
+  it('shows the integration\'s text for the slug, cycles through the slugs', () => {
+    const hass = makeHass({
+      [`select.${n}_carpet_boost_select`]: st('automatic', { options: ['automatic', 'eco', 'performance'] }),
+    });
+    const html = renderSettingsPanel(hass, baseConfig, n, true);
+    expect(html).toContain('Automatic ▼');
+    expect(html).toContain('data-cycle-current="automatic"');
+    expect(html).toContain('&quot;performance&quot;');
   });
 });

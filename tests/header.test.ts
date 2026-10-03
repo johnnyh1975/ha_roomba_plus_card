@@ -15,6 +15,8 @@ function render(states: Record<string, ReturnType<typeof st>> = {}, overrides: P
     missionData: null,
     roomPickerOpen: false,
     selectedRoomCount: 0,
+    isSendingClean: false,
+    sendError: null,
     ...overrides,
   });
 }
@@ -115,6 +117,76 @@ describe('renderHeader() — v2.0 selected-room button swap', () => {
     );
     expect(html).toContain('Start full clean');
     expect(html).toContain('Rooms…');
+  });
+
+  // v2.5.0 — "Start selected rooms" previously showed no sending-in-progress
+  // state at all: runCleanSelected() tracks isSendingClean, a separate flag
+  // from the generic loadingAction system every other header button uses,
+  // and isSendingClean was never wired into header.ts.
+  it('shows the spinner and hides the label when isSendingClean is true', () => {
+    const html = render(
+      { 'vacuum.roomba': st('docked') },
+      { caps: { ...defaultCaps, hasSmartZones: true }, selectedRoomCount: 2, isSendingClean: true },
+    );
+    expect(html).toContain('rpc-btn-loading');
+    expect(html).toContain('rpc-spinner');
+    expect(html).not.toContain('Start 2 selected rooms');
+  });
+
+  it('disables the button while isSendingClean is true', () => {
+    const html = render(
+      { 'vacuum.roomba': st('docked') },
+      { caps: { ...defaultCaps, hasSmartZones: true }, selectedRoomCount: 2, isSendingClean: true },
+    );
+    const btn = html.match(/<button[^>]*data-action="clean-selected"[^>]*>/)?.[0] ?? '';
+    expect(btn).toContain('disabled');
+  });
+
+  it('no spinner and button enabled when isSendingClean is false', () => {
+    const html = render(
+      { 'vacuum.roomba': st('docked') },
+      { caps: { ...defaultCaps, hasSmartZones: true }, selectedRoomCount: 2, isSendingClean: false },
+    );
+    expect(html).toContain('Start 2 selected rooms');
+    expect(html).not.toContain('rpc-btn-loading');
+    const btn = html.match(/<button[^>]*data-action="clean-selected"[^>]*>/)?.[0] ?? '';
+    expect(btn).not.toContain('disabled');
+  });
+
+  it('isSendingClean does not affect an unrelated action\'s loading spinner (loadingAction stays independent)', () => {
+    const html = render(
+      { 'vacuum.roomba': st('cleaning') },
+      { loadingAction: 'pause', isSendingClean: true },
+    );
+    // 'pause' should still show its own spinner via loadingAction, not
+    // accidentally suppressed or double-spun by the unrelated flag.
+    const btn = html.match(/<button[^>]*data-action="pause"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? '';
+    expect(btn).toContain('rpc-btn-loading');
+  });
+
+  // v2.5.0 — sendError previously reached only the ⚙ tab's own room-picker
+  // (room-selector-zone.ts); a failed clean_room call while the user was
+  // on any other tab showed nothing at all where they were looking.
+  it('shows the send-error message in the header when sendError is set', () => {
+    const html = render(
+      { 'vacuum.roomba': st('docked') },
+      { sendError: 'Start command may not have been received — check the iRobot app' },
+    );
+    expect(html).toContain('rpc-send-error');
+    expect(html).toContain('Start command may not have been received');
+  });
+
+  it('no send-error element when sendError is null', () => {
+    const html = render({ 'vacuum.roomba': st('docked') }, { sendError: null });
+    expect(html).not.toContain('rpc-send-error');
+  });
+
+  it('escapes sendError content (defensive, matches room-selector-zone\'s own handling)', () => {
+    const html = render(
+      { 'vacuum.roomba': st('docked') },
+      { sendError: '<script>alert(1)</script>' },
+    );
+    expect(html).not.toContain('<script>alert(1)</script>');
   });
 });
 
@@ -376,5 +448,215 @@ describe('renderHeader() — v2.2.0 recharge-aware duration line', () => {
       { caps: capsProgress },
     );
     expect(html).not.toContain('min charging');
+  });
+});
+
+// v2.5.0 I18N — end-to-end proof that a non-English hass.language actually
+// changes rendered header output, not just the dictionaries in isolation.
+describe('renderHeader() — v2.5.0 I18N end-to-end', () => {
+  it('renders German text when hass.language is de', () => {
+    const html = renderHeader({
+      hass: { ...makeHass({ 'vacuum.roomba': st('docked') }), language: 'de' },
+      config: baseConfig,
+      caps: defaultCaps,
+      robotName: n,
+      loadingAction: null,
+      todayMissionCount: null,
+      missionData: null,
+      roomPickerOpen: false,
+      selectedRoomCount: 0,
+      isSendingClean: false,
+      sendError: null,
+    });
+    expect(html).toContain('Angedockt'); // stateDocked
+    expect(html).toContain('Vollständige Reinigung starten'); // startFullClean
+    expect(html).not.toContain('Docked');
+    expect(html).not.toContain('Start full clean');
+  });
+
+  it('falls back to English for an unsupported hass.language', () => {
+    const html = renderHeader({
+      hass: { ...makeHass({ 'vacuum.roomba': st('docked') }), language: 'sv' },
+      config: baseConfig,
+      caps: defaultCaps,
+      robotName: n,
+      loadingAction: null,
+      todayMissionCount: null,
+      missionData: null,
+      roomPickerOpen: false,
+      selectedRoomCount: 0,
+      isSendingClean: false,
+      sendError: null,
+    });
+    expect(html).toContain('Docked');
+  });
+});
+
+// ── v2.5.0 F2 — phase slugs ──────────────────────────────────────────────────
+// The phase sensor reports slugs since integration 4.1 (`emptying_bin`, not
+// the raw MQTT `evac` the header compared against — that branch never fired).
+describe('renderHeader() — v2.5.0 F2 phase slugs', () => {
+  const caps = { ...defaultCaps, hasMissionPhase: true };
+
+  it('emptying_bin → "Emptying bin" header state, no misleading actions', () => {
+    for (const vac of ['returning', 'docked']) {
+      const html = render({
+        'vacuum.roomba': st(vac),
+        [`sensor.${n}_phase`]: st('emptying_bin'),
+      }, { caps });
+      expect(html).toContain('Emptying bin');
+      expect(html).not.toContain('data-action="return_home"');
+      expect(html).not.toContain('data-action="start"');
+    }
+  });
+
+  it('emptying_bin while the vacuum still reports cleaning keeps Pause', () => {
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      [`sensor.${n}_phase`]: st('emptying_bin'),
+    }, { caps });
+    expect(html).toContain('data-action="pause"');
+  });
+
+  it('negative control: the raw MQTT value `evac` is not a phase slug any more', () => {
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      [`sensor.${n}_phase`]: st('evac'),
+    }, { caps });
+    expect(html).not.toContain('Emptying bin');
+  });
+
+  it('charging_mid_mission → recharging state, without mission_active or ETA', () => {
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      [`sensor.${n}_phase`]: st('charging_mid_mission'),
+    }, { caps });
+    expect(html).toContain('Recharging — mission continues');
+    expect(html).toContain('data-action="return_home"');   // cancel mission
+  });
+
+  it('charging_mid_mission while NOT docked does not claim recharging', () => {
+    const html = render({
+      'vacuum.roomba': st('returning'),
+      [`sensor.${n}_phase`]: st('charging_mid_mission'),
+    }, { caps });
+    expect(html).not.toContain('Recharging');
+  });
+
+  it('no_contact → "No contact with robot" even when the vacuum still says docked', () => {
+    const html = render({
+      'vacuum.roomba': st('docked'),
+      [`sensor.${n}_phase`]: st('no_contact'),
+    }, { caps });
+    expect(html).toContain('No contact with robot');
+    expect(html).toContain('rpc-offline-state');
+    expect(html).not.toContain('>Docked<');
+  });
+
+  it('not_responding → same offline state; an active error still wins', () => {
+    expect(render({
+      'vacuum.roomba': st('idle'),
+      [`sensor.${n}_phase`]: st('not_responding'),
+    }, { caps })).toContain('No contact with robot');
+    expect(render({
+      'vacuum.roomba': st('error'),
+      [`sensor.${n}_phase`]: st('not_responding'),
+    }, { caps })).not.toContain('No contact with robot');
+  });
+
+  it('station phases show the integration\'s own text (formatter), never the slug', () => {
+    const hass = makeHass({
+      'vacuum.roomba': st('docked'),
+      [`sensor.${n}_phase`]: st('washing_pad'),
+    });
+    const plain = renderHeader({
+      hass, config: baseConfig, caps, robotName: n, loadingAction: null,
+      todayMissionCount: null, missionData: null, roomPickerOpen: false,
+      selectedRoomCount: 0, isSendingClean: false, sendError: null,
+    });
+    expect(plain).toContain('Washing pad');   // humanised fallback
+    expect(plain).not.toContain('washing_pad');
+    hass.formatEntityState = (obj) => obj.state === 'washing_pad' ? 'Pad wird gewaschen' : obj.state;
+    const localized = renderHeader({
+      hass, config: baseConfig, caps, robotName: n, loadingAction: null,
+      todayMissionCount: null, missionData: null, roomPickerOpen: false,
+      selectedRoomCount: 0, isSendingClean: false, sendError: null,
+    });
+    expect(localized).toContain('Pad wird gewaschen');
+  });
+});
+
+// ── v2.5.0 F4 — current room from device_tracker.{n}.room ────────────────────
+describe('renderHeader() — v2.5.0 F4 current room', () => {
+  const caps = { ...defaultCaps, hasPositionTracker: true };
+
+  it('reads the `room` attribute of device_tracker.{n} (integration naming)', () => {
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      'device_tracker.roomba': st('Kitchen', { room: 'Kitchen' }),
+    }, { caps });
+    expect(html).toContain('rpc-current-room');
+    expect(html).toContain('Kitchen');
+  });
+
+  it('a localized status label in the STATE is never shown as a room', () => {
+    // 4.x states include "Stuck", "Dock busy" and es/fr/it/nl/pl/pt labels the
+    // old sentinel list did not know; without a `room` attribute, nothing shows.
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      'device_tracker.roomba': st('Bloqué'),
+    }, { caps });
+    expect(html).not.toContain('rpc-current-room');
+  });
+
+  it('a null room attribute (room not resolved yet) shows nothing', () => {
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      'device_tracker.roomba': st('Cleaning', { room: null }),
+    }, { caps });
+    expect(html).not.toContain('rpc-current-room');
+  });
+});
+
+// ── v2.5.0 — area sensors honour their unit (m² since integration 4.x) ──────
+describe('renderHeader() — v2.5.0 area units', () => {
+  const caps = { ...defaultCaps, hasArea: true, hasMissionActive: true };
+
+  it('area_cleaned_today in m² is shown correctly on a metric install', () => {
+    const hass = makeHass({
+      'vacuum.roomba': st('cleaning'),
+      [`binary_sensor.${n}_mission_active`]: st('on'),
+      [`sensor.${n}_area_cleaned_today`]: st('20', { unit_of_measurement: 'm²' }),
+    });
+    hass.config = { unit_system: { length: 'km' } };
+    const html = renderHeader({
+      hass, config: baseConfig, caps, robotName: n, loadingAction: null,
+      todayMissionCount: null, missionData: null, roomPickerOpen: false,
+      selectedRoomCount: 0, isSendingClean: false, sendError: null,
+    });
+    expect(html).toContain('20 m² already today');
+  });
+
+  it('…and converted, rounded, on an imperial install', () => {
+    const html = render({
+      'vacuum.roomba': st('cleaning'),
+      [`binary_sensor.${n}_mission_active`]: st('on'),
+      [`sensor.${n}_area_cleaned_today`]: st('20', { unit_of_measurement: 'm²' }),
+    }, { caps });
+    expect(html).toContain('215 ft² already today');
+  });
+});
+
+// ── v2.5.0 — last-cleaned room chips take icons from the zone select ─────────
+describe('renderHeader() — v2.5.0 cleaned-room chip icons', () => {
+  it('uses region_icons from the active cloud zone select', () => {
+    const html = render({
+      'vacuum.roomba': st('docked', { last_cleaned_rooms: ['Kitchen'] }),
+      [`select.${n}_cloud_zone_p1`]: st('Kitchen', {
+        options: ['Kitchen'], is_active_map: true, region_icons: { Kitchen: 'mdi:fridge' },
+      }),
+    }, { caps: { ...defaultCaps, hasCleanedRooms: true } });
+    expect(html).toContain('rpc-cleaned-chip');
+    expect(html).toMatch(/rpc-cleaned-chip">[^<]* Kitchen/);
   });
 });

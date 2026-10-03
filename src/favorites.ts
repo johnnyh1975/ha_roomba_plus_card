@@ -2,8 +2,9 @@
  * favorites.ts — A3 (v2.1.0)
  *
  * Renders one tappable button per favourite routine. Favourite entities are
- * `button.{robotName}_fav_{id}` where `{id}` is an arbitrary per-user iRobot
- * routine identifier. They are stateless: tapping presses the button
+ * `button.{robotName}_fav_{id}` (Classic) or `button.{robotName}_favorite_{id}`
+ * (Prime / V4 robots, integration ≥ 4.0 — v2.5.0) where `{id}` is an
+ * arbitrary per-user iRobot routine identifier. They are stateless: tapping presses the button
  * (button.press), there is no meaningful state to display, which is why the
  * individual entities are intentionally NOT in relevantEntityIds() — the row
  * never needs to re-render on state change (documented in the version plan).
@@ -14,13 +15,19 @@
  */
 import { HomeAssistant, CardConfig } from './types.js';
 import { esc } from './utils.js';
+import { t, resolveLang } from './i18n/index.js';
 
 /** Collect favourite button entity IDs for a robot, sorted for stable order. */
 export function favoriteEntityIds(hass: HomeAssistant, robotName: string): string[] {
-  const prefix = `button.${robotName}_fav_`;
+  const prefixes = favoritePrefixes(robotName);
   return Object.keys(hass.states)
-    .filter((id) => id.startsWith(prefix))
+    .filter((id) => prefixes.some((p) => id.startsWith(p)))
     .sort();
+}
+
+/** Classic `_fav_` and Prime `_favorite_` button prefixes (v2.5.0). */
+function favoritePrefixes(robotName: string): string[] {
+  return [`button.${robotName}_fav_`, `button.${robotName}_favorite_`];
 }
 
 /** Human label for a favourite button: friendly_name attr, else derived from id.
@@ -41,7 +48,8 @@ export function favoriteLabel(hass: HomeAssistant, entityId: string, robotName: 
     return friendly;
   }
   // Fallback: turn button.roomba_fav_quick_kitchen → "Quick Kitchen"
-  const slug = entityId.replace(`button.${robotName}_fav_`, '');
+  const prefix = favoritePrefixes(robotName).find((p) => entityId.startsWith(p)) ?? '';
+  const slug = entityId.slice(prefix.length);
   return slug
     .split('_')
     .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
@@ -67,7 +75,7 @@ export function renderFavorites(hass: HomeAssistant, _config: CardConfig, robotN
   return `
     <div class="rpc-settings-divider"></div>
     <div class="rpc-fav-section">
-      <div class="rpc-fav-label">Favourites</div>
+      <div class="rpc-fav-label">${t(resolveLang(hass.language), 'favorites.label')}</div>
       <div class="rpc-fav-row">${buttons}</div>
     </div>
   `;
