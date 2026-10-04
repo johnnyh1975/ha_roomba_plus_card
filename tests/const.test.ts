@@ -19,3 +19,14 @@ describe('mdiToEmoji()', () => {
     expect(integrationIcons.filter(i => mdiToEmoji(`mdi:${i}`) === '')).toEqual([]);
   });
 });
+
+// ── v3.0 A4 — CARD_VERSION follows package.json ──────────────────────────
+import { CARD_VERSION } from '../src/const';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+describe('CARD_VERSION', () => {
+  it('equals package.json version', () => {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+    expect(CARD_VERSION).toBe(pkg.version);
+  });
+});

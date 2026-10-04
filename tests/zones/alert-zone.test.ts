@@ -25,7 +25,7 @@ describe('renderAlertZone()', () => {
   it('renders alert when vacuum has an active error and sensor is non-zero', () => {
     const html = render({
       [`vacuum.${n}`]:                 st('error', { error_code: 2 }),
-      [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck', description: 'The brush roll is jammed.', action: 'Clear hair' }),
+      [`sensor.${n}_last_error_code`]: st('2', { description: 'Brush stuck', action: 'Clear hair' }),
     });
     expect(html).toContain('Error: Brush stuck');
     expect(html).toContain('Clear hair');
@@ -37,18 +37,18 @@ describe('renderAlertZone()', () => {
     // error on the vacuum entity, no banner.
     const html = render({
       [`vacuum.${n}`]:                 st('docked', {}),
-      [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck' }),
+      [`sensor.${n}_last_error_code`]: st('2', { description: 'Brush stuck' }),
     });
     expect(html).toBe('');
   });
 
   it('B1: no alert when vacuum entity is absent entirely', () =>
-    expect(render({ [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck' }) })).toBe(''));
+    expect(render({ [`sensor.${n}_last_error_code`]: st('2', { description: 'Brush stuck' }) })).toBe(''));
 
   it('B1: active via error_code attribute even when vacuum state is not "error" (e.g. paused)', () => {
     const html = render({
       [`vacuum.${n}`]:                 st('paused', { error_code: 15 }),
-      [`sensor.${n}_last_error_code`]: st('15', { label: 'Reboot required' }),
+      [`sensor.${n}_last_error_code`]: st('15', { description: 'Reboot required' }),
     });
     expect(html).toContain('Error: Reboot required');
   });
@@ -81,7 +81,7 @@ describe('renderAlertZone()', () => {
   it('escapes XSS in error label', () => {
     const html = render({
       [`vacuum.${n}`]:                 st('error', { error_code: 1 }),
-      [`sensor.${n}_last_error_code`]: st('1', { label: '<img onerror=x>' }),
+      [`sensor.${n}_last_error_code`]: st('1', { description: '<img onerror=x>' }),
     });
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
@@ -354,10 +354,9 @@ describe('renderAlertZone() — error sensor unknown state (B5)', () => {
   it('shows label as alert title when state is a real error code', () => {
     const html = render({
       [`vacuum.${n}`]:                 st('error', { error_code: 17 }),
-      [`sensor.${n}_last_error_code`]: st('17', { label: 'Path blocked', description: 'An obstacle is blocking the path.', action: 'Clear the path.' }),
+      [`sensor.${n}_last_error_code`]: st('17', { description: 'Path blocked', action: 'Clear the path.' }),
     });
     expect(html).toContain('Error: Path blocked');
-    expect(html).toContain('An obstacle is blocking the path.');
     expect(html).toContain('Clear the path.');
   });
 
@@ -463,5 +462,50 @@ describe('renderAlertZone() — v2.2.0 R1 degenerate active-error fallback', () 
     const html = render({ [`vacuum.${n}`]: st('error', {}) });
     expect(html).toContain('Robot error — check the iRobot app');
     expect(html).not.toContain('Error: Error');
+  });
+});
+
+// ── v3.0 B2 — Prime error through the robot model ────────────────────────
+import { primeCombo } from '../fixtures/robots';
+import { collectAlerts as collect3 } from '../../src/zones/alert-zone';
+import { defaultCaps as caps3 } from '../helpers';
+
+describe('collectAlerts() — v3.0 Prime error', () => {
+  it('Prime error: title as text, description as subtext', () => {
+    const hass = primeCombo([['sensor.combo_prime_error', 'error', 'Error 18', {
+      error_code: 18, error_title: 'Docking issue', error_description: 'Clear the dock area.',
+    }]]);
+    const a = collect3(hass, caps3, 'combo').find(x => x.priority === 1);
+    expect(a?.text).toContain('Docking issue');
+    expect(a?.subtext).toBe('Clear the dock area.');
+  });
+  it('Prime: vacuum in error without words → generic, once', () => {
+    const hass = primeCombo([['vacuum.combo', null, 'error', { friendly_name: 'Combo' }]]);
+    const p1 = collect3(hass, caps3, 'combo').filter(x => x.priority === 1);
+    expect(p1).toHaveLength(1);
+    expect(p1[0].text).toContain('iRobot app');
+  });
+  it('negative control: no error → no priority-1 alert', () =>
+    expect(collect3(primeCombo(), caps3, 'combo').some(x => x.priority === 1)).toBe(false));
+});
+
+import { classicI7 } from '../fixtures/robots';
+describe('collectAlerts() — v3.0 Classic stale error', () => {
+  it('error_code left on the vacuum after docking, error sensor unknown → no banner', () => {
+    const hass = classicI7([
+      ['vacuum.i7', null, 'docked', { friendly_name: 'i7', error_code: 2, error: 'Brush stuck' }],
+      ['sensor.i7_last_error_code', 'last_error_code', '2', { description: 'Brush stuck' }],
+    ]);
+    expect(collect3(hass, caps3, 'i7').some(a => a.priority === 1)).toBe(false);
+  });
+  it('negative control: error sensor live → banner with the description', () => {
+    const hass = classicI7([
+      ['vacuum.i7', null, 'paused', { friendly_name: 'i7', error_code: 2 }],
+      ['sensor.i7_error', 'error', 'Brush stuck'],
+      ['sensor.i7_last_error_code', 'last_error_code', '2', { description: 'Brush stuck', action: 'Clear hair' }],
+    ]);
+    const a = collect3(hass, caps3, 'i7').find(x => x.priority === 1);
+    expect(a?.text).toContain('Brush stuck');
+    expect(a?.subtext).toBe('Clear hair');
   });
 });

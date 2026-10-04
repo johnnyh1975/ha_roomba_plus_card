@@ -1,4 +1,6 @@
 import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
+import { robot } from '../registry.js';
+import { errorRole } from '../robot-model.js';
 import { normalisedWifiFloor } from '../heatmap.js';
 import { esc, formatState } from '../utils.js';
 import { READINESS } from '../slugs.js';
@@ -51,37 +53,28 @@ export function collectAlerts(
   // report: a brush-jam banner stayed on the Health tab for a week after
   // the jam was physically cleared. The resolved error now renders as a
   // muted informational line in the Health zone instead (see health-zone.ts).
-  const vacuumEntity = hass.states[`vacuum.${n}`];
-  const activeError  = !!vacuumEntity
-    && (vacuumEntity.state === 'error' || !!vacuumEntity.attributes?.error_code);
-  const errorSensor = hass.states[`sensor.${n}_last_error_code`];
-  if (activeError
-      && errorSensor
-      && errorSensor.state !== '0'
-      && errorSensor.state !== ''
-      && errorSensor.state !== 'unknown'
-      && errorSensor.state !== 'unavailable') {
-    const label  = esc((errorSensor.attributes.label       as string) ?? t(lang, 'alert.errorFallback', { code: errorSensor.state }));
-    const desc   = esc((errorSensor.attributes.description as string) ?? '');
-    const action = esc((errorSensor.attributes.action      as string) ?? '');
-    const subtext = [desc, action].filter(Boolean).join(' ') || undefined;
-    alerts.push({ priority: 1, text: t(lang, 'alert.errorPrefixed', { label }), subtext, category: 'none' });
-  } else if (activeError) {
-    // Active error but last_error_code unusable (sensor lagging behind the
-    // live MQTT state, or entity disabled) — fall back to the vacuum
-    // entity's own error attributes so an active error is never silent.
-    // With neither message nor code (state 'error' from an unknown-phase
-    // mapping), use the header's generic wording instead of "Error: Error".
-    const code = vacuumEntity!.attributes?.error_code;
-    const msg  = vacuumEntity!.attributes?.error as string | undefined;
-    const text = msg ? t(lang, 'alert.errorPrefixed', { label: esc(msg) })
-      : code != null ? t(lang, 'alert.errorPrefixed', { label: t(lang, 'alert.errorFallback', { code: esc(String(code)) }) })
-      : t(lang, 'header.robotErrorCheckApp');
-    alerts.push({ priority: 1, text, category: 'none' });
+  // v3.0 B2: one error role for both generations (robot-model.ts
+  // errorRole): Prime from the error sensor's help-catalogue words; Classic
+  // live only while the `error` sensor says so — the vacuum's error_code
+  // attribute outlives the error after docking (sensor_helpers.py:150), which
+  // kept a banner up for days. Words: Classic last_error_code `description`
+  // and `action` (it has no `label`, so 2.x always fell back to "Error N").
+  const e = errorRole(hass, n, robot(hass, n));
+  if (e.active) {
+    const label = e.title ? esc(e.title)
+      : e.code ? t(lang, 'alert.errorFallback', { code: esc(e.code) })
+      : '';
+    const sub = e.description ?? e.action;
+    alerts.push({
+      priority: 1,
+      text: label ? t(lang, 'alert.errorPrefixed', { label }) : t(lang, 'header.robotErrorCheckApp'),
+      subtext: sub ? esc(sub) : undefined,
+      category: 'none',
+    });
   }
 
   // Priority 2 — maintenance due (Wave A A5: readiness-specific text). Health.
-  const maintenanceSensor = hass.states[`binary_sensor.${n}_maintenance_due`];
+  const maintenanceSensor = robot(hass, n).st('binary_sensor', 'maintenance_due');
   if (maintenanceSensor && maintenanceSensor.state === 'on') {
     // v2.5.0 F1 (#17): readiness is a SLUG since integration 4.1.8 —
     // `ready`, `bin_full`, `lid_open`, … or `not_ready_<n>` for a state the
@@ -90,7 +83,7 @@ export function collectAlerts(
     // ready — check the app". Compared against slugs (slugs.ts, guarded by
     // tests/slugs.test.ts); the reason is shown in the integration's own
     // words via HA's formatter.
-    const readinessId = `sensor.${n}_readiness`;
+    const readinessId = (robot(hass, n).id('sensor', 'readiness') ?? '');
     const readiness = hass.states[readinessId]?.state ?? '';
     let alertText = t(lang, 'alert.maintenanceDue');
     if (readiness === READINESS.BIN_FULL) {
@@ -107,8 +100,8 @@ export function collectAlerts(
 
   // Priority 3/4 — filter/brush wear rate (L4). Health.
   if (caps.hasWearRate) {
-    const filterWear = hass.states[`sensor.${n}_filter_wear_rate`];
-    const filterThr  = hass.states[`sensor.${n}_filter_remaining_hours`];
+    const filterWear = robot(hass, n).st('sensor', 'filter_wear_rate');
+    const filterThr  = robot(hass, n).st('sensor', 'filter_remaining_hours');
     if (filterWear && filterWear.state !== 'unknown' && filterWear.state !== 'unavailable' && filterThr) {
       // v2.5.0 F7: same reference life the Health bar uses (max_hours first).
       const thr     = consumableReferenceHours(filterThr);
@@ -118,8 +111,8 @@ export function collectAlerts(
       }
     }
 
-    const brushWear = hass.states[`sensor.${n}_brush_wear_rate`];
-    const brushThr  = hass.states[`sensor.${n}_brush_remaining_hours`];
+    const brushWear = robot(hass, n).st('sensor', 'brush_wear_rate');
+    const brushThr  = robot(hass, n).st('sensor', 'brush_remaining_hours');
     if (brushWear && brushWear.state !== 'unknown' && brushWear.state !== 'unavailable' && brushThr) {
       const thr   = consumableReferenceHours(brushThr);
       const ratio = thr ? parseFloat(brushWear.state) / (thr / 90) : NaN;
@@ -133,7 +126,7 @@ export function collectAlerts(
   // — grouped with performance/anomaly signals already in the v2.0 Health tab
   // (speed trend, robot health score) rather than Map, despite its spatial
   // origin, for consistency with where other performance signals live.
-  const navQualityEntity = hass.states[`sensor.${n}_nav_quality`];
+  const navQualityEntity = robot(hass, n).st('sensor', 'nav_quality');
   if (navQualityEntity
       && navQualityEntity.state !== 'unknown'
       && navQualityEntity.state !== 'unavailable') {
@@ -150,7 +143,7 @@ export function collectAlerts(
 
   // Priority 6 — consecutive clean skips (F6a, v2.1+). Health.
   if (caps.hasConsecutiveSkips) {
-    const skipsEntity = hass.states[`sensor.${n}_consecutive_clean_skips`];
+    const skipsEntity = robot(hass, n).st('sensor', 'consecutive_clean_skips');
     if (skipsEntity && skipsEntity.state !== 'unknown' && skipsEntity.state !== 'unavailable') {
       const count = parseInt(skipsEntity.state, 10);
       if (!isNaN(count) && count > 0) {
@@ -183,7 +176,7 @@ export function collectAlerts(
   // labelled as a percentage) is the genuine successor to the old floor
   // concept. Read the attribute, not the entity state.
   if (caps.hasWifiFloor) {
-    const wifiEntity = hass.states[`sensor.${n}_wifi_health`];
+    const wifiEntity = robot(hass, n).st('sensor', 'wifi_health');
     const rawBucket   = wifiEntity?.attributes?.weakest_bucket_observed;
     if (wifiEntity && typeof rawBucket === 'number' && !isNaN(rawBucket)) {
       // rawBucket is always 0–4 by construction (see migration note above);
@@ -206,7 +199,7 @@ export function collectAlerts(
   // default) fires when per-cell coverage history diverges from the robot's
   // own learned layout. Lowest priority: informative, not actionable damage.
   // Presence-based gating — entity absent on ≤ 3.1.x, no cap flag needed.
-  const layoutEntity = hass.states[`binary_sensor.${n}_layout_change_detected`];
+  const layoutEntity = robot(hass, n).st('binary_sensor', 'layout_change_detected');
   if (layoutEntity && layoutEntity.state === 'on') {
     alerts.push({
       priority: 8,

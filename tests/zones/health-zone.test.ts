@@ -924,7 +924,7 @@ describe('renderHealthZone() — v2.2.0 B1 resolved-error info line', () => {
   it('shows muted "Last error" line when error is resolved (no active vacuum error)', () => {
     const html = render({
       [`vacuum.${n}`]:                 st('docked', {}),
-      [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck' }),
+      [`sensor.${n}_last_error_code`]: st('2', { description: 'Brush stuck' }),
       [`sensor.${n}_last_error_at`]:   st(new Date(Date.now() - 6 * 86400000).toISOString()),
     });
     expect(html).toContain('rpc-last-error-info');
@@ -936,7 +936,7 @@ describe('renderHealthZone() — v2.2.0 B1 resolved-error info line', () => {
   it('omits the info line while the error is still ACTIVE (banner owns it)', () => {
     const html = render({
       [`vacuum.${n}`]:                 st('error', { error_code: 2 }),
-      [`sensor.${n}_last_error_code`]: st('2', { label: 'Brush stuck' }),
+      [`sensor.${n}_last_error_code`]: st('2', { description: 'Brush stuck' }),
     });
     expect(html).not.toContain('rpc-last-error-info');
   });
@@ -952,7 +952,7 @@ describe('renderHealthZone() — v2.2.0 B1 resolved-error info line', () => {
   it('renders without timestamp when last_error_at is unavailable', () => {
     const html = render({
       [`vacuum.${n}`]:                 st('docked', {}),
-      [`sensor.${n}_last_error_code`]: st('9', { label: 'Cliff sensor' }),
+      [`sensor.${n}_last_error_code`]: st('9', { description: 'Cliff sensor' }),
       [`sensor.${n}_last_error_at`]:   st('unavailable'),
     });
     expect(html).toContain('Last error: Cliff sensor (resolved)');
@@ -961,7 +961,7 @@ describe('renderHealthZone() — v2.2.0 B1 resolved-error info line', () => {
   it('falls back to "Error N" label and escapes XSS', () => {
     const html = render({
       [`vacuum.${n}`]:                 st('docked', {}),
-      [`sensor.${n}_last_error_code`]: st('5', { label: '<b>x</b>' }),
+      [`sensor.${n}_last_error_code`]: st('5', { description: '<b>x</b>' }),
     });
     expect(html).not.toContain('<b>x</b>');
     expect(html).toContain('&lt;b&gt;');
@@ -1530,5 +1530,54 @@ describe('renderHealthZone() — Prime rooms-overdue (integration 4.2.19)', () =
     }, { ...defaultCaps, hasRoomsOverdue: true });
     expect(html).toContain('rpc-rooms-overdue');
     expect(html).toContain('Bad');
+  });
+});
+
+// ── v3.0 B7 + station — Prime parts and dock ─────────────────────────────
+import { primeCombo, classicI7 } from '../fixtures/robots';
+
+describe('renderHealthZone() — v3.0 Prime parts and station', () => {
+  const hs: HealthZoneState = {
+    openPopover: null, resetting: null, resetError: null, legendShown: false,
+    healthDetailsExpanded: true, openMaintPopover: null, navDetailsExpanded: false,
+  };
+  const hass = primeCombo([
+    ['sensor.combo_prime_part_filter', 'prime_part_filter', '30', {
+      friendly_name: 'Combo Filter', unit_of_measurement: 'h', category: 'replacement', count_used: 90, raw_count_remaining: 30,
+    }],
+    ['sensor.combo_prime_part_pad_wash_cleaning', 'prime_part_pad_wash_cleaning', '0', {
+      friendly_name: 'Combo Pad wash', unit_of_measurement: 'washes', category: 'maintenance', count_used: 90, raw_count_remaining: 0,
+    }],
+    ['sensor.combo_prime_dock_status', 'prime_dock_status', 'idle', { friendly_name: 'Combo Dock status' }],
+    ['button.combo_prime_wash_pad', 'prime_wash_pad', 'unknown'],
+    ['switch.combo_prime_pad_dry', 'prime_pad_dry', 'on'],
+  ]);
+  hass.formatEntityState = (s, state) => `«${state ?? s.state}»`;
+  const html = renderHealthZone(hass, { ...baseConfig, entity: 'vacuum.combo' }, defaultCaps, 'combo', hs);
+
+  it('replacement part: bar with share of life and the value in its own unit', () => {
+    expect(html).toContain('Filter');
+    expect(html).toContain('25%');
+    expect(html).toContain('«30»');
+  });
+  it('maintenance part: value only, no bar, never red for a zero', () => {
+    const row = html.slice(html.indexOf('Pad wash'), html.indexOf('Pad wash') + 300);
+    expect(row).toContain('«0»');
+    expect(row).not.toContain('rpc-bar-track');
+  });
+  it('no reset button on Prime parts (reset_* does not reset the robot\'s counter)', () =>
+    expect(html).not.toMatch(/data-reset="[^"]*filter/));
+  it('station: status in the integration\'s words, actions and pad-drying switch', () => {
+    expect(html).toContain('Dock status: «idle»');
+    expect(html).toContain('data-press-entity="button.combo_prime_empty_bin"');
+    expect(html).toContain('data-press-entity="button.combo_prime_wash_pad"');
+    expect(html).toContain('data-switch-entity="switch.combo_prime_pad_dry"');
+    expect(html).toContain('aria-pressed="true"');
+  });
+  it('header says Care', () => expect(html).toContain('CARE'));
+  it('negative control: Classic shows no Prime sections', () => {
+    const c = renderHealthZone(classicI7(), { ...baseConfig, entity: 'vacuum.i7' }, defaultCaps, 'i7', hs);
+    expect(c).not.toContain('data-press-entity');
+    expect(c).not.toContain('PARTS');
   });
 });

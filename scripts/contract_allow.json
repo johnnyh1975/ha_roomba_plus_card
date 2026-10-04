@@ -1,0 +1,7 @@
+{
+  "keys": {
+    "sensor:battery": "The battery sensor has no translation_key (HA's device_class name); found by suffix or device_class (registry.ts).",
+    "sensor:battery_level": "Pre-4.0 object id of the battery sensor on migrated installs (entity-ids.ts batterySensorId fallback)."
+  },
+  "services": {}
+}

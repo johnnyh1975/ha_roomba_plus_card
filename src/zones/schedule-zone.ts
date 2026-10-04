@@ -1,4 +1,5 @@
 import { HomeAssistant, CardConfig, RobotCapabilities } from '../types.js';
+import { robot } from '../registry.js';
 import { esc } from '../utils.js';
 import { t, resolveLang } from '../i18n/index.js';
 
@@ -43,13 +44,13 @@ export function renderScheduleZone(
 
   const lang = resolveLang(hass.language);
   const n = robotName;
-  const nextCleanEntity = hass.states[`sensor.${n}_next_clean`];
-  const holdEntity      = hass.states[`binary_sensor.${n}_schedule_hold_active`];
+  const nextCleanEntity = robot(hass, n).st('sensor', 'next_clean');
+  const holdEntity      = robot(hass, n).st('binary_sensor', 'schedule_hold_active');
 
   // B1/B2 sensors — presence scheduling (L6, v1.8+)
-  const opportunitiesEntity = hass.states[`sensor.${n}_presence_clean_opportunities_7d`];
-  const utilisationEntity   = hass.states[`sensor.${n}_presence_clean_utilisation_7d`];
-  const likelyWindowEntity  = hass.states[`sensor.${n}_next_likely_clean_window`];
+  const opportunitiesEntity = robot(hass, n).st('sensor', 'presence_clean_opportunities_7d');
+  const utilisationEntity   = robot(hass, n).st('sensor', 'presence_clean_utilisation_7d');
+  const likelyWindowEntity  = robot(hass, n).st('sensor', 'next_likely_clean_window');
 
   const hasPresenceAnalytics = !!opportunitiesEntity && !!utilisationEntity
     && opportunitiesEntity.state !== 'unknown' && opportunitiesEntity.state !== 'unavailable'
@@ -111,7 +112,7 @@ export function renderScheduleZone(
   // from the presence-derived likely window.
   let optimalWindowHtml = '';
   if (caps.hasOptimalWindow) {
-    const optEntity = hass.states[`sensor.${n}_optimal_clean_window`];
+    const optEntity = robot(hass, n).st('sensor', 'optimal_clean_window');
     if (optEntity && optEntity.state !== 'unavailable' && optEntity.state !== 'unknown') {
       const formatted = formatNextClean(optEntity.state, hass.language, lang);
       if (formatted && formatted !== t(lang, 'schedule.noScheduleSet')) {

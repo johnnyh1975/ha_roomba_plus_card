@@ -3,10 +3,11 @@
  * Spec: roomba_plus_card_spec.md + roomba_plus_card_wave_features.md (Wave A)
  */
 
+import { robot } from './registry.js';
 import { CardConfig, HomeAssistant, DaySummary, MissionRecord, HazardRecord, HouseholdSummary, MissionExplain, MissionPath, MissionMapPayload } from './types.js';
 import { detectCapabilities } from './capabilities.js';
 import { MissionApiClient } from './mission-api.js';
-import { timeSince, isMetricSystem } from './utils.js';
+import { timeSince, isMetricSystem, esc } from './utils.js';
 import { renderRoomSelectorZone } from './zones/room-selector-zone.js';
 import { renderAlertZone }        from './zones/alert-zone.js';
 import { renderHouseholdZone, renderHouseholdSkeleton } from './zones/household-zone.js';
@@ -14,13 +15,16 @@ import { CHIP_TO_OPTION, OPTION_TO_CHIP } from './zones/room-selector-zone.js';
 import { renderHeader } from './header.js';
 import { availableTabs, defaultTab, healthTabHasBadge, historyTabHasBadge, renderTabBar, TabId } from './tabs.js';
 import { resolveClick, resolveKeydownTarget, ClickActionKey } from './actions-resolver.js';
-import { buildConfigFormSchema } from './config-form.js';
+import { buildConfigFormSchema, stubConfig } from './config-form.js';
 import { shouldReloadForEvent } from './mission-events.js';
-import { renderTabContent } from './tab-content.js';
+import { renderTabContent, TabContentContext } from './tab-content.js';
+import { isWideCard } from './layout.js';
+import type { MapLayer } from './zones/map-zone.js';
+import { diagnosticsData, diagnosticsMarkdown, renderDiagnostics } from './diagnostics.js';
 import { isPureClickKey, clickReducer, ClickState, ClickPayload } from './click-reducers.js';
 import { t, resolveLang } from './i18n/index.js';
 import { planAction } from './action-plan.js';
-import { relevantEntityIds } from './relevant-entity-ids.js';
+import { relevantEntityIds, anyEntityChanged } from './relevant-entity-ids.js';
 import { checkMinimums, fetchIntegrationVersion, renderVersionNotice, VersionProblem } from './version-check.js';
 
 // ──────────────────────────────────────────────
@@ -59,6 +63,7 @@ const STYLES = `
   }
 
   .rpc-card {
+    container-type: inline-size; container-name: rpc;
     background: var(--ha-card-background, var(--card-background-color, #fff));
     border-radius: var(--ha-card-border-radius, 12px);
     padding: var(--rpc-card-padding);
@@ -100,6 +105,12 @@ const STYLES = `
     font-size: 0.8rem; color: var(--secondary-text-color);
     margin-top: 2px; margin-left: 28px;
   }
+  /* v3.0 B2/B3 — Prime error words, start check, remaining mode */
+  .rpc-error-desc, .rpc-error-modes {
+    font-size: 0.8rem; color: var(--secondary-text-color);
+    margin-top: 2px; margin-left: 28px;
+  }
+  .rpc-error-title, .rpc-start-blocked { font-size: 0.85rem; color: var(--rpc-amber); margin-top: 4px; }
 
   /* Wave A3 — area-today */
   .rpc-area-today {
@@ -169,6 +180,8 @@ const STYLES = `
 
   /* ─── Zone 2 — Room Selector ─── */
   .rpc-chips-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+  /* v3.0 B5 — Prime rooms grouped by floor */
+  .rpc-floor-label { font-size: 0.72rem; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; margin: 4px 0; }
   .rpc-room-chip {
     padding: 5px 12px; border-radius: 20px;
     border: 1.5px solid var(--primary-color, #2563eb);
@@ -400,6 +413,12 @@ const STYLES = `
   /* v2.2.0 A2/A3 */
   .rpc-lifetime-dirt { margin-top: 2px; }
   .rpc-dock-health { font-size: 0.82rem; }
+  /* v3.0 — Prime station and parts */
+  .rpc-dock-line { font-size: 0.82rem; margin-top: 2px; }
+  .rpc-dock-line--warn { color: var(--rpc-amber); }
+  .rpc-dock-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .rpc-dock-actions .rpc-btn { width: auto; flex: 0 0 auto; margin: 0; padding: 5px 12px; font-size: 0.8rem; }
+  .rpc-part-value { font-size: 0.78rem; color: var(--secondary-text-color); min-width: 72px; text-align: right; white-space: nowrap; }
   .rpc-dock-label { font-size: 0.7rem; font-weight: 700; letter-spacing: .06em; color: var(--secondary-text-color); margin-bottom: 2px; }
   .rpc-dock-tank { margin-bottom: 2px; }
   .rpc-dock-counters { color: var(--secondary-text-color); font-size: 0.78rem; }
@@ -630,6 +649,36 @@ const STYLES = `
     box-shadow: 0 1px 2px rgba(0,0,0,.15);
     cursor: pointer; white-space: nowrap; pointer-events: auto;
   }
+  /* v3.0 C — Map tab on the rooms map */
+  .rpc-map-wrap { position: relative; overflow: hidden; margin: 0 auto; border-radius: 8px; background: #1e1e1e; }
+  .rpc-map-base { display: block; }
+  .rpc-map-coverage { position: absolute; opacity: 0.75; pointer-events: none; mix-blend-mode: screen; }
+  .rpc-room-poly--static { cursor: default; fill-opacity: 0.04; }
+  .rpc-room-label--static { cursor: default; opacity: 0.85; }
+  .rpc-map-robot {
+    position: absolute; width: 12px; height: 12px; transform: translate(-50%, -50%);
+    border-radius: 50%; background: var(--primary-color, #2563eb); border: 2px solid #fff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, .3); pointer-events: none;
+  }
+  /* v3.0 A5 — wide card: map column | header + tabs */
+  .rpc-two-col { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .rpc-col-map { position: sticky; top: 0; }
+  /* narrow card: full-width action buttons */
+  @container rpc (max-width: 340px) {
+    .rpc-actions .rpc-btn { flex: 1 1 100%; }
+    .rpc-metrics-row { gap: 12px; }
+  }
+  /* v3.0 A4 — card diagnostics */
+  .rpc-diag { font-size: 0.78rem; margin: 6px 0 4px; }
+  .rpc-diag-head { color: var(--secondary-text-color); margin-bottom: 6px; line-height: 1.5; }
+  .rpc-diag-table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+  .rpc-diag-table td { padding: 2px 4px; border-bottom: 1px solid var(--divider-color); vertical-align: top; }
+  .rpc-diag-table td:first-child, .rpc-diag-table td:last-child { white-space: nowrap; }
+  .rpc-diag-table code { font-size: 0.72rem; overflow-wrap: anywhere; }
+  .rpc-diag-missing td { color: var(--secondary-text-color); }
+  .rpc-diag-derived { color: var(--secondary-text-color); margin-bottom: 8px; }
+  .rpc-map-layers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .rpc-map-floor { margin-bottom: 8px; }
   .rpc-room-label--selected {
     background: var(--primary-color, #2563eb); color: #fff;
   }
@@ -837,12 +886,18 @@ class RoombaPlusCard extends HTMLElement {
   // 404 (no coverage map for this mission); 'error' = 409/502/network.
   private openMissionMap: { recordId: string; data: MissionMapPayload | null; status?: 'absent' | 'error' } | null = null;
   private lifetimeExpanded = false;      // C1: lifetime stats footer expanded
+  /** v3.0 C: Map tab layers switched off this session. */
+  private hiddenMapLayers = new Set<MapLayer>();
   private hazards: HazardRecord[] = [];  // F7: coverage map hazard pins (fetched with history)
   private historyTab: 'calendar' | 'coverage' = 'calendar'; // F7: active tab in history zone
   private householdData: HouseholdSummary | null = null;     // F17: household summary (multi-robot only)
   private apiClient: MissionApiClient | null = null;
   /** v2.5.0: components below the card's minimum (version-check.ts). */
   private versionProblems: VersionProblem[] = [];
+  /** v3.0 A4: for the card diagnostics. */
+  private integrationVersion: string | null = null;
+  private diagOpen = false;
+  private diagCopied = false;
   private versionCheckStarted = false;
   private prevVacuumState  = '';
   private prevMissionActive = '';   // tracks binary_sensor.*_mission_active across updates
@@ -859,6 +914,12 @@ class RoombaPlusCard extends HTMLElement {
     }
   };
 
+  /** v3.0 A5: card width ≥ WIDE_PX — map column beside the content. */
+  private wide = false;
+  /** v3.0: last markup written, to skip identical re-renders. */
+  private lastHtml = '';
+  private resizeObserver: ResizeObserver | null = null;
+
   constructor() {
     super();
     this.root = this.attachShadow({ mode: 'open' });
@@ -872,6 +933,20 @@ class RoombaPlusCard extends HTMLElement {
     this.root.addEventListener('click', this.handleDelegatedClick);
     this.root.addEventListener('change', this.handleDelegatedChange);
     this.root.addEventListener('keydown', this.handleDelegatedKeydown);
+    // v3.0 A5: two columns on a wide card. Observed, not a media query —
+    // the card's own width counts (a sections dashboard column, a panel
+    // view), not the window's.
+    if (typeof ResizeObserver !== 'undefined' && !this.resizeObserver) {
+      this.resizeObserver = new ResizeObserver(entries => {
+        const w = entries[0]?.contentRect?.width ?? 0;
+        const wide = isWideCard(w, this.wide);
+        if (wide !== this.wide) {
+          this.wide = wide;
+          if (this._hass && this.config) this.render();
+        }
+      });
+      this.resizeObserver.observe(this);
+    }
   }
 
   disconnectedCallback() {
@@ -879,6 +954,8 @@ class RoombaPlusCard extends HTMLElement {
     this.root.removeEventListener('click', this.handleDelegatedClick);
     this.root.removeEventListener('change', this.handleDelegatedChange);
     this.root.removeEventListener('keydown', this.handleDelegatedKeydown);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     // v2.1.0 A5: tear down the mission-completed subscription
     if (this.missionEventUnsub) {
       this.missionEventUnsub().catch(() => { /* ignore teardown errors */ });
@@ -920,7 +997,11 @@ class RoombaPlusCard extends HTMLElement {
       this.resetRobotState();
     }
 
+    this.lastHtml = '';
     this.root.innerHTML = `<style>${STYLES}</style><div class="rpc-card" style="padding:16px;color:var(--secondary-text-color,#9ca3af);font-size:.85rem">Loading…</div>`;
+    // v3.0: a config edit with hass already set renders right away — it
+    // used to wait for the next watched entity change, showing "Loading…".
+    if (this._hass) this.render();
   }
 
   set hass(hass: HomeAssistant) {
@@ -932,17 +1013,18 @@ class RoombaPlusCard extends HTMLElement {
       ...relevantEntityIds(this._hass, this.robotName, this.activeRobot, this.config.robot_selector_helper),
       ...relevantEntityIds(hass, this.robotName, this.activeRobot, this.config.robot_selector_helper),
     ]));
-    const changed = !this._hass || relevant.some(id =>
-      hass.states[id]?.state       !== this._hass.states[id]?.state ||
-      hass.states[id]?.last_changed !== this._hass.states[id]?.last_changed
-    );
+    // v3.0: last_updated too — it moves on an attribute-only change
+    // (last_changed does not), and 3.0 reads attributes that change without
+    // the state: the vacuum's favourites, cleaning mode and dock activity,
+    // the Prime room select's floors, the start check's reason.
+    const changed = !this._hass || anyEntityChanged(this._hass, hass, relevant);
 
     // Always update the hass reference — mission detection and apiClient need current data
     const prev = this._hass;
     this._hass = hass;
 
     // Sync passes chip to entity state — but never overwrite an optimistic update in-flight
-    const passesEntity = hass.states[`select.${this.robotName}_cleaning_passes`];
+    const passesEntity = robot(hass, this.robotName).st('select', 'cleaning_passes');
     if (passesEntity && !this.isSendingClean && !this.passSettingInFlight) {
       this.passes = OPTION_TO_CHIP[passesEntity.state] ?? 'Auto';
     }
@@ -950,7 +1032,7 @@ class RoombaPlusCard extends HTMLElement {
     // History refresh on mission completion.
     // v1.9+: use binary_sensor.*_mission_active (on→off = mission truly finished, not just docked mid-mission).
     // Pre-1.9 fallback: cleaning→docked vacuum state transition (may fire spuriously on mid-mission recharge).
-    const missionActiveId    = `binary_sensor.${this.robotName}_mission_active`;
+    const missionActiveId    = (robot(this._hass, this.robotName).id('binary_sensor', 'mission_active') ?? '');
     const missionActiveState = hass.states[missionActiveId]?.state ?? '';
 
     if (missionActiveState) {
@@ -1084,6 +1166,7 @@ class RoombaPlusCard extends HTMLElement {
     this.versionCheckStarted = true;
     const haVersion = this._hass.config?.version;
     fetchIntegrationVersion(this._hass).then(integrationVersion => {
+      this.integrationVersion = integrationVersion;
       const problems = checkMinimums(haVersion, integrationVersion);
       if (problems.length > 0) {
         this.versionProblems = problems;
@@ -1269,15 +1352,22 @@ class RoombaPlusCard extends HTMLElement {
       health:  healthTabHasBadge(this._hass, caps, this.robotName),
       history: historyTabHasBadge(this._hass, caps, this.robotName),
     };
-    const tabBarHtml = renderTabBar(tabs, this.activeTab, badges);
+    // v3.0 A5: a wide card (≥ 700 px, measured by the ResizeObserver set up
+    // in connectedCallback) shows the map in its own column next to the
+    // header and tabs; the Map tab leaves the tab bar then. activeTab is
+    // kept, so narrowing the card again returns to the map if it was open.
+    const twoCol   = this.wide && this.viewMode !== 'household' && tabs.some(tb => tb.id === 'map');
+    const barTabs  = twoCol ? tabs.filter(tb => tb.id !== 'map') : tabs;
+    const panelTab: TabId | null = twoCol && this.activeTab === 'map' ? (barTabs[0]?.id ?? null) : this.activeTab;
+    const tabBarHtml = renderTabBar(barTabs, panelTab, badges);
 
-    const tabContentHtml = renderTabContent(this.activeTab, {
+    const tabCtx: TabContentContext = {
       hass: this._hass, config: this.config, caps, robotName: this.robotName, isMetric,
       missionData: this.missionData, historyLoading: this.historyLoading, historyError: this.historyError,
       openDay: this.openDay, dayMissions: this.dayMissions, openDaySummary: this.openDaySummary,
       openExplain: this.openExplain, openReplay: this.openReplay, openMissionMap: this.openMissionMap,
       lifetimeExpanded: this.lifetimeExpanded, historyTab: this.historyTab, hazards: this.hazards,
-      selectedRooms: this.selectedRooms,
+      selectedRooms: this.selectedRooms, hiddenMapLayers: this.hiddenMapLayers,
       openPopover: this.openPopover, resetting: this.resetting, resetError: this.resetError,
       legendShown: this.legendShown, healthDetailsExpanded: this.healthDetailsExpanded,
       openMaintPopover: this.openMaintPopover, navDetailsExpanded: this.navDetailsExpanded,
@@ -1285,8 +1375,14 @@ class RoombaPlusCard extends HTMLElement {
       settingsPanelOpen: this.settingsPanelOpen, isSendingClean: this.isSendingClean,
       sendError: this.sendError, passes: this.passes,
       maintenanceLinksHtml: this.renderMaintenanceLinks(caps),
+      diagnosticsHtml: panelTab === 'settings'
+        ? renderDiagnostics(this.diagOpen ? diagnosticsData(this._hass, this.robotName, this.integrationVersion) : null,
+            this.diagOpen, this.diagCopied, resolveLang(this._hass.language))
+        : '',
       alertZoneHtml,
-    });
+    };
+    const tabContentHtml = renderTabContent(panelTab, tabCtx);
+    const mapColumnHtml  = twoCol ? renderTabContent('map', { ...tabCtx, mapColumn: true }) : '';
 
     // v2.0: household view replaces header + tabs entirely rather than
     // appending the household zone as a permanent footer below every tab —
@@ -1312,6 +1408,20 @@ class RoombaPlusCard extends HTMLElement {
         <button class="rpc-household-back" data-household-back>← Back</button>
         ${householdBodyHtml}
       `
+      : twoCol
+      ? `
+        <div class="rpc-two-col">
+          <div class="rpc-col-map">${mapColumnHtml}</div>
+          <div class="rpc-col-main">
+            ${headerHtml}
+            ${roomPickerHtml}
+            ${tabBarHtml}
+            <div class="rpc-tab-panel">
+              ${tabContentHtml}
+            </div>
+          </div>
+        </div>
+      `
       : `
         ${headerHtml}
         ${roomPickerHtml}
@@ -1330,6 +1440,12 @@ class RoombaPlusCard extends HTMLElement {
       </div>
     `;
 
+    // v3.0: unchanged output → leave the DOM alone. The render guard now
+    // also reacts to attribute-only changes (a tracker pose every few
+    // seconds), and rebuilding identical markup would close an open
+    // <select>, drop keyboard focus and restart animations each time.
+    if (html === this.lastHtml) return;
+    this.lastHtml = html;
     this.root.innerHTML = html;
     // B3 (v2.1.0): no per-render listener re-attach — delegated handlers on
     // this.root (registered in connectedCallback) cover all interactions.
@@ -1359,19 +1475,19 @@ class RoombaPlusCard extends HTMLElement {
    * same "Reset X ago" / "Never recorded" treatment.
    */
   private renderMaintenanceLinks(caps: import('./types.js').RobotCapabilities): string {
-    if (!caps.hasMaintenanceCalendar && !this._hass.states[`sensor.${this.robotName}_battery_capacity_retention`]) return '';
+    if (!caps.hasMaintenanceCalendar && !robot(this._hass, this.robotName).st('sensor', 'battery_capacity_retention')) return '';
 
     const lang = resolveLang(this._hass.language);
     const n = this.robotName;
     const rows: { label: string; service: string; tsEntityId: string }[] = [];
-    if (this._hass.states[`sensor.${n}_wheel_last_cleaned`])
-      rows.push({ label: t(lang, 'card.maintWheelCleaning'),   service: 'roomba_plus.reset_wheel_cleaning',   tsEntityId: `sensor.${n}_wheel_last_cleaned` });
-    if (this._hass.states[`sensor.${n}_contact_last_cleaned`])
-      rows.push({ label: t(lang, 'card.maintContactCleaning'), service: 'roomba_plus.reset_contact_cleaning', tsEntityId: `sensor.${n}_contact_last_cleaned` });
-    if (this._hass.states[`sensor.${n}_bin_last_cleaned`])
-      rows.push({ label: t(lang, 'card.maintBinCleaning'),     service: 'roomba_plus.reset_bin_cleaning',     tsEntityId: `sensor.${n}_bin_last_cleaned` });
-    if (this._hass.states[`sensor.${n}_battery_capacity_retention`])
-      rows.push({ label: t(lang, 'card.maintBatteryBaseline'), service: 'roomba_plus.reset_battery',          tsEntityId: `sensor.${n}_battery_last_replaced` });
+    if (robot(this._hass, n).st('sensor', 'wheel_last_cleaned'))
+      rows.push({ label: t(lang, 'card.maintWheelCleaning'),   service: 'roomba_plus.reset_wheel_cleaning',   tsEntityId: (robot(this._hass, n).id('sensor', 'wheel_last_cleaned') ?? '') });
+    if (robot(this._hass, n).st('sensor', 'contact_last_cleaned'))
+      rows.push({ label: t(lang, 'card.maintContactCleaning'), service: 'roomba_plus.reset_contact_cleaning', tsEntityId: (robot(this._hass, n).id('sensor', 'contact_last_cleaned') ?? '') });
+    if (robot(this._hass, n).st('sensor', 'bin_last_cleaned'))
+      rows.push({ label: t(lang, 'card.maintBinCleaning'),     service: 'roomba_plus.reset_bin_cleaning',     tsEntityId: (robot(this._hass, n).id('sensor', 'bin_last_cleaned') ?? '') });
+    if (robot(this._hass, n).st('sensor', 'battery_capacity_retention'))
+      rows.push({ label: t(lang, 'card.maintBatteryBaseline'), service: 'roomba_plus.reset_battery',          tsEntityId: (robot(this._hass, n).id('sensor', 'battery_last_replaced') ?? '') });
 
     if (rows.length === 0) return '';
 
@@ -1407,7 +1523,7 @@ class RoombaPlusCard extends HTMLElement {
     const options = list.map(id => {
       const name = this._hass.states[id]?.attributes?.['friendly_name'] as string ?? id;
       const sel  = this.viewMode === 'robot' && id === this.activeRobot ? ' selected' : '';
-      return `<option value="${id}"${sel}>${name}</option>`;
+      return `<option value="${esc(id)}"${sel}>${esc(name)}</option>`;
     }).join('');
     const householdSel = this.viewMode === 'household' ? ' selected' : '';
     return `
@@ -1516,7 +1632,7 @@ class RoombaPlusCard extends HTMLElement {
         const option    = ds.passOption!;
         this.passes = chipLabel;
         this.render();
-        const selectId = `select.${this.robotName}_cleaning_passes`;
+        const selectId = (robot(this._hass, this.robotName).id('select', 'cleaning_passes') ?? '');
         if (this._hass.states[selectId]) {
           this.passSettingInFlight = true;
           this._hass.callService('select', 'select_option', { entity_id: selectId, option })
@@ -1566,7 +1682,7 @@ class RoombaPlusCard extends HTMLElement {
             this.render();
           }, 3000);
         } else {
-          const switchId = `switch.${this.robotName}_schedule_hold`;
+          const switchId = (robot(this._hass, this.robotName).id('switch', 'schedule_hold') ?? '');
           const isOn     = this._hass.states[switchId]?.state === 'on';
           this.holdToggling = true;
           this.render();
@@ -1602,6 +1718,50 @@ class RoombaPlusCard extends HTMLElement {
           this._hass.callService('select', 'select_option', { entity_id: entityId, option: next })
             .catch(() => { /* non-fatal */ });
         }
+        return;
+      }
+
+      case 'fav-id': {
+        // v3.0 B4: favourites from the vacuum's `favorites` attribute, both
+        // generations, started through the integration's service.
+        const favoriteId = ds.favId!;
+        this._hass.callService('roomba_plus', 'run_favorite', {
+          entity_id: this.activeRobot, favorite_id: favoriteId,
+        }).catch((e: unknown) => this.showServiceError(e));
+        return;
+      }
+
+      case 'diag-toggle':
+        this.diagOpen = !this.diagOpen;
+        this.diagCopied = false;
+        this.render();
+        return;
+
+      case 'diag-copy': {
+        // v3.0 A4: Markdown for an issue. Clipboard needs a secure context
+        // (https or localhost); without it the text is selected in a dialog
+        // so it can be copied by hand.
+        const md = diagnosticsMarkdown(diagnosticsData(this._hass, this.robotName, this.integrationVersion));
+        const done = () => { this.diagCopied = true; this.render(); };
+        const clip = (navigator as Navigator | undefined)?.clipboard;
+        if (clip?.writeText) clip.writeText(md).then(done, () => window.prompt('', md));
+        else window.prompt('', md);
+        return;
+      }
+
+      case 'map-layer': {
+        // v3.0 C: switch a Map tab layer on/off (session only).
+        const layer = ds.mapLayer as MapLayer;
+        if (this.hiddenMapLayers.has(layer)) this.hiddenMapLayers.delete(layer);
+        else this.hiddenMapLayers.add(layer);
+        this.render();
+        return;
+      }
+
+      case 'press-entity': {
+        // v3.0: station actions (Prime empty bin / wash pad) — button.press.
+        this._hass.callService('button', 'press', { entity_id: ds.pressEntity! })
+          .catch((e: unknown) => this.showServiceError(e));
         return;
       }
 
@@ -1746,6 +1906,19 @@ class RoombaPlusCard extends HTMLElement {
     }
   }
 
+  /** v3.0: a refused favourite or station action says why (the
+   *  integration's translated reason — robot offline, favourite not found)
+   *  in the header's error line instead of nothing. */
+  private showServiceError(e: unknown): void {
+    const msg = (e as { message?: unknown } | null)?.message;
+    const text = typeof msg === 'string' && msg.trim() !== ''
+      ? msg : t(resolveLang(this._hass.language), 'card.sendCommandUnclear');
+    this.sendError = text;
+    this.render();
+    // Not for ever: gone after a while unless something replaced it.
+    setTimeout(() => { if (this.sendError === text) { this.sendError = null; this.render(); } }, 10000);
+  }
+
   /** Clean the currently selected rooms (verbatim from original handleAction). */
   private async runCleanSelected(): Promise<void> {
     const entity = this.activeRobot;
@@ -1768,7 +1941,7 @@ class RoombaPlusCard extends HTMLElement {
 
     try {
       // Set cleaning passes via select entity first (spec: "Tapping calls select.select_option")
-      const passesId = `select.${n}_cleaning_passes`;
+      const passesId = (robot(this._hass, n).id('select', 'cleaning_passes') ?? '');
       if (this.passes !== 'Auto' && this._hass.states[passesId]) {
         await this._hass.callService('select', 'select_option', {
           entity_id: passesId,
@@ -1801,7 +1974,7 @@ class RoombaPlusCard extends HTMLElement {
   private async runRepeatLast(): Promise<void> {
     const n = this.robotName;
     try {
-      await this._hass.callService('button', 'press', { entity_id: `button.${n}_repeat_mission` });
+      await this._hass.callService('button', 'press', { entity_id: (robot(this._hass, n).id('button', 'repeat_mission') ?? '') });
     } catch { /* silent */ }
   }
 
@@ -1862,7 +2035,13 @@ class RoombaPlusCard extends HTMLElement {
     return { schema: buildConfigFormSchema() };
   }
 
-  static getStubConfig() { return { entity: 'vacuum.roomba' }; }
+  static getStubConfig(hass?: HomeAssistant) { return stubConfig(hass); }
+
+  /** v3.0 A5: sections dashboards — full width by default, never narrower
+   *  than half; height follows the content. */
+  getGridOptions(): { columns: number; min_columns: number } {
+    return { columns: 12, min_columns: 6 };
+  }
 }
 
 if (typeof customElements !== 'undefined') {

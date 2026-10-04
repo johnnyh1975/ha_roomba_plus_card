@@ -36,6 +36,11 @@ export type ClickActionKey =
   | 'lifetime-toggle'
   | 'history-tab'
   | 'fav-entity'
+  | 'fav-id'
+  | 'press-entity'
+  | 'map-layer'
+  | 'diag-toggle'
+  | 'diag-copy'
   | 'explain'
   | 'replay'
   | 'map';
@@ -69,6 +74,11 @@ export const CLICK_PRIORITY: ReadonlyArray<readonly [string, ClickActionKey]> = 
   ['[data-lifetime-toggle]', 'lifetime-toggle'],
   ['[data-history-tab]', 'history-tab'],
   ['[data-fav-entity]', 'fav-entity'],
+  ['[data-fav-id]', 'fav-id'],     // v3.0 B4 — roomba_plus.run_favorite
+  ['[data-press-entity]', 'press-entity'], // v3.0 — Prime dock buttons (button.press)
+  ['[data-map-layer]', 'map-layer'],       // v3.0 C — Map tab layer chips
+  ['[data-diag-toggle]', 'diag-toggle'],   // v3.0 A4 — card diagnostics
+  ['[data-diag-copy]', 'diag-copy'],
   ['[data-explain]', 'explain'],   // v2.2.0 F1 — before nothing: mission rows have no other data-attr ancestors
   ['[data-replay]', 'replay'],     // v2.2.0 F4
   ['[data-map]', 'map'],           // v2.3.0 MISSION-MAP

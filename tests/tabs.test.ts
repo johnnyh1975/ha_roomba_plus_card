@@ -168,3 +168,18 @@ describe('healthTabHasBadge() — Prime rooms overdue (integration 4.2.19)', () 
     expect(healthTabHasBadge(makeHass({ 'sensor.roomba_prime_rooms_overdue': st('2') }),
       { ...defaultCaps, hasRoomsOverdue: true }, 'roomba')).toBe(true));
 });
+
+// ── v3.0 C — Map tab on the rooms map ────────────────────────────────────
+describe('availableTabs() — v3.0 rooms map', () => {
+  it('a rooms map alone brings the Map tab (Prime has no coverage map)', () => {
+    const tabs = availableTabs(baseConfig, { ...defaultCaps, hasRoomsMap: true, hasCoverageImage: false });
+    expect(tabs[0].id).toBe('map');
+    expect(defaultTab(baseConfig, { ...defaultCaps, hasRoomsMap: true })).toBe('map');
+  });
+  it('neither map → no Map tab (negative control)', () =>
+    expect(availableTabs(baseConfig, { ...defaultCaps, hasRoomsMap: false, hasCoverageImage: false }).some(t => t.id === 'map')).toBe(false));
+  it('the health tab is called Care now (id unchanged)', () => {
+    const care = availableTabs(baseConfig, defaultCaps).find(t => t.id === 'health');
+    expect(care?.label).toBe('Care');
+  });
+});

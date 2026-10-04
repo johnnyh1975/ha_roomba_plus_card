@@ -352,3 +352,17 @@ describe('detectCapabilities() — integration 4.2.19', () => {
   it('hasRoomsOverdue true from the Prime sensor', () =>
     expect(detectCapabilities(makeHass({ [`sensor.${n}_prime_rooms_overdue`]: st('0') }), n, baseConfig).hasRoomsOverdue).toBe(true));
 });
+
+// ── v3.0 B5 — Prime rooms count as smart zones ───────────────────────────
+import { primeCombo, classicI7 } from './fixtures/robots';
+describe('detectCapabilities() — v3.0 rooms role', () => {
+  it('Prime prime_zone_select → hasSmartZones', () =>
+    expect(detectCapabilities(primeCombo(), 'combo', { ...baseConfig, entity: 'vacuum.combo' }).hasSmartZones).toBe(true));
+  it('Classic cloud select → hasSmartZones', () =>
+    expect(detectCapabilities(classicI7(), 'i7', { ...baseConfig, entity: 'vacuum.i7' }).hasSmartZones).toBe(true));
+  it('negative control: a select with no options → false', () => {
+    const hass = classicI7([['select.i7_cloud_zone_abc', 'cloud_smart_zone_select', 'unknown', {
+      options: [], is_active_map: true }]]);
+    expect(detectCapabilities(hass, 'i7', { ...baseConfig, entity: 'vacuum.i7' }).hasSmartZones).toBe(false);
+  });
+});

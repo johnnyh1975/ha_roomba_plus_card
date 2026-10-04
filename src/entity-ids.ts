@@ -1,6 +1,11 @@
 /**
- * entity-ids.ts — v2.5.0: the card's fallback table for entity IDs that the
- * integration does NOT name `{domain}.{robot}_{fixed suffix}`.
+ * entity-ids.ts — named lookups for entities that need more than one key.
+ *
+ * v3.0: everything here resolves through registry.ts (device + translation
+ * key), so renamed entities and Prime prefixes are found; the history below
+ * explains why each lookup exists. Originally (v2.5.0) this was the card's
+ * fallback table for entity IDs that the integration does NOT name
+ * `{domain}.{robot}_{fixed suffix}`.
  *
  * Plan v3 invariant 1 ("no entity id is built by string outside the fallback
  * table") starts here. Each resolver below exists because a hard-coded id
@@ -24,31 +29,31 @@
  * translation_key); until then this is the single place ids are guessed.
  */
 import type { HomeAssistant } from './types.js';
-
-const has = (hass: HomeAssistant, id: string): boolean => !!hass.states[id];
+import { robot } from './registry.js';
 
 /** All of this robot's cloud zone selects (one per Smart Map), sorted. */
 export function cloudZoneSelectIds(hass: HomeAssistant, n: string): string[] {
-  const prefix = `select.${n}_cloud_zone_`;
-  return Object.keys(hass.states).filter(id => id.startsWith(prefix)).sort();
+  return robot(hass, n).ids('select', 'cloud_smart_zone_select');
 }
 
 /**
- * The room/zone select the card should use for multi-room selection, or
- * null. Local SmartZoneSelect first (no-cloud installs). Otherwise the
- * cloud select of the ACTIVE map: `is_active_map: true`, usable (not
- * unavailable — the integration reports unavailable when the map has no
- * selectable options). A single cloud select is used even without the
- * attribute (older integrations); with several and none marked active,
- * none is chosen — offering rooms from a map the robot is not on cleans
- * nothing (or the wrong floor), which is worse than no picker.
+ * The Classic room/zone select the card should use for multi-room
+ * selection, or null. Local SmartZoneSelect first (no-cloud installs).
+ * Otherwise the cloud select of the ACTIVE map: `is_active_map: true`,
+ * usable (not unavailable — the integration reports unavailable when the
+ * map has no selectable options). A single cloud select is used even
+ * without the attribute (older integrations); with several and none marked
+ * active, none is chosen — offering rooms from a map the robot is not on
+ * cleans nothing (or the wrong floor), which is worse than no picker.
+ * Prime robots have their own select (rooms.ts handles both).
  */
 export function zoneSelectId(hass: HomeAssistant, n: string): string | null {
-  const local = `select.${n}_smart_zone_select`;
-  if (has(hass, local) && hass.states[local].state !== 'unavailable') return local;
+  const r = robot(hass, n);
+  const local = r.id('select', 'smart_zone_select');
+  if (local && hass.states[local]?.state !== 'unavailable') return local;
 
-  const usable = cloudZoneSelectIds(hass, n)
-    .filter(id => hass.states[id].state !== 'unavailable');
+  const usable = r.ids('select', 'cloud_smart_zone_select')
+    .filter(id => hass.states[id] && hass.states[id].state !== 'unavailable');
   const active = usable.filter(id => hass.states[id].attributes?.is_active_map === true);
   if (active.length > 0) return active[0];
   if (usable.length === 1 && hass.states[usable[0]].attributes?.is_active_map === undefined) {
@@ -60,31 +65,31 @@ export function zoneSelectId(hass: HomeAssistant, n: string): string | null {
   return null;
 }
 
-/** device_tracker.{n} (integration naming), else a user-renamed _position. */
+/** The robot's device tracker (translation_key `position`; its entity id is
+ *  the device name alone, or a user-renamed `_position`). */
 export function trackerId(hass: HomeAssistant, n: string): string | null {
-  for (const id of [`device_tracker.${n}`, `device_tracker.${n}_position`]) {
-    if (has(hass, id)) return id;
-  }
-  return null;
+  return robot(hass, n).id('device_tracker', 'position');
 }
 
-/** sensor.{n}_battery (fresh installs), else _battery_level (migrated). */
+/** The battery sensor: no translation_key on either generation, so by
+ *  suffix (`_battery`, or `_battery_level` after schema migration 21) or by
+ *  `device_class: battery`. */
 export function batterySensorId(hass: HomeAssistant, n: string): string | null {
-  for (const id of [`sensor.${n}_battery`, `sensor.${n}_battery_level`]) {
-    if (has(hass, id)) return id;
-  }
-  return null;
+  const r = robot(hass, n);
+  return r.id('sensor', 'battery') ?? r.id('sensor', 'battery_level') ?? r.byDeviceClass('sensor', 'battery');
 }
 
 /**
  * The Classic live map image carrying `rooms` / `calibration_points` /
- * `zones` / `door_markers` / `furniture_candidates`: image.{n}_map on fresh
- * installs, image.{n}_cleaning_map on entries migrated by schema 21. When
- * both exist the one actually carrying `rooms` wins (Prime's image.{n}_map
- * is a raw map without them).
+ * `zones` / `door_markers` / `furniture_candidates` (translation_key `map`;
+ * entity id `_map`, or `_cleaning_map` after schema migration 21). Prime's
+ * `image.*_map` is a raw diagnostic map with another key and is not
+ * returned.
  */
 export function mapImageId(hass: HomeAssistant, n: string): string | null {
-  const candidates = [`image.${n}_map`, `image.${n}_cleaning_map`].filter(id => has(hass, id));
+  const r = robot(hass, n);
+  const candidates = [r.id('image', 'map'), r.index.generation === 'prime' ? null : r.id('image', 'cleaning_map')]
+    .filter((id): id is string => !!id && !!hass.states[id]);
   const withRooms = candidates.find(id => {
     const rooms = hass.states[id].attributes?.rooms;
     return !!rooms && typeof rooms === 'object';
@@ -92,14 +97,10 @@ export function mapImageId(hass: HomeAssistant, n: string): string | null {
   return withRooms ?? candidates[0] ?? null;
 }
 
-/** sensor.{n}_rooms_overdue (Classic), else sensor.{n}_prime_rooms_overdue
- *  — the Prime sensor exists since integration 4.2.19 (same attributes, it
- *  subclasses the Classic one; `clean_overdue_rooms` serves both). */
+/** Rooms-overdue sensor, both generations (translation_key `rooms_overdue`;
+ *  Prime since integration 4.2.19 as `_prime_rooms_overdue`). */
 export function roomsOverdueId(hass: HomeAssistant, n: string): string | null {
-  for (const id of [`sensor.${n}_rooms_overdue`, `sensor.${n}_prime_rooms_overdue`]) {
-    if (has(hass, id)) return id;
-  }
-  return null;
+  return robot(hass, n).id('sensor', 'rooms_overdue');
 }
 
 /** Plain-object attribute of the chosen zone select (region_icons,

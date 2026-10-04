@@ -660,3 +660,120 @@ describe('renderHeader() — v2.5.0 cleaned-room chip icons', () => {
     expect(html).toMatch(/rpc-cleaned-chip">[^<]* Kitchen/);
   });
 });
+
+// ── v3.0 B1/B2/B3/B8 — Prime through the robot model ─────────────────────
+import { primeCombo, classicI7 } from './fixtures/robots';
+
+describe('renderHeader() — v3.0 Prime (robot model)', () => {
+  const renderPrime = (rows: Parameters<typeof primeCombo>[0] = []) => {
+    const hass = primeCombo(rows);
+    hass.formatEntityState = (s, state) => `«${state ?? s.state}»`;
+    return renderHeader({
+      hass, config: { ...baseConfig, entity: 'vacuum.combo' }, caps: defaultCaps, robotName: 'combo',
+      loadingAction: null, todayMissionCount: null, missionData: null, roomPickerOpen: false,
+      selectedRoomCount: 0, isSendingClean: false, sendError: null, activeRobot: 'vacuum.combo',
+    });
+  };
+
+  it('B1: dock activity while the phase says charging → station state in the integration\'s words', () => {
+    const html = renderPrime([['vacuum.combo', null, 'docked', { friendly_name: 'Combo', dock_activity: 'pad_drying' }]]);
+    expect(html).toContain('«drying_pad»');
+    expect(html).not.toContain('Docked');
+  });
+  it('B1: dock activity evacuating → emptying bin, no buttons', () => {
+    const html = renderPrime([['vacuum.combo', null, 'docked', { friendly_name: 'Combo', dock_activity: 'evacuating' }]]);
+    expect(html).toContain('Emptying bin');
+    expect(html).not.toContain('data-action="start"');
+  });
+  it('negative control: without dock activity the docked robot reads Docked', () =>
+    expect(renderPrime()).toContain('Docked'));
+  it('B1: cleaning mode named through the mode sensor', () => {
+    const html = renderPrime([
+      ['vacuum.combo', null, 'cleaning', { friendly_name: 'Combo', cleaning_mode: 'mopping' }],
+      ['sensor.combo_cleaning_mode', 'prime_cleaning_mode', 'mopping'],
+    ]);
+    expect(html).toContain('«mopping»');
+  });
+  it('B1: cleaning mode without the sensor → card wording', () => {
+    const html = renderPrime([['vacuum.combo', null, 'cleaning', { friendly_name: 'Combo', cleaning_mode: 'mopping' }]]);
+    expect(html).toContain('Mopping');
+  });
+  it('B2: error title and description from the Prime error sensor', () => {
+    const html = renderPrime([
+      ['vacuum.combo', null, 'error', { friendly_name: 'Combo' }],
+      ['sensor.combo_prime_error', 'error', 'Error 287', {
+        error_code: 287, error_title: 'Pad plate attached', error_description: 'Remove the pad plate to vacuum.',
+        partially_operable: true, available_modes: ['mop'],
+      }],
+    ]);
+    expect(html).toContain('Pad plate attached');
+    expect(html).toContain('Remove the pad plate to vacuum.');
+    expect(html).toContain('Vacuuming not possible — mopping only');
+    expect(html).not.toContain('check the iRobot app');
+  });
+  it('B2: partially operable error while docked shows as a line, state stays', () => {
+    const html = renderPrime([['sensor.combo_prime_error', 'error', 'Error 290', {
+      error_code: 290, error_title: 'Pad plate missing', partially_operable: true, available_modes: ['vacuum'],
+    }]]);
+    expect(html).toContain('rpc-error-title');
+    expect(html).toContain('Pad plate missing');
+    expect(html).toContain('Mopping not possible — vacuuming only');
+    expect(html).toContain('Docked');
+  });
+  it('B3: start check blocked → reason line, Start stays enabled', () => {
+    const html = renderPrime([['binary_sensor.combo_prime_start_blocked', 'prime_start_blocked', 'on',
+      { blocked_reason: 'Robot lifted', available_modes: [] }]]);
+    expect(html).toContain('Robot lifted');
+    expect(html).toContain('Neither vacuuming nor mopping possible');
+    expect(html).toMatch(/data-action="start"\s*\n\s*aria-label/);
+  });
+  it('negative control: start check off → no line', () =>
+    expect(renderPrime()).not.toContain('rpc-start-blocked'));
+  it('B8: Prime connected off → robot offline (chip and no-contact state)', () => {
+    const html = renderPrime([['binary_sensor.combo_connected', 'connected', 'off']]);
+    expect(html).toContain('Robot offline');
+    expect(html).toContain('rpc-offline-state');
+  });
+  it('B8: Prime connection health error → cloud offline chip', () => {
+    const html = renderPrime([['sensor.combo_prime_connection_health', 'prime_connection_health', 'error']]);
+    expect(html).toContain('rpc-connectivity-degraded');
+  });
+});
+
+describe('renderHeader() — v3.0 Classic error via the model', () => {
+  it('Classic error: code, description, action as before', () => {
+    const hass = classicI7([
+      ['vacuum.i7', null, 'error', { friendly_name: 'i7', error_code: 15 }],
+      ['sensor.i7_last_error_code', 'last_error_code', '15', { description: 'Reboot required', action: 'Restart it' }],
+    ]);
+    const html = renderHeader({
+      hass, config: { ...baseConfig, entity: 'vacuum.i7' }, caps: defaultCaps, robotName: 'i7',
+      loadingAction: null, todayMissionCount: null, missionData: null, roomPickerOpen: false,
+      selectedRoomCount: 0, isSendingClean: false, sendError: null, activeRobot: 'vacuum.i7',
+    });
+    expect(html).toContain('Reboot required');
+    expect(html).toContain('15');
+    expect(html).toContain('Restart it');
+  });
+});
+
+describe('renderHeader() — v3.0 mid-mission recharge reads paused', () => {
+  it('phase charging_mid_mission + vacuum paused → recharging, Cancel only (no Resume)', () => {
+    const html = render({ 'vacuum.roomba': st('paused'), 'sensor.roomba_phase': st('charging_mid_mission') });
+    expect(html).toContain('Recharging');
+    expect(html).toContain('data-action="return_home"');
+    expect(html).not.toContain('data-action="resume"');
+  });
+  it('mission_active on + phase charging + paused → recharging', () => {
+    const html = render(
+      { 'vacuum.roomba': st('paused'), 'sensor.roomba_phase': st('charging'), 'binary_sensor.roomba_mission_active': st('on') },
+      { caps: { ...defaultCaps, hasMissionActive: true } });
+    expect(html).toContain('Recharging');
+  });
+  it('negative control: a user pause on the floor (phase stopped) stays Paused with Resume', () => {
+    const html = render(
+      { 'vacuum.roomba': st('paused'), 'sensor.roomba_phase': st('stopped'), 'binary_sensor.roomba_mission_active': st('on') },
+      { caps: { ...defaultCaps, hasMissionActive: true } });
+    expect(html).toContain('data-action="resume"');
+  });
+});

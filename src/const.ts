@@ -66,3 +66,7 @@ export function mdiToEmoji(icon: unknown, fallback = ''): string {
 }
 
 export const MDI_FALLBACK = '📍';
+
+/** v3.0 A4: the card's own version (card diagnostics). Kept equal to
+ *  package.json "version" by tests/const.test.ts. */
+export const CARD_VERSION = '3.0.0';

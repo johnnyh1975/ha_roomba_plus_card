@@ -1,6 +1,9 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, MissionRecord, DaySummary } from './types.js';
+import { robot } from './registry.js';
 import { zoneSelectId, trackerId, mapImageId, roomsOverdueId } from './entity-ids.js';
-import { favoriteEntityIds } from './favorites.js';
+import { favoriteList } from './favorites.js';
+import { roomsRole } from './robot-model.js';
+import { roomsMapUsable } from './zones/map-zone.js';
 
 /**
  * Detect robot capabilities from hass entity state (Tier 1) and optional
@@ -18,15 +21,19 @@ export function detectCapabilities(
   firstRecord?: MissionRecord | null,
   firstSummary?: DaySummary | null,
 ): RobotCapabilities {
-  const e   = (key: string) => !!hass.states[`sensor.${name}_${key}`];
-  const b   = (key: string) => !!hass.states[`binary_sensor.${name}_${key}`];
-  const img = (key: string) => !!hass.states[`image.${name}_${key}`];
+  // v3.0 A1: presence by device + translation_key (registry.ts), suffix
+  // only as the documented fallback.
+  const R   = robot(hass, name);
+  const e   = (key: string) => !!R.st('sensor', key);
+  const b   = (key: string) => !!R.st('binary_sensor', key);
+  const img = (key: string) => !!R.st('image', key);
 
   const hasPad   = e('mop_pad');
   const hasBrush = e('brush_remaining_hours');
   // v2.5.0 F3/F8: resolved, not guessed (entity-ids.ts).
   const zoneSelect = zoneSelectId(hass, name);
   const mapImage   = mapImageId(hass, name);
+  const roomsSelect = roomsRole(hass, name, R).rooms.length > 0 ? roomsRole(hass, name, R).selectId : null;
   const mapAttrs   = mapImage ? (hass.states[mapImage]?.attributes ?? {}) : {};
 
   return {
@@ -41,8 +48,11 @@ export function detectCapabilities(
     // select.*_cloud_zone_{pmap_id}, one per map. Both flags now mean
     // "a usable multi-room select exists" (smart_zone_select or the active
     // map's cloud select).
-    hasZones:         zoneSelect !== null,
-    hasSmartZones:    zoneSelect !== null,
+    // v3.0 B5: the Prime select (prime_zone_select) counts too — rooms are
+    // read through the robot model, which knows both.
+    hasZones:         zoneSelect !== null || roomsSelect !== null,
+    hasSmartZones:    roomsSelect !== null,
+    hasRoomsMap:      roomsMapUsable(hass, name),
     hasProblemZone:   e('problem_zone'),
     hasLifetimeArea:  e('cleaning_analytics_30d'),  // SC1 (v2.7.0): was recent_area_30d
     hasWearRate:      e('filter_wear_rate'),
@@ -57,7 +67,7 @@ export function detectCapabilities(
     // v2.5.0 F5: sensor.*_recent_coverage_pct was removed in integration
     // v3.0; its successor is the `coverage_pct` attribute on
     // cleaning_performance (last mission's area vs the 60-day p75).
-    hasCoveragePct:        typeof hass.states[`sensor.${name}_cleaning_performance`]?.attributes?.coverage_pct === 'number',
+    hasCoveragePct:        typeof robot(hass, name).st('sensor', 'cleaning_performance')?.attributes?.coverage_pct === 'number',
     hasBatteryEol:         e('estimated_battery_eol'),
     hasConsecutiveSkips:   e('consecutive_clean_skips'),
     hasMopBehavior:        e('mop_behavior'),
@@ -76,8 +86,8 @@ export function detectCapabilities(
     // ── v1.6 / integration v2.3–v2.4 ─────────────────────────────────────
     // hasCleanedRooms: non-empty array only — empty array means whole-home
     // clean (no room events) and should NOT trigger the chip row.
-    hasCleanedRooms: Array.isArray(hass.states[`vacuum.${name}`]?.attributes?.last_cleaned_rooms)
-                     && (hass.states[`vacuum.${name}`]?.attributes?.last_cleaned_rooms as unknown[]).length > 0,
+    hasCleanedRooms: Array.isArray(hass.states[robot(hass, name).vacuumId]?.attributes?.last_cleaned_rooms)
+                     && (hass.states[robot(hass, name).vacuumId]?.attributes?.last_cleaned_rooms as unknown[]).length > 0,
     hasDemandBlocked:     b('demand_clean_blocked'),
     hasEnergyConsumption: e('total_energy_consumed'),
     hasOptimalWindow:     e('optimal_clean_window'),
@@ -119,7 +129,7 @@ export function detectCapabilities(
     // arbitrary per-user iRobot routine identifiers, so this scans all
     // entity_ids for the prefix rather than checking a single fixed key.
     // v2.5.0: Prime favourites are button.*_favorite_<id> (favorites.ts).
-    hasFavorites: favoriteEntityIds(hass, name).length > 0,
+    hasFavorites: favoriteList(hass, name).length > 0,
 
     // ── v2.1.0 — header indicators ───────────────────────────────────────────
     // A1: connectivity. Both are binary_sensors (verified vs integration

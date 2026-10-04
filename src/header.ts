@@ -13,9 +13,11 @@
  * merged into a single spatial line here, rather than rendered as two
  * separate lines as the original incremental plan would have produced.
  */
+import { robot } from './registry.js';
+import { statusRole, errorRole, startCheckRole } from './robot-model.js';
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary } from './types.js';
 import { esc, timeSince, formatState, areaSqftFromEntity, isMetricSystem } from './utils.js';
-import { PHASE, STATION_PHASES, OFFLINE_PHASES } from './slugs.js';
+import { PHASE, STATION_PHASES } from './slugs.js';
 import { trackerId, zoneSelectMapAttr } from './entity-ids.js';
 import { mdiToEmoji } from './const.js';
 import { t, resolveLang } from './i18n/index.js';
@@ -112,11 +114,10 @@ export function renderHeader(props: HeaderProps): string {
   const anyLoading = loadingAction !== null || isSendingClean;
   const n = robotName;
 
-  const errorSensor        = `sensor.${n}_last_error_code`;
-  const errorZoneSensor    = `sensor.${n}_last_error_zone`;
-  const rechargeTimeSensor = `sensor.${n}_mission_recharge_time`;
-  const avgDurationSensor  = `sensor.${n}_average_mission_time`;
-  const areaCleanedToday   = `sensor.${n}_area_cleaned_today`;
+  const errorZoneSensor    = (robot(hass, n).id('sensor', 'last_error_zone') ?? '');
+  const rechargeTimeSensor = (robot(hass, n).id('sensor', 'mission_recharge_time') ?? '');
+  const avgDurationSensor  = (robot(hass, n).id('sensor', 'average_mission_time') ?? '');
+  const areaCleanedToday   = (robot(hass, n).id('sensor', 'area_cleaned_today') ?? '');
 
   const elapsedMin     = (attrs.mission_elapsed_min as number | null) ?? null;
   const missionArea    = (attrs.mission_area_sqft as number | null) ?? null;
@@ -127,29 +128,46 @@ export function renderHeader(props: HeaderProps): string {
   const robotIcon  = isMop ? '🧹' : '🤖';
   const friendlyName = esc((attrs.friendly_name as string) ?? entityId);
 
-  const missionPhase      = hass.states[`sensor.${n}_phase`]?.state ?? '';
+  // v3.0 A2/B1: status, error and start check come from the robot model,
+  // which fills them from Classic or Prime entities alike.
+  const R      = robot(hass, n);
+  const status = statusRole(hass, n, R);
+  const err    = errorRole(hass, n, R);
+  const start  = startCheckRole(hass, n, R);
   // v2.5.0 F2: the phase sensor reports slugs (integration ≥ 4.1). The
   // header still owns its own wording for its core states; station work
   // (pad wash/dry, tank refill) is shown in the INTEGRATION's text (P3).
-  const isOfflinePhase  = OFFLINE_PHASES.has(missionPhase);
+  // v3.0 B1: a Prime dock working while the phase still reads `charging`
+  // reports it on the vacuum (`dock_activity`) — used as the phase then.
+  const rawPhase = status.phase;
+  const missionPhase = (STATION_PHASES.has(rawPhase) || rawPhase === PHASE.EMPTYING_BIN || !status.dockActivityPhase)
+    ? rawPhase : status.dockActivityPhase;
+  const isOfflinePhase  = status.offline;
   const isStationPhase  = STATION_PHASES.has(missionPhase);
   const isEmptyingBin   = missionPhase === PHASE.EMPTYING_BIN;
-  const missionActiveRaw  = hass.states[`binary_sensor.${n}_mission_active`]?.state ?? '';
+  const missionActiveRaw  = robot(hass, n).st('binary_sensor', 'mission_active')?.state ?? '';
   const isMissionActive   = missionActiveRaw === 'on';
   const hasMissionActive  = caps.hasMissionActive;
 
-  const expireRaw  = hass.states[`sensor.${n}_mission_expire_time`]?.state ?? '';
+  const expireRaw  = robot(hass, n).st('sensor', 'mission_expire_time')?.state ?? '';
   const expireDate = expireRaw && expireRaw !== 'unavailable' && expireRaw !== 'unknown'
     ? new Date(expireRaw) : null;
   const hasETA     = !!expireDate && !isNaN(expireDate.getTime()) && expireDate > new Date();
   const resumeMin  = hasETA ? Math.max(1, Math.round((expireDate!.getTime() - Date.now()) / 60000)) : null;
 
+  // v3.0: a robot charging in the middle of a mission is reported as
+  // `paused` by both generations — the cycle is still running while the
+  // activity reads docked (vacuum.py:569 Classic, :510 Prime). Up to 2.5
+  // only `docked` counted, so a mid-mission recharge read "Paused" and
+  // offered Resume to a robot on a nearly empty battery.
+  const onDock = vacState === 'docked' || vacState === 'paused';
   let isRecharging = false;
-  if (missionPhase === PHASE.CHARGING_MID_MISSION && vacState === 'docked') {
+  if (missionPhase === PHASE.CHARGING_MID_MISSION && onDock) {
     // v2.5.0 F2: the integration says so directly since 4.x — no inference.
     isRecharging = true;
   } else if (hasMissionActive) {
-    isRecharging = vacState === 'docked' && isMissionActive;
+    isRecharging = isMissionActive && (vacState === 'docked'
+      || (vacState === 'paused' && missionPhase === PHASE.CHARGING));
   } else {
     const rechargeState = st(hass, rechargeTimeSensor);
     const rechargeValid = rechargeState !== 'unavailable' && rechargeState !== 'unknown'
@@ -163,7 +181,7 @@ export function renderHeader(props: HeaderProps): string {
   // silently — the header opportunity flagged in the v2.0 plan.
   let rechargeLineHtml = '';
   if (isRecharging && caps.hasMissionProgressSensor) {
-    const mp = hass.states[`sensor.${n}_mission_progress`];
+    const mp = robot(hass, n).st('sensor', 'mission_progress');
     const rechargeMin = mp?.attributes?.recharge_min;
     if (typeof rechargeMin === 'number') {
       rechargeLineHtml = `<div class="rpc-recharge-line">⚡ ${t(lang, 'header.rechargeLine', { min: Math.round(rechargeMin) })}</div>`;
@@ -188,7 +206,7 @@ export function renderHeader(props: HeaderProps): string {
     stateLabel = t(lang, 'header.stateEmptyingBin');
   } else if (isStationPhase && vacState !== 'cleaning' && vacState !== 'error') {
     stateDot   = '⟳';
-    stateLabel = esc(formatState(hass, `sensor.${n}_phase`));
+    stateLabel = esc(status.phaseId ? formatState(hass, status.phaseId, missionPhase) : missionPhase);
   } else if (isRecharging) {
     stateDot   = '⚡';
     stateLabel = resumeMin !== null
@@ -196,7 +214,16 @@ export function renderHeader(props: HeaderProps): string {
       : t(lang, 'header.stateRechargingContinues');
   } else {
     switch (vacState) {
-      case 'cleaning':    stateDot = '●'; stateLabel = isMop ? t(lang, 'header.stateMopping') : t(lang, 'header.stateCleaning'); break;
+      case 'cleaning':
+        stateDot = '●';
+        // v3.0 B1: a Prime robot names its cleaning mode (vacuuming /
+        // mopping / both) — in the integration's words when the mode sensor
+        // is there to translate it.
+        stateLabel = status.cleaningMode && status.cleaningModeId
+          ? esc(formatState(hass, status.cleaningModeId, status.cleaningMode))
+          : (status.cleaningMode === 'mopping' || (!status.cleaningMode && isMop))
+            ? t(lang, 'header.stateMopping') : t(lang, 'header.stateCleaning');
+        break;
       case 'paused':      stateDot = '⏸'; stateLabel = t(lang, 'header.statePaused');                                        break;
       case 'returning':   stateDot = '↩'; stateLabel = t(lang, 'header.stateReturning');                                     break;
       case 'docked':      stateDot = '✓'; stateLabel = t(lang, 'header.stateDocked');                                        break;
@@ -207,22 +234,40 @@ export function renderHeader(props: HeaderProps): string {
   }
 
   // ── Error details ──
+  // v3.0 B2: one error role for both generations. Classic: code, the
+  // integration's description and what to do; Prime: the iRobot help
+  // catalogue's title and description, and which mode still works.
   let errorHtml = '';
-  if (vacState === 'error') {
-    const errEntity = hass.states[errorSensor];
-    if (errEntity && errEntity.state !== '0' && errEntity.state !== '' && errEntity.state !== 'unavailable') {
-      const desc   = esc((errEntity.attributes.description as string) ?? t(lang, 'header.unknownError'));
-      const action = esc((errEntity.attributes.action   as string) ?? '');
+  const modesLine = (modes: string[]): string => {
+    if (modes.length === 0 || (modes.includes('vacuum') && modes.includes('mop'))) return '';
+    const key = modes.includes('vacuum') ? 'header.onlyVacuumPossible' : 'header.onlyMopPossible';
+    return `<div class="rpc-error-modes">${t(lang, key)}</div>`;
+  };
+  if (vacState === 'error' || err.active) {
+    if (err.active && (err.title || err.code)) {
       const zone   = st(hass, errorZoneSensor);
-      const hasZone = zone && zone !== 'unknown' && zone !== 'unavailable';
-      stateLabel = t(lang, 'header.errorLabel', { code: esc(errEntity.state), desc });
-      errorHtml  = `
-        ${action ? `<div class="rpc-error-action">${action}</div>` : ''}
+      const hasZone = !!errorZoneSensor && zone && zone !== 'unknown' && zone !== 'unavailable';
+      const label = err.title
+        ? (err.code ? t(lang, 'header.errorLabel', { code: esc(err.code), desc: esc(err.title) }) : esc(err.title))
+        : t(lang, 'header.errorLabel', { code: esc(err.code), desc: esc(t(lang, 'header.unknownError')) });
+      if (vacState === 'error') stateLabel = label;
+      errorHtml = `
+        ${vacState !== 'error' ? `<div class="rpc-error-title">⚠ ${label}</div>` : ''}
+        ${err.description ? `<div class="rpc-error-desc">${esc(err.description)}</div>` : ''}
+        ${err.action ? `<div class="rpc-error-action">${esc(err.action)}</div>` : ''}
         ${hasZone ? `<div class="rpc-error-zone">${t(lang, 'header.errorZone', { zone: esc(zone) })}</div>` : ''}
+        ${err.partiallyOperable ? modesLine(err.availableModes) : ''}
       `;
-    } else {
+    } else if (vacState === 'error') {
       stateLabel = t(lang, 'header.robotErrorCheckApp');
     }
+  } else if (start?.blocked) {
+    // v3.0 B3: Prime start check — the robot would refuse a start (pad
+    // plate fitted, lifted, …). The integration reports and does not gate,
+    // so the card says why and what still works, and leaves Start enabled.
+    const none = start.availableModes.length === 0;
+    errorHtml = `<div class="rpc-start-blocked">⛔ ${start.reason ? esc(start.reason) : t(lang, 'header.startBlocked')}</div>
+      ${none ? `<div class="rpc-error-modes">${t(lang, 'header.noModePossible')}</div>` : modesLine(start.availableModes)}`;
   }
 
   // ── Area-today context line ──
@@ -260,7 +305,7 @@ export function renderHeader(props: HeaderProps): string {
   let spatialLineHtml = '';
   if (vacState === 'cleaning') {
     if (caps.hasMissionProgressSensor) {
-      const mp = hass.states[`sensor.${n}_mission_progress`];
+      const mp = robot(hass, n).st('sensor', 'mission_progress');
       const currentRoom = mp?.attributes?.current_room as string | undefined;
       const progressPct = mp && mp.state !== 'unavailable' && mp.state !== 'unknown'
         ? parseFloat(mp.state) : NaN;
@@ -304,8 +349,8 @@ export function renderHeader(props: HeaderProps): string {
       parts.push(`<div class="rpc-metric"><span class="rpc-metric-val">${formatArea(missionArea, unit, isMetric)}</span><span class="rpc-metric-lbl">${t(lang, 'header.metricCleaned')}</span></div>`);
 
       // v2.5.0: analytics area is m² (cloud) — compare like with like.
-      const recentAreaRaw    = areaSqftFromEntity(hass.states[`sensor.${n}_cleaning_analytics_30d`]);
-      const missionCount30   = parseFloat(st(hass, `sensor.${n}_missions_last_30d`));
+      const recentAreaRaw    = areaSqftFromEntity(robot(hass, n).st('sensor', 'cleaning_analytics_30d'));
+      const missionCount30   = parseFloat(st(hass, (robot(hass, n).id('sensor', 'missions_last_30d') ?? '')));
       const avgArea = (!isNaN(recentAreaRaw) && !isNaN(missionCount30) && missionCount30 >= 5)
         ? recentAreaRaw / missionCount30
         : NaN;
@@ -336,7 +381,7 @@ export function renderHeader(props: HeaderProps): string {
   // ── Demand cleaning blocked ──
   let demandHtml = '';
   if (caps.hasDemandBlocked) {
-    if (hass.states[`binary_sensor.${n}_demand_clean_blocked`]?.state === 'on') {
+    if (robot(hass, n).st('binary_sensor', 'demand_clean_blocked')?.state === 'on') {
       demandHtml = `<div class="rpc-demand-blocked">🧹 ${t(lang, 'header.demandBlocked')}</div>`;
     }
   }
@@ -365,9 +410,19 @@ export function renderHeader(props: HeaderProps): string {
   //   binary_sensor.*_cloud_connected — ON = connected (CONNECTIVITY class)
   //   binary_sensor.*_mqtt_stale       — ON = stale/problem (PROBLEM class)
   let connectivityHtml = '';
-  if (caps.hasConnectivity) {
-    const cloudConnected = hass.states[`binary_sensor.${n}_cloud_connected`]?.state;
-    const mqttStale      = hass.states[`binary_sensor.${n}_mqtt_stale`]?.state;
+  if (R.generation === 'prime') {
+    // v3.0 B8: Prime — `connected` off: the cloud has lost the robot;
+    // `prime_connection_health` error: the integration cannot reach the
+    // cloud. Same two labels as Classic.
+    const robotOff = R.st('binary_sensor', 'connected')?.state === 'off';
+    const cloudErr = R.st('sensor', 'prime_connection_health')?.state === 'error';
+    if (robotOff || cloudErr) {
+      const label = robotOff ? t(lang, 'header.connectivityRobotOffline') : t(lang, 'header.connectivityCloudOffline');
+      connectivityHtml = `<span class="rpc-connectivity rpc-connectivity-degraded" title="${esc(label)}">☁ ${esc(label)}</span>`;
+    }
+  } else if (caps.hasConnectivity) {
+    const cloudConnected = robot(hass, n).st('binary_sensor', 'cloud_connected')?.state;
+    const mqttStale      = robot(hass, n).st('binary_sensor', 'mqtt_stale')?.state;
     const cloudDown = cloudConnected === 'off';
     const mqttDown  = mqttStale === 'on';
     if (cloudDown || mqttDown) {
@@ -381,7 +436,7 @@ export function renderHeader(props: HeaderProps): string {
   // string; we surface it for 24h after the entity's last_changed, then hide.
   let firmwareHtml = '';
   if (caps.hasFirmware) {
-    const fw = hass.states[`sensor.${n}_firmware_version`];
+    const fw = robot(hass, n).st('sensor', 'firmware_version');
     const ver = fw?.state;
     if (ver && ver !== 'unavailable' && ver !== 'unknown') {
       const changed = fw?.last_changed ? new Date(fw.last_changed).getTime() : 0;
@@ -453,10 +508,13 @@ export function renderHeader(props: HeaderProps): string {
   // Demand-blocked + docked: "Start anyway" is the only meaningful action —
   // a plain "Start" alongside the blocked banner reads as contradictory.
   const demandBlocked = caps.hasDemandBlocked
-    && hass.states[`binary_sensor.${n}_demand_clean_blocked`]?.state === 'on';
+    && robot(hass, n).st('binary_sensor', 'demand_clean_blocked')?.state === 'on';
 
   if (vacState === 'cleaning') {
     buttons = btn('pause', t(lang, 'header.pause'), `⏸ ${t(lang, 'header.pause')}`) + btn('return_home', t(lang, 'header.returnHome'), `🏠 ${t(lang, 'header.returnHome')}`);
+  } else if (isRecharging) {
+    // v3.0: before `paused` — a recharging robot reports paused.
+    buttons = btn('return_home', t(lang, 'header.cancelMission'), `✕ ${t(lang, 'header.cancelMission')}`);
   } else if (vacState === 'paused') {
     buttons = btn('resume', t(lang, 'header.resume'), `▶ ${t(lang, 'header.resume')}`)
             + btn('return_home', t(lang, 'header.returnHome'), `🏠 ${t(lang, 'header.returnHome')}`)
@@ -469,8 +527,6 @@ export function renderHeader(props: HeaderProps): string {
     // that window — "Return home" to a docked robot, or "Start" mid-evac,
     // would both mislead. The pre-2.5.0 branch here (pause/return) never
     // ran: it compared against the raw `evac`.
-  } else if (isRecharging) {
-    buttons = btn('return_home', t(lang, 'header.cancelMission'), `✕ ${t(lang, 'header.cancelMission')}`);
   } else if (vacState !== 'returning' && !unavailable) {
     if (selectedRoomCount > 0) {
       // v2.0 C7-ROOM-BOUNDS: selection active (via header chip picker or

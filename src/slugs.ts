@@ -28,6 +28,9 @@ export const READINESS = {
 /** sensor.*_phase (translation_key `phase`). */
 export const PHASE = {
   EMPTYING_BIN: 'emptying_bin',
+  /** v3.0: with a running mission (mission_active) and a `paused` vacuum,
+   *  this is a mid-mission recharge. */
+  CHARGING: 'charging',
   CHARGING_MID_MISSION: 'charging_mid_mission',
   NO_CONTACT: 'no_contact',
   NOT_RESPONDING: 'not_responding',

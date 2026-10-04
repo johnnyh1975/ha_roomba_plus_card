@@ -34,18 +34,30 @@ export const ADVANCED_VISIBILITY_FLAGS = [
   'show_dirt_events',
 ] as const;
 
+/** v3.0 A6: entity selector filter — vacuums of the roomba_plus integration. */
+export const ROOMBA_PLUS_VACUUM = { integration: 'roomba_plus', domain: 'vacuum' } as const;
+
+/** v3.0 A6: the card picker's preview config — the first roomba_plus vacuum
+ *  (by the entity registry), else any vacuum, else a placeholder. */
+export function stubConfig(hass?: { states?: Record<string, unknown>; entities?: Record<string, { platform?: string }> }): { entity: string } {
+  const vacuums = Object.keys(hass?.states ?? {}).filter(id => id.startsWith('vacuum.')).sort();
+  const ours = vacuums.find(id => hass?.entities?.[id]?.platform === 'roomba_plus');
+  return { entity: ours ?? vacuums[0] ?? 'vacuum.roomba' };
+}
+
 export function buildConfigFormSchema(): HAFormField[] {
   return [
     {
       name: 'entity',
       label: 'Robot vacuum',
       required: true,
-      selector: { entity: { domain: 'vacuum' } },
+      // v3.0 A6: only this integration's robots are offered.
+      selector: { entity: { filter: ROOMBA_PLUS_VACUUM } },
     },
     {
       name: 'entities',
       label: 'Multiple robots (overrides single robot above)',
-      selector: { entity: { domain: 'vacuum', multiple: true } },
+      selector: { entity: { filter: ROOMBA_PLUS_VACUUM, multiple: true } },
     },
     // ── v2.0 tab-architecture switches (the real layout controls) ──────────
     {
@@ -70,7 +82,7 @@ export function buildConfigFormSchema(): HAFormField[] {
           options: [
             { value: 'map',      label: 'Map' },
             { value: 'history',  label: 'History' },
-            { value: 'health',   label: 'Health' },
+            { value: 'health',   label: 'Care' },
             { value: 'settings', label: 'Settings' },
           ],
         },

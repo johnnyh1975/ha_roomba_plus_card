@@ -17,6 +17,7 @@ import { renderHealthZone } from './zones/health-zone.js';
 import { renderScheduleZone } from './zones/schedule-zone.js';
 import { renderRoomSelectorZone, renderSettingsPanel } from './zones/room-selector-zone.js';
 import { renderFavorites } from './favorites.js';
+import { renderMapZone, MapLayer, classicMapUnaligned } from './zones/map-zone.js';
 
 export interface TabContentContext {
   hass: HomeAssistant;
@@ -42,6 +43,8 @@ export interface TabContentContext {
   historyTab: 'calendar' | 'coverage';
   hazards: HazardRecord[];
   selectedRooms: Set<string>;
+  /** v3.0 C: map layers switched off this session. */
+  hiddenMapLayers: Set<MapLayer>;
 
   // health state
   openPopover: string | null;
@@ -62,6 +65,10 @@ export interface TabContentContext {
 
   // injected pre-rendered strings (depend on class internals)
   maintenanceLinksHtml: string;
+  /** v3.0 A5: rendering the map column of a wide card (not the Map tab). */
+  mapColumn?: boolean;
+  /** v3.0 A4: card diagnostics (⚙ tab), rendered by the card. */
+  diagnosticsHtml?: string;
   alertZoneHtml: string;
 }
 
@@ -74,22 +81,19 @@ export function renderTabContent(tab: TabId | null, ctx: TabContentContext): str
 
   switch (tab) {
     case 'map':
-      // Promotes the existing F7 coverage heatmap + hazard pins to a
-      // first-class tab by forcing historyTab to 'coverage'. C7-ROOM-BOUNDS
-      // room polygon overlays render when caps.hasAlignment. Tap-to-select
-      // shares selectedRooms with the header "Rooms…" chip picker.
-      // suppressSubTabToggle: true — this tab IS the coverage view at the
-      // top-level tab bar already.
-      return renderHistoryZone(hass, config, caps, robotName,
-        { data: ctx.missionData, loading: ctx.historyLoading, error: ctx.historyError,
-          openDay: ctx.openDay, dayMissions: ctx.dayMissions, openDaySummary: ctx.openDaySummary,
-          openExplain: ctx.openExplain, openReplay: ctx.openReplay, openMissionMap: ctx.openMissionMap,
-          lifetimeExpanded: ctx.lifetimeExpanded,
-          historyTab: 'coverage', hazards: ctx.hazards,
-          mapSelectedRooms: ctx.selectedRooms,
-          suppressSubTabToggle: true,
-          isMapContext: true },
-        isMetric);
+      // v3.0 C: the rooms map (both generations) when it can carry the tab;
+      // the 2.x coverage view otherwise (rooms map absent, not calibrated,
+      // or no rooms yet).
+      if (caps.hasRoomsMap) {
+        const html = renderMapZone(hass, config, caps, robotName,
+          { selectedRooms: ctx.selectedRooms, hazards: ctx.hazards, hiddenLayers: ctx.hiddenMapLayers });
+        // A Classic map not yet matched to the robot's pose cannot carry
+        // the heatmap and pins (different frames); 2.5 showed them, so the
+        // coverage view follows below the rooms map until alignment.
+        if (html && !(caps.hasCoverageImage && classicMapUnaligned(hass, robotName))) return html;
+        if (html) return html + coverageView(ctx);
+      }
+      return coverageView(ctx);
 
     case 'history':
       return renderHistoryZone(hass, config, caps, robotName,
@@ -136,9 +140,34 @@ export function renderTabContent(tab: TabId | null, ctx: TabContentContext): str
             : ''}
           ${ctx.maintenanceLinksHtml}
           ${renderFavorites(hass, config, robotName)}
+          ${ctx.diagnosticsHtml ?? ''}
         `;
 
     default:
       return '';
   }
+}
+
+/** The 2.x Map tab: coverage heatmap with pins (and room outlines once
+ *  aligned) — Classic without a usable rooms map, or below a not yet
+ *  aligned one. */
+function coverageView(ctx: TabContentContext): string {
+  const { hass, config, caps, robotName, isMetric } = ctx;
+  // Promotes the existing F7 coverage heatmap + hazard pins to a
+  // first-class tab by forcing historyTab to 'coverage'. C7-ROOM-BOUNDS
+  // room polygon overlays render when caps.hasAlignment. Tap-to-select
+  // shares selectedRooms with the header "Rooms…" chip picker.
+  // suppressSubTabToggle: true — this tab IS the coverage view at the
+  // top-level tab bar already.
+  return renderHistoryZone(hass, config, caps, robotName,
+    { data: ctx.missionData, loading: ctx.historyLoading, error: ctx.historyError,
+      openDay: ctx.openDay, dayMissions: ctx.dayMissions, openDaySummary: ctx.openDaySummary,
+      openExplain: ctx.openExplain, openReplay: ctx.openReplay, openMissionMap: ctx.openMissionMap,
+      lifetimeExpanded: ctx.lifetimeExpanded,
+      historyTab: 'coverage', hazards: ctx.hazards,
+      mapSelectedRooms: ctx.selectedRooms,
+      suppressSubTabToggle: true,
+      isMapContext: true,
+      suppressDetails: ctx.mapColumn === true },
+    isMetric);
 }

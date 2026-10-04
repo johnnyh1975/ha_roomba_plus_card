@@ -409,12 +409,16 @@ describe('renderRoomSelectorZone() — v2.5.0 F3 cloud zone select', () => {
   it('renders chips from the active map\'s cloud select', () => {
     const html = renderRoomSelectorZone(props(caps, {
       [`select.${n}_cloud_zone_p1`]: st('Kitchen', {
-        options: ['Kitchen', 'Bath'], is_active_map: true,
-        region_icons: { Kitchen: 'mdi:fridge' },
+        options: ['Kitchen', 'Bath', 'Rug zone'], is_active_map: true,
+        // every region gets an icon (default for unknown types,
+        // select.py:1008-1018); zones get none
+        region_icons: { Kitchen: 'mdi:fridge', Bath: 'mdi:shape-outline' },
       }),
     }));
     expect(html).toContain('data-room="Kitchen"');
     expect(html).toContain('data-room="Bath"');
+    // Classic clean_room takes zones too (sent as `zid`, room_cleaning.py:2172)
+    expect(html).toContain('data-room="Rug zone"');
     // icons use the integration's full "mdi:" names
     expect(html).toContain('🧊 Kitchen');
   });
@@ -441,5 +445,41 @@ describe('renderSettingsPanel() — v2.5.0 F9 carpet boost', () => {
     expect(html).toContain('Automatic ▼');
     expect(html).toContain('data-cycle-current="automatic"');
     expect(html).toContain('&quot;performance&quot;');
+  });
+});
+
+// ── v3.0 B5 — Prime rooms grouped by floor ───────────────────────────────
+import { primeCombo } from '../fixtures/robots';
+
+describe('renderRoomSelectorZone() — v3.0 Prime', () => {
+  const hass = primeCombo([
+    ['select.combo_prime_zone_select', 'prime_zone_select', 'Kitchen', {
+      options: ['Kitchen', 'Bath', 'Office', 'Couch zone'],
+      segment_map: { Kitchen: 'Ground', Bath: 'Upstairs', Office: 'Upstairs', 'Couch zone': 'Ground' },
+      robot_on_map: 'Upstairs',
+    }],
+    ['image.combo_rooms_map', 'rooms_map', 'idle', { rooms: { 1: { name: 'Kitchen' }, 2: { name: 'Bath' }, 3: { name: 'Office' } } }],
+  ]);
+  const render = (h = hass) => renderRoomSelectorZone({
+    hass: h, config: baseConfig, caps: { ...defaultCaps, hasZones: true, hasSmartZones: true },
+    robotName: 'combo', selectedRooms: new Set(), passes: 'Auto', isSending: false, sendError: null,
+    settingsPanelOpen: false,
+  });
+
+  it('renders Prime rooms, not zones', () => {
+    const html = render();
+    expect(html).toContain('data-room="Kitchen"');
+    expect(html).toContain('data-room="Office"');
+    expect(html).not.toContain('data-room="Couch zone"');
+  });
+  it('groups by floor, robot\'s floor first and marked', () => {
+    const html = render();
+    expect(html.indexOf('Upstairs')).toBeLessThan(html.indexOf('Ground'));
+    expect(html).toContain('robot is here');
+  });
+  it('one floor → no grouping', () => {
+    const one = primeCombo();
+    expect(render(one)).not.toContain('rpc-floor-label');
+    expect(render(one)).toContain('data-room="Bath"');
   });
 });

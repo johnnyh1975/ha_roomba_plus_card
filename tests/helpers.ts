@@ -22,7 +22,7 @@ export function makeHass(states: Record<string, Partial<HAState>> = {}): HomeAss
 
 export const defaultCaps: RobotCapabilities = {
   hasArea: false, hasBrush: true, hasPad: false, hasWater: false,
-  hasCleanBase: false, hasZones: false, hasSmartZones: false,
+  hasCleanBase: false, hasZones: false, hasSmartZones: false, hasRoomsMap: false,
   hasProblemZone: false, hasLifetimeArea: false, hasWearRate: false,
   isMop: false, hasMissionActive: false, hasMissionPhase: false,
   // v1.3
@@ -53,7 +53,7 @@ export const defaultCaps: RobotCapabilities = {
 
 export const fullCaps: RobotCapabilities = {
   hasArea: true, hasBrush: true, hasPad: false, hasWater: false,
-  hasCleanBase: true, hasZones: true, hasSmartZones: true,
+  hasCleanBase: true, hasZones: true, hasSmartZones: true, hasRoomsMap: false,
   hasProblemZone: true, hasLifetimeArea: true, hasWearRate: true,
   isMop: false, hasMissionActive: true, hasMissionPhase: true,
   // v1.3

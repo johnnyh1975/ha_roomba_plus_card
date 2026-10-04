@@ -52,6 +52,9 @@ export interface RobotCapabilities {
   hasCleanBase: boolean;
   hasZones: boolean;
   hasSmartZones: boolean;
+  /** v3.0 C: image.*_rooms_map with picture, calibration and rooms — the
+   *  Map tab's base (both generations). */
+  hasRoomsMap: boolean;
   hasProblemZone: boolean;
   /** sensor.*_cleaning_analytics_30d (state = m²). SC1 (integration v2.7.0):
    *  migrated from sensor.*_recent_area_30d, which is deprecated and removed
@@ -416,6 +419,11 @@ export interface HouseholdSummary {
 
 export interface HomeAssistant {
   states: Record<string, HAState>;
+  /** v3.0 A1: frontend entity registry. Optional for test harnesses; the
+   *  resolver falls back to entity-id suffixes when it is absent. */
+  entities?: Record<string, HARegistryEntry>;
+  /** v3.0 A4: frontend device registry. */
+  devices?: Record<string, HADeviceEntry>;
   callService(domain: string, service: string, data?: Record<string, unknown>): Promise<void>;
   callWS(msg: Record<string, unknown>): Promise<unknown>;
   fetchWithAuth(url: string, init?: RequestInit): Promise<Response>;
@@ -440,6 +448,29 @@ export interface HomeAssistant {
       subscribeMessage: { type: string; event_type?: string },
     ): Promise<() => Promise<void>>;
   };
+}
+
+/** v3.0 A1: one row of the frontend entity registry (`hass.entities`), as
+ *  HA ≥ 2023.x expands `config/entity_registry/list_for_display`. Disabled
+ *  entities are not listed. There is no unique_id and no device_class here. */
+export interface HARegistryEntry {
+  entity_id: string;
+  device_id?: string | null;
+  platform?: string;
+  translation_key?: string | null;
+  entity_category?: 'config' | 'diagnostic' | null;
+  hidden?: boolean;
+  name?: string | null;
+}
+
+/** v3.0 A4: device registry row (`hass.devices`), the fields the card reads. */
+export interface HADeviceEntry {
+  id: string;
+  name?: string | null;
+  name_by_user?: string | null;
+  model?: string | null;
+  manufacturer?: string | null;
+  sw_version?: string | null;
 }
 
 export interface HAState {

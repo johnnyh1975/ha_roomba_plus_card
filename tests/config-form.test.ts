@@ -89,3 +89,25 @@ describe('B4 — every field carries a selector or is a group', () => {
     }
   });
 });
+
+// ── v3.0 A6 — robots of this integration only ────────────────────────────
+import { stubConfig, ROOMBA_PLUS_VACUUM } from '../src/config-form';
+describe('v3.0 A6 editor', () => {
+  it('entity selectors filter on roomba_plus vacuums', () => {
+    const schema = buildConfigFormSchema();
+    const single = schema.find(f => f.name === 'entity')!;
+    const multi = schema.find(f => f.name === 'entities')!;
+    expect(single.selector).toEqual({ entity: { filter: ROOMBA_PLUS_VACUUM } });
+    expect(multi.selector).toEqual({ entity: { filter: ROOMBA_PLUS_VACUUM, multiple: true } });
+  });
+  it('stub config picks the first roomba_plus vacuum', () => {
+    expect(stubConfig({
+      states: { 'vacuum.a_other': {}, 'vacuum.b_mine': {} },
+      entities: { 'vacuum.a_other': { platform: 'xiaomi' }, 'vacuum.b_mine': { platform: 'roomba_plus' } },
+    })).toEqual({ entity: 'vacuum.b_mine' });
+  });
+  it('no registry → first vacuum; nothing → placeholder', () => {
+    expect(stubConfig({ states: { 'vacuum.z': {}, 'light.x': {} } })).toEqual({ entity: 'vacuum.z' });
+    expect(stubConfig(undefined)).toEqual({ entity: 'vacuum.roomba' });
+  });
+});

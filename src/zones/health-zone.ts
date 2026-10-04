@@ -1,8 +1,10 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, HAState } from '../types.js';
+import { robot } from '../registry.js';
 import { esc, timeSince, formatState } from '../utils.js';
 import { CLEAN_BASE_PROBLEMS } from '../slugs.js';
 import { batterySensorId, roomsOverdueId } from '../entity-ids.js';
 import { t, resolveLang } from '../i18n/index.js';
+import { primePartsRole, primeDockRole, errorRole } from '../robot-model.js';
 
 interface Bar {
   key: string;
@@ -152,7 +154,7 @@ function renderHealthScore(
 ): string {
   if (!caps.hasRobotHealthScore) return '';
 
-  const entity = hass.states[`sensor.${n}_robot_health_score`];
+  const entity = robot(hass, n).st('sensor', 'robot_health_score');
   if (!entity) return '';
 
   const lang = resolveLang(hass.language);
@@ -216,7 +218,7 @@ function renderHealthScore(
 // "learning…" row for a feature most users never triggered is noise. Layout
 // change surfaces as an alert when it actually fires (alert-zone.ts).
 function renderHealthTrend(hass: HomeAssistant, n: string): string {
-  const trend = hass.states[`sensor.${n}_health_score_trend`];
+  const trend = robot(hass, n).st('sensor', 'health_score_trend');
   if (!trend) return '';
   const lang = resolveLang(hass.language);
 
@@ -256,7 +258,7 @@ function renderHealthTrend(hass: HomeAssistant, n: string): string {
 // the user enables it. When disabled the entity is absent and this returns ''
 // (no banner), which is the correct graceful behaviour.
 function renderAnomalyBanner(hass: HomeAssistant, n: string): string {
-  const entity = hass.states[`sensor.${n}_consecutive_mission_anomalies`];
+  const entity = robot(hass, n).st('sensor', 'consecutive_mission_anomalies');
   if (!entity) return '';
   const consecutive = Number(entity.state);
   if (!Number.isFinite(consecutive) || consecutive < 3) return '';
@@ -291,7 +293,7 @@ function renderNavHealth(
   const lang = resolveLang(hass.language);
 
   const numOrNull = (key: string): number | null => {
-    const e = hass.states[`sensor.${n}_${key}`];
+    const e = robot(hass, n).st('sensor', key);
     if (!e || e.state === 'unknown' || e.state === 'unavailable') return null;
     const v = Number(e.state);
     return Number.isFinite(v) ? v : null;
@@ -355,9 +357,9 @@ function renderMaintenanceCalendar(
   const lang = resolveLang(hass.language);
 
   const rows: { key: string; label: string; entityId: string; service: string }[] = [
-    { key: 'wheel',   label: t(lang, 'health.maintWheels'),   entityId: `sensor.${n}_wheel_last_cleaned`,   service: 'roomba_plus.reset_wheel_cleaning' },
-    { key: 'contact', label: t(lang, 'health.maintContacts'), entityId: `sensor.${n}_contact_last_cleaned`, service: 'roomba_plus.reset_contact_cleaning' },
-    { key: 'bin',     label: t(lang, 'health.maintBin'),      entityId: `sensor.${n}_bin_last_cleaned`,     service: 'roomba_plus.reset_bin_cleaning' },
+    { key: 'wheel',   label: t(lang, 'health.maintWheels'),   entityId: (robot(hass, n).id('sensor', 'wheel_last_cleaned') ?? ''),   service: 'roomba_plus.reset_wheel_cleaning' },
+    { key: 'contact', label: t(lang, 'health.maintContacts'), entityId: (robot(hass, n).id('sensor', 'contact_last_cleaned') ?? ''), service: 'roomba_plus.reset_contact_cleaning' },
+    { key: 'bin',     label: t(lang, 'health.maintBin'),      entityId: (robot(hass, n).id('sensor', 'bin_last_cleaned') ?? ''),     service: 'roomba_plus.reset_bin_cleaning' },
   ].filter(r => !!hass.states[r.entityId]);
 
   if (rows.length === 0) return '';
@@ -414,12 +416,16 @@ function renderDockHealth(hass: HomeAssistant, n: string): string {
     const v = parseFloat(e.state);
     return isNaN(v) ? null : v;
   };
-  const tank      = read(`sensor.${n}_dock_tank_level`);
-  const knockoffs = read(`sensor.${n}_dock_knockoffs`);
-  const aborts    = read(`sensor.${n}_dock_charge_aborts`);
-  const chatters  = read(`sensor.${n}_dock_contact_chatters`);
+  const tank      = read((robot(hass, n).id('sensor', 'dock_tank_level') ?? ''));
+  const knockoffs = read((robot(hass, n).id('sensor', 'dock_knockoffs') ?? ''));
+  const aborts    = read((robot(hass, n).id('sensor', 'dock_charge_aborts') ?? ''));
+  const chatters  = read((robot(hass, n).id('sensor', 'dock_contact_chatters') ?? ''));
 
-  if (tank === null && knockoffs === null && aborts === null && chatters === null) return '';
+  // v3.0 B7/dock: Prime station — status lines in the integration's words
+  // and the station's own actions (empty bin, wash pad, pad drying).
+  const primeDockHtml = renderPrimeDock(hass, n, lang);
+
+  if (tank === null && knockoffs === null && aborts === null && chatters === null && !primeDockHtml) return '';
 
   const tankHtml = tank !== null
     ? `<div class="rpc-dock-tank">${t(lang, 'health.dockTankLevel', { pct: Math.round(tank) })}</div>`
@@ -438,8 +444,76 @@ function renderDockHealth(hass: HomeAssistant, n: string): string {
     <div class="rpc-dock-health">
       <div class="rpc-dock-label">${t(lang, 'health.dockLabel')}</div>
       ${tankHtml}
+      ${primeDockHtml}
       ${countersHtml}
     </div>
+  `;
+}
+
+function renderPrimeDock(hass: HomeAssistant, n: string, lang: string): string {
+  const dock = primeDockRole(hass, n);
+  if (!dock) return '';
+  const line = (id: string | null): string => {
+    if (!id) return '';
+    const s = hass.states[id];
+    if (!s || s.state === 'unknown') return '';
+    const name = String(s.attributes?.friendly_name ?? '');
+    const dev  = String(hass.states[robot(hass, n).vacuumId]?.attributes?.friendly_name ?? '');
+    const label = dev && name.startsWith(dev + ' ') ? name.slice(dev.length + 1) : name;
+    return `<div class="rpc-dock-line">${label ? `${esc(label)}: ` : ''}${esc(formatState(hass, id))}</div>`;
+  };
+  const dockError = dock.errorId && hass.states[dock.errorId]?.state === 'on'
+    ? `<div class="rpc-dock-line rpc-dock-line--warn">⚠ ${t(lang, 'health.dockProblem')}</div>` : '';
+  const btn = (id: string | null, label: string): string => id
+    ? `<button class="rpc-btn rpc-btn-secondary" data-press-entity="${esc(id)}">${label}</button>` : '';
+  const dryOn = dock.padDrySwitch ? hass.states[dock.padDrySwitch]?.state === 'on' : false;
+  const dry = dock.padDrySwitch ? `
+    <div class="rpc-setting-item">
+      <span class="rpc-setting-label">${t(lang, 'health.dockPadDrying')}</span>
+      <button class="rpc-setting-toggle${dryOn ? ' rpc-setting-on' : ''}"
+              data-switch-entity="${esc(dock.padDrySwitch)}" aria-pressed="${dryOn}">${dryOn ? '●' : '○'}</button>
+    </div>` : '';
+  const actions = btn(dock.emptyBinButton, t(lang, 'health.dockEmptyBin')) + btn(dock.washPadButton, t(lang, 'health.dockWashPad'));
+  return `
+    ${dockError}
+    ${line(dock.statusId)}
+    ${line(dock.padWashId)}
+    ${line(dock.padDryId)}
+    ${dry}
+    ${actions ? `<div class="rpc-dock-actions">${actions}</div>` : ''}
+  `;
+}
+
+// ── v3.0 B7 — Prime parts ─────────────────────────────────────────────────
+// One row per prime_part_* sensor, in its own unit (hours, runs, emptyings)
+// as HA formats it. Replacement parts get a bar (share of life left);
+// maintenance parts count since the job was last done, so they get the
+// value only (prime_parts.py needs_attention). No reset button: the
+// integration's reset_* actions record locally and do not reset the
+// robot's own part counter, which is what these rows show (P8).
+function renderPrimeParts(hass: HomeAssistant, n: string, lang: string): string {
+  const parts = primePartsRole(hass, n);
+  if (parts.length === 0) return '';
+  const rows = parts.map(p => {
+    const value = esc(formatState(hass, p.entityId));
+    if (p.pct === null) {
+      return `<div class="rpc-bar-row rpc-bar-row--static">
+        <span class="rpc-bar-label">${esc(p.label)}</span>
+        <span class="rpc-part-value">${value}</span>
+      </div>`;
+    }
+    const colour = p.remaining <= 0 ? 'var(--rpc-red)' : barColour(p.pct, 'consumable');
+    return `<div class="rpc-bar-row rpc-bar-row--static" aria-label="${esc(p.label)} — ${p.pct}%">
+        <span class="rpc-bar-label">${esc(p.label)}</span>
+        <div class="rpc-bar-track"><div class="rpc-bar-fill" style="width:${p.pct}%;background:${colour}"></div></div>
+        <span class="rpc-bar-pct" style="color:${colour}">${p.pct}%</span>
+        <span class="rpc-part-value">${value}</span>
+      </div>`;
+  }).join('');
+  return `
+    <div class="rpc-health-divider"></div>
+    <div class="rpc-dock-label">${t(lang, 'health.partsLabel')}</div>
+    ${rows}
   `;
 }
 
@@ -590,7 +664,7 @@ function renderRoomsOverdue(hass: HomeAssistant, caps: RobotCapabilities, n: str
 function renderDirtCorrelation(hass: HomeAssistant, caps: RobotCapabilities, n: string): string {
   if (!caps.hasDirtCorrelation) return '';
 
-  const entity = hass.states[`sensor.${n}_dirt_weather_correlation`];
+  const entity = robot(hass, n).st('sensor', 'dirt_weather_correlation');
   if (!entity) return '';
   // Bug-hunt round 1 (self-correction): unlike rooms_overdue, this
   // sensor's native_value legitimately returns None — HA state "unknown"
@@ -652,28 +726,28 @@ export function renderHealthZone(
   const bars: Bar[] = [];
 
   // Filter — all robots
-  if (hass.states[`sensor.${n}_filter_remaining_hours`]) {
+  if (robot(hass, n).st('sensor', 'filter_remaining_hours')) {
     bars.push({
       key: 'filter', label: t(lang, 'health.barFilter'),
-      sensorId:     `sensor.${n}_filter_remaining_hours`,
+      sensorId:     (robot(hass, n).id('sensor', 'filter_remaining_hours') ?? ''),
       needsReference: true,
       type: 'consumable',
-      wearSensorId:  caps.hasWearRate ? `sensor.${n}_filter_wear_rate` : undefined,
+      wearSensorId:  caps.hasWearRate ? (robot(hass, n).id('sensor', 'filter_wear_rate') ?? '') : undefined,
       resetService:  'reset_filter',
-      lastReplacedId:`sensor.${n}_filter_last_replaced`,
+      lastReplacedId:(robot(hass, n).id('sensor', 'filter_last_replaced') ?? ''),
     });
   }
 
   // Brush — vacuums only
-  if (caps.hasBrush && hass.states[`sensor.${n}_brush_remaining_hours`]) {
+  if (caps.hasBrush && robot(hass, n).st('sensor', 'brush_remaining_hours')) {
     bars.push({
       key: 'brush', label: t(lang, 'health.barBrush'),
-      sensorId:     `sensor.${n}_brush_remaining_hours`,
+      sensorId:     (robot(hass, n).id('sensor', 'brush_remaining_hours') ?? ''),
       needsReference: true,
       type: 'consumable',
-      wearSensorId:  caps.hasWearRate ? `sensor.${n}_brush_wear_rate` : undefined,
+      wearSensorId:  caps.hasWearRate ? (robot(hass, n).id('sensor', 'brush_wear_rate') ?? '') : undefined,
       resetService:  'reset_brush',
-      lastReplacedId:`sensor.${n}_brush_last_replaced`,
+      lastReplacedId:(robot(hass, n).id('sensor', 'brush_last_replaced') ?? ''),
     });
   }
 
@@ -681,24 +755,24 @@ export function renderHealthZone(
   // expected a `threshold_days` attribute the integration never had, so it
   // never rendered at all; the sensor is a forecast in days with no
   // reference life to draw a percentage against.
-  if (caps.hasPad && hass.states[`sensor.${n}_pad_days_until_due`]) {
+  if (caps.hasPad && robot(hass, n).st('sensor', 'pad_days_until_due')) {
     bars.push({
       key: 'pad', label: t(lang, 'health.barPad'),
-      sensorId:      `sensor.${n}_pad_days_until_due`,
+      sensorId:      (robot(hass, n).id('sensor', 'pad_days_until_due') ?? ''),
       needsReference: false,
       type: 'days',
       unit: 'd',
-      wearSensorId:  caps.hasWearRate ? `sensor.${n}_pad_wear_rate` : undefined,
+      wearSensorId:  caps.hasWearRate ? (robot(hass, n).id('sensor', 'pad_wear_rate') ?? '') : undefined,
       resetService:  'reset_pad',
-      lastReplacedId:`sensor.${n}_pad_last_replaced`,
+      lastReplacedId:(robot(hass, n).id('sensor', 'pad_last_replaced') ?? ''),
     });
   }
 
   // Tank — Braava only
-  if (caps.hasWater && hass.states[`sensor.${n}_mop_tank_level`]) {
+  if (caps.hasWater && robot(hass, n).st('sensor', 'mop_tank_level')) {
     bars.push({
       key: 'tank', label: t(lang, 'health.barTank'),
-      sensorId:     `sensor.${n}_mop_tank_level`,
+      sensorId:     (robot(hass, n).id('sensor', 'mop_tank_level') ?? ''),
       needsReference: false,
       type: 'tank',
     });
@@ -708,7 +782,7 @@ export function renderHealthZone(
   // v2.5.0 F8: _battery (fresh) or _battery_level (schema-21 migrated).
   const batSensorId = batterySensorId(hass, n);
   const vacBatPct = !batSensorId
-    ? (hass.states[`vacuum.${n}`]?.attributes?.battery_level as number | undefined)
+    ? (hass.states[robot(hass, n).vacuumId]?.attributes?.battery_level as number | undefined)
     : undefined;
 
   if (batSensorId || vacBatPct !== undefined) {
@@ -722,10 +796,10 @@ export function renderHealthZone(
   }
 
   // Clean Base — s9+ only
-  if (caps.hasCleanBase && hass.states[`sensor.${n}_clean_base_status`]) {
+  if (caps.hasCleanBase && robot(hass, n).st('sensor', 'clean_base_status')) {
     bars.push({
       key: 'cleanbase', label: t(lang, 'health.barCleanBase'),
-      sensorId:     `sensor.${n}_clean_base_status`,
+      sensorId:     (robot(hass, n).id('sensor', 'clean_base_status') ?? ''),
       needsReference: false,
       type: 'cleanbase',
     });
@@ -755,18 +829,19 @@ export function renderHealthZone(
   // visible without alarm styling.
   let lastErrorHtml = '';
   {
-    const vacuumEntity = hass.states[`vacuum.${n}`];
-    const activeError  = !!vacuumEntity
-      && (vacuumEntity.state === 'error' || !!vacuumEntity.attributes?.error_code);
-    const errSensor = hass.states[`sensor.${n}_last_error_code`];
+    // v3.0: live-error test shared with header and alert (robot-model.ts).
+    const activeError = errorRole(hass, n).active;
+    const errSensor = robot(hass, n).st('sensor', 'last_error_code');
     if (!activeError
         && errSensor
         && errSensor.state !== '0'
         && errSensor.state !== ''
         && errSensor.state !== 'unknown'
         && errSensor.state !== 'unavailable') {
-      const label = esc((errSensor.attributes.label as string) ?? t(lang, 'alert.errorFallback', { code: errSensor.state }));
-      const atState = hass.states[`sensor.${n}_last_error_at`]?.state;
+      // last_error_code carries `description` (no `label`, sensor_core.py:2035).
+      const desc = errSensor.attributes.description;
+      const label = esc(typeof desc === 'string' && desc ? desc : t(lang, 'alert.errorFallback', { code: errSensor.state }));
+      const atState = robot(hass, n).st('sensor', 'last_error_at')?.state;
       const ago = (atState && atState !== 'unknown' && atState !== 'unavailable')
         ? timeSince(atState, hass.language)
         : '';
@@ -793,14 +868,16 @@ export function renderHealthZone(
   const roomsOverdueHtml = renderRoomsOverdue(hass, caps, n, state);
   // v2.3.0 — same reasoning: dirt-correlation alone is real content too.
   const dirtCorrelationHtml = renderDirtCorrelation(hass, caps, n);
+  // v3.0 B7 — Prime parts are real content on their own too.
+  const primePartsHtml = renderPrimeParts(hass, n, lang);
 
   // v2.2.0 B1: lastErrorHtml added — a resolved-error line is real content.
   // v2.2.0 A3: dockHealthHtml likewise.
   if (bars.length === 0 && !caps.hasRobotHealthScore && !caps.hasMaintenanceCalendar
       && !anomalyHtml && !navHealthHtml && !caps.hasBatteryRetention && !caps.hasCoveragePct
-      && !lastErrorHtml && !dockHealthHtml && !roomsOverdueHtml && !dirtCorrelationHtml
+      && !lastErrorHtml && !dockHealthHtml && !roomsOverdueHtml && !dirtCorrelationHtml && !primePartsHtml
       // v2.5.0: the mop pad / intensity line is real content on its own too.
-      && !(caps.isMop && (hass.states[`sensor.${n}_mop_pad`] || hass.states[`sensor.${n}_mop_behavior`]))) return '';
+      && !(caps.isMop && (robot(hass, n).st('sensor', 'mop_pad') || robot(hass, n).st('sensor', 'mop_behavior')))) return '';
 
   const barsHtml = bars.map(bar => renderBar(bar, hass, n, state)).join('');
 
@@ -809,18 +886,18 @@ export function renderHealthZone(
   // Separator is only emitted if at least one of the two new bars actually renders.
   let retentionBarHtml = '';
   if (caps.hasBatteryRetention) {
-    const retEntity = hass.states[`sensor.${n}_battery_capacity_retention`];
+    const retEntity = robot(hass, n).st('sensor', 'battery_capacity_retention');
     if (retEntity && retEntity.state !== 'unavailable' && retEntity.state !== 'unknown') {
       const retPct = Math.round(parseFloat(retEntity.state));
       if (!isNaN(retPct)) {
         const colour = retPct > 85 ? 'var(--rpc-green)' : retPct > 70 ? 'var(--rpc-amber)' : 'var(--rpc-red)';
-        const cyclesEntity = hass.states[`sensor.${n}_battery_cycles`];
+        const cyclesEntity = robot(hass, n).st('sensor', 'battery_cycles');
         const cyclesVal    = cyclesEntity ? parseInt(cyclesEntity.state, 10) : NaN;
         const cycleText    = !isNaN(cyclesVal) ? t(lang, 'health.chargeCycles', { count: cyclesVal }) : '';
 
         let eolHtml = '';
         if (caps.hasBatteryEol) {
-          const eolEntity = hass.states[`sensor.${n}_estimated_battery_eol`];
+          const eolEntity = robot(hass, n).st('sensor', 'estimated_battery_eol');
           if (eolEntity && eolEntity.state !== 'unavailable' && eolEntity.state !== 'unknown') {
             const eolDays = parseInt(eolEntity.state, 10);
             if (!isNaN(eolDays)) {
@@ -882,10 +959,10 @@ export function renderHealthZone(
     // standalone recent_coverage_pct sensor was removed in integration v3.0).
     // It is the last mission's area against the 60-day typical (p75), so it
     // can exceed 100 — the bar is clamped, the number is not.
-    const perfEntity = hass.states[`sensor.${n}_cleaning_performance`];
+    const perfEntity = robot(hass, n).st('sensor', 'cleaning_performance');
     const covRaw = perfEntity?.attributes?.coverage_pct;
     if (perfEntity && typeof covRaw === 'number' && Number.isFinite(covRaw)) {
-      const missionCountEntity = hass.states[`sensor.${n}_missions_last_30d`];
+      const missionCountEntity = robot(hass, n).st('sensor', 'missions_last_30d');
       const missionCount       = missionCountEntity ? parseInt(missionCountEntity.state, 10) : NaN;
       if (isNaN(missionCount) || missionCount < 10) {
         coverageBarHtml = `
@@ -937,11 +1014,11 @@ export function renderHealthZone(
   // F14 — Lifetime energy consumption (integration v2.4 F12e)
   let energyHtml = '';
   if (caps.hasEnergyConsumption) {
-    const energyEntity = hass.states[`sensor.${n}_total_energy_consumed`];
+    const energyEntity = robot(hass, n).st('sensor', 'total_energy_consumed');
     if (energyEntity && energyEntity.state !== 'unavailable' && energyEntity.state !== 'unknown') {
       const kwh = parseFloat(energyEntity.state);
       if (!isNaN(kwh)) {
-        const cyclesEntity = hass.states[`sensor.${n}_battery_cycles`];
+        const cyclesEntity = robot(hass, n).st('sensor', 'battery_cycles');
         const cyclesVal    = cyclesEntity ? parseInt(cyclesEntity.state, 10) : NaN;
         const isOpen = state.openPopover === 'energy';
         const cyclesSuffix = !isNaN(cyclesVal) ? t(lang, 'health.energyCyclesSuffix', { cycles: cyclesVal }) : '';
@@ -972,12 +1049,12 @@ export function renderHealthZone(
   // Wave A4 — Braava pad type + intensity row
   let mopConfigHtml = '';
   if (caps.isMop) {
-    const padType   = hass.states[`sensor.${n}_mop_pad`];
-    const mopBehav  = caps.hasMopBehavior ? hass.states[`sensor.${n}_mop_behavior`] : null;
+    const padType   = robot(hass, n).st('sensor', 'mop_pad');
+    const mopBehav  = caps.hasMopBehavior ? robot(hass, n).st('sensor', 'mop_behavior') : null;
     const parts: string[] = [];
     // v2.5.0 F6: slugs (`reusable_wet`, `standard`) — integration's text.
-    if (padType  && padType.state  !== 'unknown' && padType.state  !== 'unavailable') parts.push(esc(formatState(hass, `sensor.${n}_mop_pad`)));
-    if (mopBehav && mopBehav.state !== 'unknown' && mopBehav.state !== 'unavailable') parts.push(t(lang, 'health.mopIntensity', { state: esc(formatState(hass, `sensor.${n}_mop_behavior`)) }));
+    if (padType  && padType.state  !== 'unknown' && padType.state  !== 'unavailable') parts.push(esc(formatState(hass, (robot(hass, n).id('sensor', 'mop_pad') ?? ''))));
+    if (mopBehav && mopBehav.state !== 'unknown' && mopBehav.state !== 'unavailable') parts.push(t(lang, 'health.mopIntensity', { state: esc(formatState(hass, (robot(hass, n).id('sensor', 'mop_behavior') ?? ''))) }));
     if (parts.length) {
       mopConfigHtml = `
         <div class="rpc-health-divider"></div>
@@ -994,6 +1071,7 @@ export function renderHealthZone(
       ${renderHealthScore(hass, caps, n, state.healthDetailsExpanded)}
       ${caps.hasRobotHealthScore && !state.healthDetailsExpanded ? '' : `
         ${barsHtml}
+        ${primePartsHtml}
         ${retentionHtml}
         ${energyHtml}
         ${mopConfigHtml}

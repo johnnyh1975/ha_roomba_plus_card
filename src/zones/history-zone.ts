@@ -1,4 +1,5 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord, MissionExplain, MissionPath, MissionMapPayload } from '../types.js';
+import { robot } from '../registry.js';
 import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, coverageExtentFromAttrs, coverageToImagePct, coverageToImagePctNum, coverageFrameStyles } from '../heatmap.js';
 import { renderMissionMapSvg } from '../mission-map.js';
 import { esc, timeSince, areaSqftFromEntity } from '../utils.js';
@@ -93,6 +94,9 @@ export interface HistoryZoneState {  data: DaySummary[] | null;
    *  footer — both belong to the History tab, not to a spatial map view.
    *  The Map tab should show only: heatmap + legend + "Updated X ago". */
   isMapContext?: boolean;
+  /** v3.0 A5: the map column of a wide card — the History panel beside it
+   *  already shows the day popover and the problem-zone callout. */
+  suppressDetails?: boolean;
   /** v2.2.0 F1 — inline "Why?" explanation state for one mission in the open
    *  day popover. null = no explanation open. data null while loading;
    *  error=true when the fetch failed or the endpoint is absent (≤ 3.1.x). */
@@ -112,7 +116,7 @@ function formatArea(sqft: number, useMetric: boolean): string {
 }
 
 /** Return emoji icon for a hazard pin by source type */
-function pinIcon(source: string): string {
+export function pinIcon(source: string): string {
   if (source === 'robot_learned') return '🚧';
   if (source === 'keepout')       return '🚫';
   return '📍'; // stuck_events (default)
@@ -141,7 +145,7 @@ function formatF22Pattern(h: HazardRecord, lang: string): string {
 }
 
 /** Build a tooltip string for a hazard pin */
-function buildPinTip(h: HazardRecord, lang: string): string {
+export function buildPinTip(h: HazardRecord, lang: string): string {
   const room = h.room_name ? ` · ${h.room_name}` : '';
   if (h.source === 'stuck_events')
     return `${t(lang, 'history.pinStuckHotspot')}${h.stuck_count ? ` (${h.stuck_count}×)` : ''}${room}${formatF22Pattern(h, lang)}`;
@@ -169,7 +173,7 @@ export function renderHistoryZone(
 
   // F11/F12: vacuum entity attributes — reflect the most recent mission.
   // last_cleaned_rooms is a live attribute; it is NOT per-mission historical data.
-  const vacAttrs     = hass.states[`vacuum.${n}`]?.attributes ?? {};
+  const vacAttrs     = hass.states[robot(hass, n).vacuumId]?.attributes ?? {};
   // v2.5.0: region_icons lives on the zone select (entity-ids.ts), never on
   // the vacuum — the room chips here never had icons before.
   const regionIcons  = zoneSelectMapAttr<string>(hass, n, 'region_icons');
@@ -182,8 +186,8 @@ export function renderHistoryZone(
   const isToday      = state.openDay === todayDateStr;
 
   // Summary bar (streak + completion rate)
-  const streakEntity     = hass.states[`sensor.${n}_clean_streak`];
-  const completionEntity = hass.states[`sensor.${n}_completion_rate_30d`];
+  const streakEntity     = robot(hass, n).st('sensor', 'clean_streak');
+  const completionEntity = robot(hass, n).st('sensor', 'completion_rate_30d');
   const streakVal        = streakEntity ? parseInt(streakEntity.state, 10) : 0;
   const completionVal    = completionEntity ? parseInt(completionEntity.state, 10) : NaN;
 
@@ -199,7 +203,7 @@ export function renderHistoryZone(
   // (deprecated, removed in v3.0) to the `trend` attribute on the consolidated
   // sensor.*_cleaning_performance. Attribute key confirmed against source.
   if (caps.hasCleaningSpeedTrend) {
-    const perfEntity = hass.states[`sensor.${n}_cleaning_performance`];
+    const perfEntity = robot(hass, n).st('sensor', 'cleaning_performance');
     const trend = perfEntity?.attributes?.trend;
     if (trend === 'declining') summaryParts.push(`<span class="rpc-trend-declining">↓ ${t(lang, 'history.speedDeclining')}</span>`);
     else if (trend === 'improving') summaryParts.push(`<span class="rpc-trend-improving">↑ ${t(lang, 'history.speedImproving')}</span>`);
@@ -222,7 +226,7 @@ export function renderHistoryZone(
   // F7 — Coverage panel (replaces heatmap when tab='coverage')
   let coveragePanelHtml = '';
   if (caps.hasCoverageImage && historyTab === 'coverage') {
-    const imageEntity = hass.states[`image.${n}_coverage_map`];
+    const imageEntity = robot(hass, n).st('image', 'coverage_map');
     const attrs       = imageEntity?.attributes ?? {};
     const entityPic   = attrs['entity_picture'] as string | undefined;
     const lastEnd     = attrs['last_mission_end'] as string | undefined;
@@ -399,30 +403,7 @@ export function renderHistoryZone(
         // friendly_name/etc. into that same flat attributes dict, so only
         // entries actually shaped like {score: number, ...} are treated as
         // room entries here, not every key present.
-        const roomAccessScores: Record<string, { score: number; limiting_factor: string | null }> = {};
-        if (caps.hasRoomAccess) {
-          const raw = (hass.states[`sensor.${n}_room_accessibility_scores`]?.attributes ?? {}) as Record<string, unknown>;
-          for (const [name, val] of Object.entries(raw)) {
-            if (val && typeof val === 'object' && typeof (val as Record<string, unknown>).score === 'number') {
-              roomAccessScores[name] = val as { score: number; limiting_factor: string | null };
-            }
-          }
-        }
-        // The integration's three known limiting_factor codes (verified
-        // against RobotProfileStore.room_accessibility_scores()) mapped to
-        // short readable labels; an unrecognised future code is shown as-is
-        // rather than hidden, same "don't silently drop new data" instinct
-        // used elsewhere in this project. null/undefined (no limiting
-        // factor — a room with no signals at all) shows no factor at all.
-        const limitingFactorLabel = (factor: string | null | undefined): string => {
-          if (factor == null) return '';
-          switch (factor) {
-            case 'obstacle_density': return t(lang, 'history.limitingFactorObstacle');
-            case 'narrow_passages':  return t(lang, 'history.limitingFactorNarrow');
-            case 'coverage_gap':     return t(lang, 'history.limitingFactorCoverage');
-            default:                 return factor;
-          }
-        };
+        const accessTips = roomAccessTips(hass, caps, n, lang);
 
         const labels = Object.values(rooms).filter(room => inFrame(room.x, room.y)).map(room => {
           const pos    = toPct(room.x, room.y);
@@ -432,11 +413,7 @@ export function renderHistoryZone(
           const areaSuffix = typeof areaM2 === 'number' && !isNaN(areaM2)
             ? ` / ${areaM2.toFixed(1)} m²`
             : '';
-          const access = roomAccessScores[room.name];
-          const factorLabel = access ? limitingFactorLabel(access.limiting_factor) : '';
-          const accessTip = access
-            ? `${t(lang, 'history.accessTip', { name: room.name, score: Math.round(access.score) })}${factorLabel ? t(lang, 'history.limitedBySuffix', { factor: factorLabel }) : ''}`
-            : '';
+          const accessTip = accessTips[room.name] ?? '';
           const tipAttr = accessTip ? ` title="${esc(accessTip)}" aria-label="${esc(accessTip)}"` : '';
           return `<div class="rpc-room-label${selected ? ' rpc-room-label--selected' : ''}"
             style="left:${pos.left};top:${pos.top}" data-room-label="${esc(room.name)}"${tipAttr}>
@@ -519,7 +496,7 @@ export function renderHistoryZone(
         </div>
         ${noExtentNote}
         <div class="rpc-coverage-legend">
-          <span style="color:var(--rpc-green)">●</span> ${t(lang, 'history.highCoverage')}
+          <span style="color:#2f6bff">●</span> ${t(lang, 'history.highCoverage')}
           <span style="color:var(--rpc-grey-mid,#9ca3af)">●</span> ${t(lang, 'history.rarelyCleaned')}
           ${legendPins}
         </div>
@@ -545,8 +522,8 @@ export function renderHistoryZone(
   // Problem zone callout
   let problemHtml = '';
   if (caps.hasProblemZone) {
-    const pzEntity    = hass.states[`sensor.${n}_problem_zone`];
-    const stuckEntity = hass.states[`sensor.${n}_stuck_count_30d`];
+    const pzEntity    = robot(hass, n).st('sensor', 'problem_zone');
+    const stuckEntity = robot(hass, n).st('sensor', 'stuck_count_30d');
     if (pzEntity && pzEntity.state !== 'unknown' && pzEntity.state !== 'unavailable') {
       const count = stuckEntity ? parseInt(stuckEntity.state, 10) : 0;
       if (count > 0) {
@@ -848,8 +825,8 @@ export function renderHistoryZone(
     // display bug (minutes shown as if they were hours). cleaning_analytics_30d's
     // `time_h` attribute is genuinely in hours, so the display is now correct
     // with no separate conversion needed.
-    const lifetimeMissions = hass.states[`sensor.${n}_lifetime_missions`];
-    const analyticsEntity  = hass.states[`sensor.${n}_cleaning_analytics_30d`];
+    const lifetimeMissions = robot(hass, n).st('sensor', 'lifetime_missions');
+    const analyticsEntity  = robot(hass, n).st('sensor', 'cleaning_analytics_30d');
 
     // Parse values individually — show the section if at least one is available.
     // Each span is only rendered when its value is a real number, so a missing
@@ -877,9 +854,9 @@ export function renderHistoryZone(
       if (!e || e.state === 'unknown' || e.state === 'unavailable') return NaN;
       return parseInt(e.state, 10);
     };
-    const optical = numState(`sensor.${n}_optical_dirt_detections`);
-    const piezo   = numState(`sensor.${n}_piezo_dirt_detections`);
-    const scrubs  = numState(`sensor.${n}_scrubs_count`);
+    const optical = numState((robot(hass, n).id('sensor', 'optical_dirt_detections') ?? ''));
+    const piezo   = numState((robot(hass, n).id('sensor', 'piezo_dirt_detections') ?? ''));
+    const scrubs  = numState((robot(hass, n).id('sensor', 'scrubs_count') ?? ''));
 
     const hasAny   = !isNaN(missions) || !isNaN(hours) || !isNaN(areaSqft)
       || !isNaN(optical) || !isNaN(piezo) || !isNaN(scrubs);
@@ -923,9 +900,42 @@ export function renderHistoryZone(
       <div class="rpc-heatmap-wrap" data-heatmap>
         ${historyTab === 'coverage' && caps.hasCoverageImage ? coveragePanelHtml : heatmapHtml}
       </div>
-      ${problemHtml}
-      ${popoverHtml}
+      ${state.suppressDetails ? '' : problemHtml}
+      ${state.suppressDetails ? '' : popoverHtml}
       ${!isMapContext ? lifetimeHtml : ''}
     </div>
   `;
+}
+
+/**
+ * v2.4.0 ROOM-ACCESS — per-room accessibility score as a label tooltip,
+ * from sensor.*_room_accessibility_scores (registered only with the UMF
+ * aligner). Its attributes have NO wrapper key — HA merges its own
+ * state_class/friendly_name into the same flat dict — so only entries
+ * shaped like {score: number, ...} count as rooms. The three known
+ * limiting_factor codes get short labels; an unknown future code is shown
+ * as-is rather than hidden. v3.0: shared by the coverage view and the
+ * rooms-map Map tab (map-zone.ts).
+ */
+export function roomAccessTips(hass: HomeAssistant, caps: RobotCapabilities, n: string, lang: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!caps.hasRoomAccess) return out;
+  const raw = (robot(hass, n).st('sensor', 'room_accessibility_scores')?.attributes ?? {}) as Record<string, unknown>;
+  const label = (factor: string | null | undefined): string => {
+    if (factor == null) return '';
+    switch (factor) {
+      case 'obstacle_density': return t(lang, 'history.limitingFactorObstacle');
+      case 'narrow_passages':  return t(lang, 'history.limitingFactorNarrow');
+      case 'coverage_gap':     return t(lang, 'history.limitingFactorCoverage');
+      default:                 return factor;
+    }
+  };
+  for (const [name, val] of Object.entries(raw)) {
+    if (!val || typeof val !== 'object') continue;
+    const v = val as { score?: unknown; limiting_factor?: string | null };
+    if (typeof v.score !== 'number') continue;
+    const f = label(v.limiting_factor);
+    out[name] = `${t(lang, 'history.accessTip', { name, score: Math.round(v.score) })}${f ? t(lang, 'history.limitedBySuffix', { factor: f }) : ''}`;
+  }
+  return out;
 }
