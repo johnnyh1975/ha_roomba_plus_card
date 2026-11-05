@@ -1,8 +1,8 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord, MissionExplain, MissionPath, MissionMapPayload } from '../types.js';
 import { robot } from '../registry.js';
-import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, coverageExtentFromAttrs, coverageToImagePct, coverageToImagePctNum, coverageFrameStyles } from '../heatmap.js';
+import { renderHeatmap, renderSkeletonHeatmap, firstWeekdayIndex, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, coverageExtentFromAttrs, coverageToImagePct, coverageToImagePctNum, coverageFrameStyles } from '../heatmap.js';
 import { renderMissionMapSvg } from '../mission-map.js';
-import { esc, timeSince, areaSqftFromEntity } from '../utils.js';
+import { esc, timeSince, areaSqftFromEntity, roomLabelText } from '../utils.js';
 import { mapImageId, zoneSelectMapAttr } from '../entity-ids.js';
 import { mdiToEmoji } from '../const.js';
 import { t, resolveLang, WEEKDAY_LABELS } from '../i18n/index.js';
@@ -366,7 +366,7 @@ export function renderHistoryZone(
             .join(' ');
           const selected = mapSelectedRooms?.has(room.name) ?? false;
           return `<polygon class="rpc-room-poly${selected ? ' rpc-room-poly--selected' : ''}"
-            points="${pointsAttr}" data-room-poly="${esc(room.name)}" />`;
+            points="${pointsAttr}" data-room-poly="${esc(room.name)}"><title>${esc(room.name)}</title></polygon>`;
         }).join('');
 
         // v2.0.1: region_areas_m2 (integration v2.9.1) — lives on the
@@ -405,19 +405,16 @@ export function renderHistoryZone(
         // room entries here, not every key present.
         const accessTips = roomAccessTips(hass, caps, n, lang);
 
-        const labels = Object.values(rooms).filter(room => inFrame(room.x, room.y)).map(room => {
+        // v3.0.1: `map_room_labels` (name / none) and `area_unit` apply here too.
+        const labels = (config.map_room_labels ?? 'full') === 'none' ? '' : Object.values(rooms).filter(room => inFrame(room.x, room.y)).map(room => {
           const pos    = toPct(room.x, room.y);
           const emoji  = mdiToEmoji(room.icon);
           const selected = mapSelectedRooms?.has(room.name) ?? false;
-          const areaM2 = regionAreasM2[room.name];
-          const areaSuffix = typeof areaM2 === 'number' && !isNaN(areaM2)
-            ? ` / ${areaM2.toFixed(1)} m²`
-            : '';
           const accessTip = accessTips[room.name] ?? '';
           const tipAttr = accessTip ? ` title="${esc(accessTip)}" aria-label="${esc(accessTip)}"` : '';
           return `<div class="rpc-room-label${selected ? ' rpc-room-label--selected' : ''}"
             style="left:${pos.left};top:${pos.top}" data-room-label="${esc(room.name)}"${tipAttr}>
-            ${emoji ? `${emoji} ` : ''}${esc(room.name)}${esc(areaSuffix)}
+            ${emoji ? `${emoji} ` : ''}${esc(roomLabelText(room.name, regionAreasM2[room.name], config, isMetric))}
           </div>`;
         }).join('');
 
@@ -508,11 +505,11 @@ export function renderHistoryZone(
   // Heatmap area
   let heatmapHtml = '';
   if (state.loading && !state.data) {
-    heatmapHtml = renderSkeletonHeatmap(Math.ceil(days / 7), lang);
+    heatmapHtml = renderSkeletonHeatmap(Math.ceil(days / 7), lang, firstWeekdayIndex(hass));
   } else if (state.error) {
     heatmapHtml = `<div class="rpc-history-error">${esc(state.error)}</div>`;
   } else if (state.data) {
-    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language, caps.hasDirtDensity, lang);
+    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language, caps.hasDirtDensity, lang, firstWeekdayIndex(hass));
     // Show partial message if API returned fewer calendar days than requested
     if (state.data.length < days) {
       heatmapHtml += `<div class="rpc-history-partial">${t(lang, 'history.partialDays', { shown: state.data.length, days })}</div>`;

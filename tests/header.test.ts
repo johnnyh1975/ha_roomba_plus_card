@@ -292,35 +292,41 @@ describe('renderHeader() — A1 connectivity indicator', () => {
 });
 
 // ── v2.1.0 A2 — firmware badge ───────────────────────────────────────────────
-describe('renderHeader() — A2 firmware badge', () => {
+describe('renderHeader() — A2 firmware badge (v3.0.1 #32)', () => {
   const caps = { ...defaultCaps, hasFirmware: true };
+  const VER = 'lewis+22.52.10+2024-01-01-abcdef+Firmware-Build+1234';
 
-  it('shows badge when firmware changed within 24h', () => {
-    const recent = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h ago
-    const fw = { ...st('22.52.10'), last_changed: recent };
+  it('shows the badge while the integration says the firmware was updated (24 h)', () => {
     const html = render({
       'vacuum.roomba': st('docked'),
-      'sensor.roomba_firmware_version': fw,
+      'sensor.roomba_firmware_version': st(VER),
+      'binary_sensor.roomba_firmware_updated': st('on'),
     }, { caps });
     expect(html).toContain('rpc-firmware-badge');
-    expect(html).toContain('22.52.10');
+    expect(html).toContain(`title="Firmware updated: ${VER}"`);
   });
 
-  it('hides badge when firmware change older than 24h', () => {
-    const old = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    const fw = { ...st('22.52.10'), last_changed: old };
+  it('#32: a Home Assistant restart (fresh last_changed) does NOT show it', () => {
+    const fw = { ...st(VER), last_changed: new Date().toISOString() };
     const html = render({
       'vacuum.roomba': st('docked'),
       'sensor.roomba_firmware_version': fw,
+      'binary_sensor.roomba_firmware_updated': st('off'),
     }, { caps });
     expect(html).not.toContain('rpc-firmware-badge');
   });
 
+  it('no firmware_updated sensor (Prime) → no badge rather than a guess', () => {
+    const fw = { ...st('1.2.3'), last_changed: new Date().toISOString() };
+    expect(render({ 'vacuum.roomba': st('docked'), 'sensor.roomba_firmware_version': fw }, { caps }))
+      .not.toContain('rpc-firmware-badge');
+  });
+
   it('hides badge when version unavailable', () => {
-    const fw = { ...st('unavailable'), last_changed: new Date().toISOString() };
     const html = render({
       'vacuum.roomba': st('docked'),
-      'sensor.roomba_firmware_version': fw,
+      'sensor.roomba_firmware_version': st('unavailable'),
+      'binary_sensor.roomba_firmware_updated': st('on'),
     }, { caps });
     expect(html).not.toContain('rpc-firmware-badge');
   });

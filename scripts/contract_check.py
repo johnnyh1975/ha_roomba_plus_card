@@ -43,7 +43,7 @@ DOMAINS = ("sensor", "binary_sensor", "select", "switch", "button", "image",
            "vacuum", "device_tracker", "calendar", "todo", "number", "event")
 
 LOOKUP_RE = re.compile(r"\.(?:id|st|ids|lookup)\(\s*'(\w+)'\s*,\s*'(\w+)'\s*\)")
-DIAG_RE = re.compile(r"\[\s*'[^']+'\s*,\s*'(\w+)'\s*,\s*'(\w+)'\s*,\s*'(?:both|classic|prime)'\s*\]")
+DIAG_RE = re.compile(r"domain:\s*'(\w+)'\s*,\s*key:\s*'(\w+)'")
 ALIAS_RE = re.compile(r"'((?:%s):\w+)'" % "|".join(DOMAINS))
 SUFFIX_KEY_RE = re.compile(r"\[\s*/[^/]+/\s*,\s*'(\w+)'\s*(?:,\s*'(\w+)')?\s*\]")
 SERVICE_RE = re.compile(r"callService\(\s*'roomba_plus'\s*,\s*'(\w+)'\s*,\s*\{([^}]*)\}", re.S)

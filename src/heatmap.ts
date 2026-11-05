@@ -56,6 +56,38 @@ function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * v3.0.1 (#30): first day of the week as a JS day index (0 = Sunday …
+ * 6 = Saturday), from the user's HA profile setting. Mirrors the HA
+ * frontend: an explicit day name wins; 'language' (or no setting) asks the
+ * browser for the locale's convention (Intl.Locale getWeekInfo()/weekInfo,
+ * firstDay 1 = Monday … 7 = Sunday). Browsers without week info fall back
+ * to Sunday for en-US and Monday otherwise — the same fallback HA uses, so
+ * the heatmap matches HA's own date pickers.
+ */
+const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+export function firstWeekdayIndex(hass: { language?: string; locale?: { language?: string; first_weekday?: string } } | undefined): number {
+  const setting = hass?.locale?.first_weekday;
+  const named = setting ? WEEKDAY_NAMES.indexOf(setting) : -1;
+  if (named >= 0) return named;
+  const language = hass?.locale?.language || hass?.language || 'en';
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const loc: any = new (Intl as any).Locale(language);
+    const info = typeof loc.getWeekInfo === 'function' ? loc.getWeekInfo() : loc.weekInfo;
+    const fd = info?.firstDay;
+    if (typeof fd === 'number' && fd >= 1 && fd <= 7) return fd % 7;
+  } catch { /* invalid tag or no Intl.Locale — fall through */ }
+  return language === 'en-US' || language === 'en' ? 0 : 1;
+}
+
+/** Day labels for the seven columns, starting at `firstDay` (JS index).
+ *  WEEKDAY_LABELS_SHORT is Monday-first. */
+function columnLabels(lang: string, firstDay: number): string[] {
+  const monFirst = WEEKDAY_LABELS_SHORT[lang] ?? WEEKDAY_LABELS_SHORT.en;
+  return Array.from({ length: 7 }, (_, d) => monFirst[((firstDay + d) % 7 + 6) % 7]);
+}
+
 export function renderHeatmap(
   summaries: DaySummary[],
   days: number,
@@ -63,16 +95,17 @@ export function renderHeatmap(
   locale = 'en-US',
   showDirtDensity = false,   // F16: modulate cell opacity by relative_to_baseline
   lang = 'en',
+  firstDay = 1,              // v3.0.1 #30: JS day index of the first column (1 = Monday)
 ): string {
   // Build date map
   const byDate = new Map<string, DaySummary>();
   for (const s of summaries) byDate.set(s.date, s);
 
-  // Build grid: oldest top-left, today bottom-right, Mon-aligned
+  // Build grid: oldest top-left, today bottom-right, aligned to firstDay
   const today = new Date();
   const startDate = new Date(today);
   startDate.setDate(today.getDate() - (days - 1));
-  const dow = (startDate.getDay() + 6) % 7; // Mon=0
+  const dow = (startDate.getDay() - firstDay + 7) % 7; // column of startDate
   startDate.setDate(startDate.getDate() - dow);
 
   const numWeeks = Math.ceil((days + dow) / 7);
@@ -89,7 +122,7 @@ export function renderHeatmap(
 
   const W = svgW();
   const H = svgH(numWeeks);
-  const dayLabels = WEEKDAY_LABELS_SHORT[lang] ?? WEEKDAY_LABELS_SHORT.en;
+  const dayLabels = columnLabels(lang, firstDay);
 
   // SVG has explicit width/height — renders at natural size, no CSS stretching
   let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="grid" aria-label="${t(lang, 'aria.heatmapLabel')}">`;
@@ -430,10 +463,10 @@ export function renderSparkline(readings: number[], minVal: number): string {
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:inline-block;vertical-align:middle;flex-shrink:0">${rects}</svg>`;
 }
 
-export function renderSkeletonHeatmap(numWeeks = 4, lang = 'en'): string {
+export function renderSkeletonHeatmap(numWeeks = 4, lang = 'en', firstDay = 1): string {
   const W = svgW();
   const H = svgH(numWeeks);
-  const dayLabels = WEEKDAY_LABELS_SHORT[lang] ?? WEEKDAY_LABELS_SHORT.en;
+  const dayLabels = columnLabels(lang, firstDay);
 
   let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
   svg += `<style>@keyframes rpc-pulse{0%,100%{opacity:.35}50%{opacity:.7}}.rpc-skel{animation:rpc-pulse 1.5s ease-in-out infinite}</style>`;

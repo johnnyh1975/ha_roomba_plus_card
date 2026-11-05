@@ -421,3 +421,101 @@ describe('coverageFrameStyles() — #20 crop + viewport cap', () => {
     expect(coverageFrameStyles(null).wrap).toBe('aspect-ratio:1 / 1;width:min(100%, 70vh)');
   });
 });
+
+// ── v3.0.1 #30 (@djdelorie): first day of the week from the HA profile ──────
+import { firstWeekdayIndex } from '../src/heatmap';
+import { afterEach } from 'vitest';
+
+/** Map each rendered cell to its column x and check that every column holds
+ *  one weekday only; returns the weekday (JS index) per column, left→right. */
+function columnWeekdays(svg: string): number[] {
+  const byX = new Map<number, Set<number>>();
+  for (const m of svg.matchAll(/data-date="(\d{4})-(\d{2})-(\d{2})"[^>]*>\s*<rect x="(-?[\d.]+)"/g)) {
+    const wd = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getDay();
+    const x = Number(m[4]);
+    if (!byX.has(x)) byX.set(x, new Set());
+    byX.get(x)!.add(wd);
+  }
+  const xs = [...byX.keys()].sort((a, b) => a - b);
+  return xs.map(x => {
+    const set = byX.get(x)!;
+    expect(set.size).toBe(1);
+    return [...set][0];
+  });
+}
+function headerLabels(svg: string): string[] {
+  return [...svg.matchAll(/<text [^>]*y="13"[^>]*>([^<]+)<\/text>/g)].map(m => m[1]);
+}
+
+describe('firstWeekdayIndex() — #30', () => {
+  const origLocale = Intl.Locale;
+  afterEach(() => { (Intl as unknown as { Locale: unknown }).Locale = origLocale; });
+
+  it('explicit profile day wins over the language', () => {
+    expect(firstWeekdayIndex({ language: 'de', locale: { language: 'de', first_weekday: 'sunday' } })).toBe(0);
+    expect(firstWeekdayIndex({ language: 'en-US', locale: { language: 'en-US', first_weekday: 'monday' } })).toBe(1);
+    expect(firstWeekdayIndex({ language: 'en', locale: { first_weekday: 'saturday' } })).toBe(6);
+  });
+
+  it("'language' follows the locale convention (US → Sunday, DE → Monday)", () => {
+    expect(firstWeekdayIndex({ language: 'en-US', locale: { language: 'en-US', first_weekday: 'language' } })).toBe(0);
+    expect(firstWeekdayIndex({ language: 'de', locale: { language: 'de', first_weekday: 'language' } })).toBe(1);
+  });
+
+  it('browser without week info: en-US → Sunday, everything else → Monday', () => {
+    (Intl as unknown as { Locale: unknown }).Locale = class { constructor(_: string) { /* no weekInfo */ } };
+    expect(firstWeekdayIndex({ language: 'en-US', locale: { language: 'en-US', first_weekday: 'language' } })).toBe(0);
+    expect(firstWeekdayIndex({ language: 'fr', locale: { language: 'fr', first_weekday: 'language' } })).toBe(1);
+  });
+
+  it('getWeekInfo() (newer browsers) is used when present', () => {
+    (Intl as unknown as { Locale: unknown }).Locale = class {
+      constructor(_: string) { /* */ }
+      getWeekInfo() { return { firstDay: 6 }; }   // Saturday
+    };
+    expect(firstWeekdayIndex({ language: 'ar-EG', locale: { language: 'ar-EG', first_weekday: 'language' } })).toBe(6);
+  });
+
+  it('no locale block (old frontend / test harness) still yields a valid day', () => {
+    const d = firstWeekdayIndex({ language: 'de' });
+    expect(d).toBe(1);
+    expect(firstWeekdayIndex(undefined)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('renderHeatmap() — first day of the week (#30)', () => {
+  it('default stays Monday-first (unchanged layout)', () => {
+    const svg = renderHeatmap([], 28, 'auto');
+    expect(headerLabels(svg)).toEqual(['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']);
+    const cols = columnWeekdays(svg);
+    expect(cols[0]).toBe(1);
+  });
+
+  it('Sunday-first: headers and cells both start on Sunday', () => {
+    const svg = renderHeatmap([], 28, 'auto', 'en-US', false, 'en', 0);
+    expect(headerLabels(svg)).toEqual(['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']);
+    const cols = columnWeekdays(svg);
+    expect(cols).toEqual([0, 1, 2, 3, 4, 5, 6].slice(0, cols.length));
+  });
+
+  it('Saturday-first in German: labels rotate with the cells', () => {
+    const svg = renderHeatmap([], 35, 'auto', 'de', false, 'de', 6);
+    expect(headerLabels(svg)).toEqual(['Sa', 'So', 'Mo', 'Di', 'Mi', 'Do', 'Fr']);
+    expect(columnWeekdays(svg)[0]).toBe(6);
+  });
+
+  it('every requested day is still shown, today included', () => {
+    const svg = renderHeatmap([], 28, 'auto', 'en-US', false, 'en', 0);
+    const dates = [...svg.matchAll(/data-date="([\d-]+)"/g)].map(m => m[1]);
+    const t = new Date();
+    const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    expect(dates).toContain(today);
+    expect(dates.length).toBeGreaterThanOrEqual(28);
+    expect(new Set(dates).size).toBe(dates.length);
+  });
+
+  it('loading skeleton uses the same first day', () => {
+    expect(headerLabels(renderSkeletonHeatmap(4, 'en', 0))[0]).toBe('Su');
+    expect(headerLabels(renderSkeletonHeatmap(4, 'en'))[0]).toBe('Mo');
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderAlertZone, hasAlertForTab } from '../../src/zones/alert-zone';
+import { renderAlertZone, hasAlertForTab, collectAlerts } from '../../src/zones/alert-zone';
 import { makeHass, defaultCaps, fullCaps, baseConfig, st } from '../helpers';
 
 const n = 'roomba';
@@ -508,4 +508,38 @@ describe('collectAlerts() — v3.0 Classic stale error', () => {
     expect(a?.text).toContain('Brush stuck');
     expect(a?.subtext).toBe('Clear hair');
   });
+});
+
+// ── v3.0.1 #33 — bin full / bin missing independent of maintenance ───────
+describe('collectAlerts() — #33 bin alerts (field report @azrael-229, i7+)', () => {
+  const texts = (states: Record<string, ReturnType<typeof st>>) =>
+    collectAlerts(makeHass(states), defaultCaps, n).map(a => a.text);
+  it('bin full with maintenance NOT due → alert (was invisible up to 3.0.0)', () => {
+    const tx = texts({ [`binary_sensor.${n}_bin_full`]: st('on'), [`binary_sensor.${n}_maintenance_due`]: st('off'),
+      [`sensor.${n}_readiness`]: st('bin_full') });
+    expect(tx).toContain('Bin full — empty to continue');
+  });
+  it('the binary sensor decides — readiness flapping to saving_map keeps the alert', () =>
+    expect(texts({ [`binary_sensor.${n}_bin_full`]: st('on'), [`sensor.${n}_readiness`]: st('saving_map') }))
+      .toContain('Bin full — empty to continue'));
+  it('…and a stale readiness bin_full does not raise it when the sensor says off', () =>
+    expect(texts({ [`binary_sensor.${n}_bin_full`]: st('off'), [`sensor.${n}_readiness`]: st('bin_full') }))
+      .not.toContain('Bin full — empty to continue'));
+  it('bin missing: bin_present off, or readiness no_bin without the sensor', () => {
+    expect(texts({ [`binary_sensor.${n}_bin_present`]: st('off') })).toContain('Bin missing — put it back to continue');
+    expect(texts({ [`sensor.${n}_readiness`]: st('no_bin') })).toContain('Bin missing — put it back to continue');
+  });
+  it('readiness fallback without bin sensors (e.g. Prime bin full)', () =>
+    expect(texts({ [`sensor.${n}_readiness`]: st('bin_full') })).toContain('Bin full — empty to continue'));
+  it('robot unreachable (sensor unavailable) → no guess', () =>
+    expect(texts({ [`binary_sensor.${n}_bin_full`]: st('unavailable'), [`sensor.${n}_readiness`]: st('bin_full') }))
+      .not.toContain('Bin full — empty to continue'));
+  it('bin full and maintenance due: bin first, then the maintenance line (not twice "bin full")', () => {
+    const tx = collectAlerts(makeHass({ [`binary_sensor.${n}_bin_full`]: st('on'), [`binary_sensor.${n}_maintenance_due`]: st('on'),
+      [`sensor.${n}_readiness`]: st('bin_full') }), defaultCaps, n).sort((a, b) => a.priority - b.priority).map(a => a.text);
+    expect(tx.slice(0, 2)).toEqual(['Bin full — empty to continue', 'Maintenance due']);
+  });
+  it('a ready robot raises nothing', () =>
+    expect(texts({ [`binary_sensor.${n}_bin_full`]: st('off'), [`binary_sensor.${n}_bin_present`]: st('on'),
+      [`sensor.${n}_readiness`]: st('ready') })).toEqual([]));
 });

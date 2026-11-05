@@ -432,18 +432,22 @@ export function renderHeader(props: HeaderProps): string {
   }
 
   // ── v2.1.0 A2 — firmware badge ──────────────────────────────────────────
-  // Shown briefly after a firmware change: the integration exposes the version
-  // string; we surface it for 24h after the entity's last_changed, then hide.
+  // Shown for 24 h after a firmware change.
+  //
+  // v3.0.1 (#32, @djdelorie): decided by the integration's
+  // `binary_sensor.*_firmware_updated` — on for 24 h after the robot reported
+  // a new softwareVer (binary_sensor.py RoombaFirmwareUpdated, since 2.8.3).
+  // Up to 3.0.0 the card used the version sensor's last_changed, which Home
+  // Assistant resets on every restart, so the badge showed after each
+  // restart and much of the time. No such sensor (Prime) → no badge rather
+  // than a wrong one. The full version is in the tooltip; the badge itself
+  // is width-limited in CSS so a long version string stays inside the card.
   let firmwareHtml = '';
-  if (caps.hasFirmware) {
-    const fw = robot(hass, n).st('sensor', 'firmware_version');
-    const ver = fw?.state;
+  if (caps.hasFirmware && robot(hass, n).st('binary_sensor', 'firmware_updated')?.state === 'on') {
+    const ver = robot(hass, n).st('sensor', 'firmware_version')?.state;
     if (ver && ver !== 'unavailable' && ver !== 'unknown') {
-      const changed = fw?.last_changed ? new Date(fw.last_changed).getTime() : 0;
-      const within24h = changed > 0 && (Date.now() - changed) < 24 * 60 * 60 * 1000;
-      if (within24h) {
-        firmwareHtml = `<span class="rpc-firmware-badge" title="${t(lang, 'header.firmwareUpdatedTitle')}">⬆ FW ${esc(ver)}</span>`;
-      }
+      const title = `${t(lang, 'header.firmwareUpdatedTitle')}: ${ver}`;
+      firmwareHtml = `<span class="rpc-firmware-badge" title="${esc(title)}">⬆ FW ${esc(ver)}</span>`;
     }
   }
 

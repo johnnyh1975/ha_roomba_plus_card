@@ -320,3 +320,22 @@ describe('renderMapZone — I13 zone among the room map\'s rooms (Prime)', () =>
     expect(html).toContain('Couch zone');
   });
 });
+
+// ── v3.0.1 map_room_labels (community request: many rooms crowd the map) ──
+describe('renderMapZone — v3.0.1 map_room_labels', () => {
+  const hass = () => classicMap(true, {}, [['select.i7_cloud_zone_abc', 'cloud_smart_zone_select', 'Kitchen', {
+    options: ['Kitchen', 'Hall'], is_active_map: true, region_icons: { Kitchen: 'mdi:fridge', Hall: 'mdi:door' },
+    region_areas_m2: { Kitchen: 18.2, Hall: 9 } }]]);
+  it('default: name and area', () =>
+    expect(renderMapZone(hass(), baseConfig, caps, 'i7', state())).toMatch(/Kitchen \/ \d/));
+  it('name: names without area', () => {
+    const h = renderMapZone(hass(), { ...baseConfig, map_room_labels: 'name' }, caps, 'i7', state());
+    expect(h).toContain('data-room-label="Kitchen"');
+    expect(h).not.toMatch(/Kitchen \/ /);
+  });
+  it('none: no labels; rooms stay tappable and named on hover', () => {
+    const h = renderMapZone(hass(), { ...baseConfig, map_room_labels: 'none' }, caps, 'i7', state());
+    expect(h).not.toContain('rpc-room-label');
+    expect(h).toMatch(/data-room-poly="Kitchen"><title>Kitchen<\/title>/);
+  });
+});

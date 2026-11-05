@@ -23,6 +23,8 @@ export const READINESS = {
   /** "None" — the integration's own no-state value; treated like ready. */
   NONE: 'none',
   BIN_FULL: 'bin_full',
+  /** v3.0.1 (#33): bin removed. */
+  NO_BIN: 'no_bin',
 } as const;
 
 /** sensor.*_phase (translation_key `phase`). */

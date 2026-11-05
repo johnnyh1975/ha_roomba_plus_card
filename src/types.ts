@@ -30,8 +30,10 @@ export interface CardConfig {
    *  is disabled. Cannot be auto-detected; the user opts in explicitly. */
   mode?: 'standalone' | 'companion';
   /** Optional override for which tab is shown on first render.
-   *  Default: 'map' for standalone SMART/EPHEMERAL, 'history' otherwise. */
-  default_tab?: 'map' | 'history' | 'health' | 'settings';
+   *  Default: 'map' for standalone SMART/EPHEMERAL, 'history' otherwise.
+   *  v3.0.1 (#31): 'none' starts with the tab panel collapsed — only the
+   *  header and the tab bar; tapping a tab opens it. */
+  default_tab?: 'map' | 'history' | 'health' | 'settings' | 'none';
 
   // ── v2.4.0 ──────────────────────────────────────────────────────────────
   /** v2.4.0 MISSION-MAP-ROTATE-PARITY: clockwise rotation (degrees) applied
@@ -42,6 +44,11 @@ export interface CardConfig {
    *  0 (no rotation) when unset — a purely cosmetic, lossless transform;
    *  does not affect calibration, room selection, or any other geometry. */
   mission_map_rotate?: 0 | 90 | 180 | 270;
+  /** v3.0.1: what each room label on the map shows. `full` (default):
+   *  icon, name and area; `name`: icon and name; `none`: no labels — rooms
+   *  stay tappable, the name shows on hover. For homes with many rooms,
+   *  where the labels crowd the map (community request, BobR1). */
+  map_room_labels?: 'full' | 'name' | 'none';
 }
 
 export interface RobotCapabilities {
@@ -428,6 +435,10 @@ export interface HomeAssistant {
   callWS(msg: Record<string, unknown>): Promise<unknown>;
   fetchWithAuth(url: string, init?: RequestInit): Promise<Response>;
   language: string;
+  /** v3.0.1 (#30): the user's locale profile settings. `first_weekday` is
+   *  'language' (follow the language's convention) or a day name
+   *  ('monday' … 'sunday'). Optional for test harnesses and old frontends. */
+  locale?: { language?: string; first_weekday?: string };
   /** `version` (HA core version) is part of HA's frontend config; optional
    *  only for test harnesses. Used by version-check.ts (v2.5.0). */
   config: { unit_system: { length: string }; version?: string };

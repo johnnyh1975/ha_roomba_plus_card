@@ -84,6 +84,7 @@ export function buildConfigFormSchema(): HAFormField[] {
             { value: 'history',  label: 'History' },
             { value: 'health',   label: 'Care' },
             { value: 'settings', label: 'Settings' },
+            { value: 'none',     label: 'None — start collapsed (tap a tab to open it)' },
           ],
         },
       },
@@ -117,6 +118,21 @@ export function buildConfigFormSchema(): HAFormField[] {
             { value: 90,  label: '90°' },
             { value: 180, label: '180°' },
             { value: 270, label: '270°' },
+          ],
+          mode: 'dropdown',
+        },
+      },
+    },
+    {
+      // v3.0.1 — for homes with many rooms (community request).
+      name: 'map_room_labels',
+      label: 'Room labels on the map',
+      selector: {
+        select: {
+          options: [
+            { value: 'full', label: 'Name and area' },
+            { value: 'name', label: 'Name only' },
+            { value: 'none', label: 'None (rooms stay tappable)' },
           ],
           mode: 'dropdown',
         },
