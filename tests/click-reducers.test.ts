@@ -11,6 +11,7 @@ function baseState(over: Partial<ClickState> = {}): ClickState {
   return {
     selectedRooms: new Set<string>(),
     activeTab: 'map',
+    tabCollapsed: false,
     viewMode: 'robot',
     openPopover: null,
     resetError: null,
@@ -62,12 +63,30 @@ describe('room / room-overlay toggle', () => {
 });
 
 describe('tab', () => {
-  it('switches to a new tab', () => {
+  it('switches to a new tab (and opens the panel)', () => {
     expect(clickReducer('tab', baseState({ activeTab: 'map' }), { tab: 'health' }))
-      .toEqual({ activeTab: 'health' });
+      .toEqual({ activeTab: 'health', tabCollapsed: false });
   });
-  it('is a no-op when tapping the active tab', () => {
-    expect(clickReducer('tab', baseState({ activeTab: 'map' }), { tab: 'map' })).toEqual({});
+  // v3.0.1 #31 (@djdelorie): the open tab toggles the panel.
+  it('tapping the open tab collapses the panel', () => {
+    expect(clickReducer('tab', baseState({ activeTab: 'map' }), { tab: 'map' }))
+      .toEqual({ activeTab: 'map', tabCollapsed: true });
+  });
+  it('tapping it again expands the same tab', () => {
+    expect(clickReducer('tab', baseState({ activeTab: 'map', tabCollapsed: true }), { tab: 'map' }))
+      .toEqual({ activeTab: 'map', tabCollapsed: false });
+  });
+  it('a different tab while collapsed opens that tab', () => {
+    expect(clickReducer('tab', baseState({ activeTab: 'map', tabCollapsed: true }), { tab: 'history' }))
+      .toEqual({ activeTab: 'history', tabCollapsed: false });
+  });
+  it('two-column layout: the highlighted tab (shownTab) is what toggles, not the hidden Map', () => {
+    // activeTab 'map' lives in its own column; the bar highlights 'history'.
+    expect(clickReducer('tab', baseState({ activeTab: 'map' }), { tab: 'history', shownTab: 'history' }))
+      .toEqual({ activeTab: 'history', tabCollapsed: true });
+  });
+  it('a click without a tab id changes nothing', () => {
+    expect(clickReducer('tab', baseState({ activeTab: 'map' }), {})).toEqual({});
   });
 });
 

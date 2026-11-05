@@ -37,11 +37,19 @@ export function availableTabs(config: CardConfig, caps: RobotCapabilities, lang 
   return tabs;
 }
 
-/** Default active tab for first render, honouring config.default_tab override. */
+/** Default active tab for first render, honouring config.default_tab override.
+ *  `default_tab: none` (v3.0.1 #31) still yields the tab a tap on the bar
+ *  would expand to first; startsCollapsed() says the panel starts closed. */
 export function defaultTab(config: CardConfig, caps: RobotCapabilities): TabId {
-  if (config.default_tab) return config.default_tab;
+  if (config.default_tab && config.default_tab !== 'none') return config.default_tab;
   const showMap = config.mode !== 'companion' && (caps.hasRoomsMap || caps.hasCoverageImage);
   return showMap ? 'map' : 'history';
+}
+
+/** v3.0.1 (#31): `default_tab: none` — the card opens with the tab panel
+ *  collapsed (header + tab bar only). */
+export function startsCollapsed(config: CardConfig): boolean {
+  return config.default_tab === 'none';
 }
 
 /**
@@ -108,7 +116,7 @@ export function historyTabHasBadge(
   return hasAlertForTab(hass, caps, robotName, 'history');
 }
 
-export function renderTabBar(tabs: TabDef[], active: TabId, badges: Partial<Record<TabId, boolean>> = {}): string {
+export function renderTabBar(tabs: TabDef[], active: TabId | null, badges: Partial<Record<TabId, boolean>> = {}): string {
   return `
     <div class="rpc-tab-bar" role="tablist">
       ${tabs.map(t => `

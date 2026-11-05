@@ -84,6 +84,7 @@ export function buildConfigFormSchema(): HAFormField[] {
             { value: 'history',  label: 'History' },
             { value: 'health',   label: 'Care' },
             { value: 'settings', label: 'Settings' },
+            { value: 'none',     label: 'None — start collapsed (tap a tab to open it)' },
           ],
         },
       },

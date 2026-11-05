@@ -30,8 +30,10 @@ export interface CardConfig {
    *  is disabled. Cannot be auto-detected; the user opts in explicitly. */
   mode?: 'standalone' | 'companion';
   /** Optional override for which tab is shown on first render.
-   *  Default: 'map' for standalone SMART/EPHEMERAL, 'history' otherwise. */
-  default_tab?: 'map' | 'history' | 'health' | 'settings';
+   *  Default: 'map' for standalone SMART/EPHEMERAL, 'history' otherwise.
+   *  v3.0.1 (#31): 'none' starts with the tab panel collapsed — only the
+   *  header and the tab bar; tapping a tab opens it. */
+  default_tab?: 'map' | 'history' | 'health' | 'settings' | 'none';
 
   // ── v2.4.0 ──────────────────────────────────────────────────────────────
   /** v2.4.0 MISSION-MAP-ROTATE-PARITY: clockwise rotation (degrees) applied

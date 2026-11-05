@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { availableTabs, defaultTab, healthTabHasBadge, historyTabHasBadge, renderTabBar } from '../src/tabs';
+import { availableTabs, defaultTab, startsCollapsed, healthTabHasBadge, historyTabHasBadge, renderTabBar } from '../src/tabs';
 import { makeHass, defaultCaps, baseConfig, st } from './helpers';
 
 describe('availableTabs()', () => {
@@ -42,6 +42,16 @@ describe('defaultTab()', () => {
 
   it('honours config.default_tab override', () => {
     expect(defaultTab({ ...baseConfig, default_tab: 'health' }, { ...defaultCaps, hasCoverageImage: true })).toBe('health');
+  });
+
+  // v3.0.1 #31: 'none' is not a tab — the first tap expands the normal default.
+  it("default_tab: none resolves to the normal default tab and starts collapsed", () => {
+    const cfg = { ...baseConfig, default_tab: 'none' as const };
+    expect(defaultTab(cfg, { ...defaultCaps, hasCoverageImage: true })).toBe('map');
+    expect(defaultTab(cfg, defaultCaps)).toBe('history');
+    expect(startsCollapsed(cfg)).toBe(true);
+    expect(startsCollapsed(baseConfig)).toBe(false);
+    expect(startsCollapsed({ ...baseConfig, default_tab: 'history' })).toBe(false);
   });
 });
 
@@ -134,6 +144,16 @@ describe('historyTabHasBadge()', () => {
   it('does not fire for health-category alerts (e.g. maintenance due)', () => {
     const hass = makeHass({ [`binary_sensor.${n}_maintenance_due`]: st('on') });
     expect(historyTabHasBadge(hass, defaultCaps, n)).toBe(false);
+  });
+});
+
+describe('renderTabBar() — collapsed (v3.0.1 #31)', () => {
+  it('no tab is highlighted when the panel is collapsed', () => {
+    const tabs = availableTabs(baseConfig, { ...defaultCaps, hasCoverageImage: true });
+    const html = renderTabBar(tabs, null);
+    expect(html).not.toContain('rpc-tab-btn--active');
+    expect(html).not.toContain('aria-selected="true"');
+    expect(html.match(/data-tab="/g)?.length).toBe(tabs.length);
   });
 });
 

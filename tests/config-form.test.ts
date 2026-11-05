@@ -25,10 +25,10 @@ describe('B4 — top-level leads with real v2.0 switches', () => {
     expect(opts).toEqual(['standalone', 'companion']);
   });
 
-  it('exposes default_tab at top level with all four tabs', () => {
+  it('exposes default_tab at top level with all four tabs plus none (v3.0.1 #31)', () => {
     expect(topLevelNames).toContain('default_tab');
     const opts = (field('default_tab')?.selector as any)?.select?.options?.map((o: any) => o.value);
-    expect(opts).toEqual(['map', 'history', 'health', 'settings']);
+    expect(opts).toEqual(['map', 'history', 'health', 'settings', 'none']);
   });
 
   it('keeps entity required', () => {

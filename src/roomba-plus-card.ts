@@ -13,7 +13,7 @@ import { renderAlertZone }        from './zones/alert-zone.js';
 import { renderHouseholdZone, renderHouseholdSkeleton } from './zones/household-zone.js';
 import { CHIP_TO_OPTION, OPTION_TO_CHIP } from './zones/room-selector-zone.js';
 import { renderHeader } from './header.js';
-import { availableTabs, defaultTab, healthTabHasBadge, historyTabHasBadge, renderTabBar, TabId } from './tabs.js';
+import { availableTabs, defaultTab, startsCollapsed, healthTabHasBadge, historyTabHasBadge, renderTabBar, TabId } from './tabs.js';
 import { resolveClick, resolveKeydownTarget, ClickActionKey } from './actions-resolver.js';
 import { buildConfigFormSchema, stubConfig } from './config-form.js';
 import { shouldReloadForEvent } from './mission-events.js';
@@ -833,6 +833,12 @@ class RoombaPlusCard extends HTMLElement {
   private missionEventSubscribing = false;
   // v2.0 — tab architecture
   private activeTab: TabId | null = null;   // null until first render picks the default
+  /** v3.0.1 (#31): tab panel collapsed — set by tapping the open tab or by
+   *  `default_tab: none`; any tab tap opens it again. */
+  private tabCollapsed = false;
+  /** v3.0.1 (#31): tab the panel showed at the last render (two-column
+   *  layout maps an active Map tab to the bar's first tab). */
+  private shownTab: TabId | null = null;
   private roomPickerOpen = false;
   /** v2.0: robot selector dropdown also offers a "Household summary" view
    *  that replaces the header + tabs entirely with the combined multi-robot
@@ -993,6 +999,9 @@ class RoombaPlusCard extends HTMLElement {
     const nextDefault = entityList.includes(prevActive) ? prevActive : entityList[0];
     const entityChanged = nextDefault !== prevActive;
 
+    // v3.0.1 (#31): a changed default_tab (card editor preview) applies at
+    // once instead of only after a page reload.
+    if (this.config && this.config.default_tab !== config.default_tab) this.activeTab = null;
     this.config    = config;
     this.activeRobot = nextDefault;
     this.robotName   = nextDefault.replace('vacuum.', '');
@@ -1292,6 +1301,7 @@ class RoombaPlusCard extends HTMLElement {
     // v2.0: pick the default tab on first render / after a robot switch reset it to null.
     if (this.activeTab === null) {
       this.activeTab = defaultTab(this.config, caps);
+      this.tabCollapsed = startsCollapsed(this.config);
     }
     const tabs = availableTabs(this.config, caps, resolveLang(this._hass.language));
     // Guard: if config/caps changed such that the previously active tab no
@@ -1363,7 +1373,9 @@ class RoombaPlusCard extends HTMLElement {
     const twoCol   = this.wide && this.viewMode !== 'household' && tabs.some(tb => tb.id === 'map');
     const barTabs  = twoCol ? tabs.filter(tb => tb.id !== 'map') : tabs;
     const panelTab: TabId | null = twoCol && this.activeTab === 'map' ? (barTabs[0]?.id ?? null) : this.activeTab;
-    const tabBarHtml = renderTabBar(barTabs, panelTab, badges);
+    this.shownTab = panelTab;
+    // v3.0.1 (#31): collapsed → no tab highlighted, no panel content.
+    const tabBarHtml = renderTabBar(barTabs, this.tabCollapsed ? null : panelTab, badges);
 
     const tabCtx: TabContentContext = {
       hass: this._hass, config: this.config, caps, robotName: this.robotName, isMetric,
@@ -1379,13 +1391,17 @@ class RoombaPlusCard extends HTMLElement {
       settingsPanelOpen: this.settingsPanelOpen, isSendingClean: this.isSendingClean,
       sendError: this.sendError, passes: this.passes,
       maintenanceLinksHtml: this.renderMaintenanceLinks(caps),
-      diagnosticsHtml: panelTab === 'settings'
+      diagnosticsHtml: panelTab === 'settings' && !this.tabCollapsed
         ? renderDiagnostics(this.diagOpen ? diagnosticsData(this._hass, this.robotName, this.integrationVersion) : null,
             this.diagOpen, this.diagCopied, resolveLang(this._hass.language))
         : '',
       alertZoneHtml,
     };
-    const tabContentHtml = renderTabContent(panelTab, tabCtx);
+    const tabContentHtml = this.tabCollapsed ? '' : renderTabContent(panelTab, tabCtx);
+    const tabPanelHtml = this.tabCollapsed ? '' : `
+            <div class="rpc-tab-panel">
+              ${tabContentHtml}
+            </div>`;
     const mapColumnHtml  = twoCol ? renderTabContent('map', { ...tabCtx, mapColumn: true }) : '';
 
     // v2.0: household view replaces header + tabs entirely rather than
@@ -1420,9 +1436,7 @@ class RoombaPlusCard extends HTMLElement {
             ${headerHtml}
             ${roomPickerHtml}
             ${tabBarHtml}
-            <div class="rpc-tab-panel">
-              ${tabContentHtml}
-            </div>
+            ${tabPanelHtml}
           </div>
         </div>
       `
@@ -1430,9 +1444,7 @@ class RoombaPlusCard extends HTMLElement {
         ${headerHtml}
         ${roomPickerHtml}
         ${tabBarHtml}
-        <div class="rpc-tab-panel">
-          ${tabContentHtml}
-        </div>
+        ${tabPanelHtml}
       `;
 
     const html = `
@@ -1601,6 +1613,7 @@ class RoombaPlusCard extends HTMLElement {
       const payload: ClickPayload = {
         room: ds.room ?? ds.roomPoly ?? ds.roomLabel,
         tab: ds.tab,
+        shownTab: key === 'tab' ? this.shownTab : undefined,
         bar: ds.bar,
         maint: ds.maint,
         historyTab: ds.historyTab as 'calendar' | 'coverage' | undefined,

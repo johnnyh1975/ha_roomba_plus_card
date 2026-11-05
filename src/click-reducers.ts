@@ -24,6 +24,8 @@
 export interface ClickState {
   selectedRooms: Set<string>;
   activeTab: string | null;
+  /** v3.0.1 (#31): tab panel collapsed (tapping the open tab again). */
+  tabCollapsed: boolean;
   viewMode: 'robot' | 'household';
   openPopover: string | null;
   resetError: string | null;
@@ -68,6 +70,10 @@ const PURE_KEYS = new Set<string>([
 export interface ClickPayload {
   room?: string;          // room / room-overlay
   tab?: string;           // tab
+  /** v3.0.1 (#31): the tab the panel actually shows. Differs from
+   *  state.activeTab in the wide two-column layout, where an active Map tab
+   *  lives in its own column and the bar highlights its first tab. */
+  shownTab?: string | null;
   bar?: string;           // bar
   maint?: string;         // maint
   historyTab?: 'calendar' | 'coverage';
@@ -102,9 +108,14 @@ export function clickReducer(key: PureClickKey, state: ClickState, payload: Clic
     }
 
     case 'tab': {
+      // v3.0.1 (#31, @djdelorie): tapping the open tab collapses the panel;
+      // tapping it again (or any other tab) opens it. No popup, no hidden
+      // state — the tab bar always stays visible.
       const tab = payload.tab ?? null;
-      if (tab === state.activeTab) return {};
-      return { activeTab: tab };
+      if (!tab) return {};
+      const shown = payload.shownTab !== undefined ? payload.shownTab : state.activeTab;
+      if (tab === shown) return { activeTab: tab, tabCollapsed: !state.tabCollapsed };
+      return { activeTab: tab, tabCollapsed: false };
     }
 
     case 'household-back':
