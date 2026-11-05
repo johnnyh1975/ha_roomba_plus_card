@@ -42,6 +42,11 @@ export interface CardConfig {
    *  0 (no rotation) when unset — a purely cosmetic, lossless transform;
    *  does not affect calibration, room selection, or any other geometry. */
   mission_map_rotate?: 0 | 90 | 180 | 270;
+  /** v3.0.1: what each room label on the map shows. `full` (default):
+   *  icon, name and area; `name`: icon and name; `none`: no labels — rooms
+   *  stay tappable, the name shows on hover. For homes with many rooms,
+   *  where the labels crowd the map (community request, BobR1). */
+  map_room_labels?: 'full' | 'name' | 'none';
 }
 
 export interface RobotCapabilities {

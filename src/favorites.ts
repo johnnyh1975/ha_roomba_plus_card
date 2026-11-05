@@ -61,16 +61,28 @@ export function favoriteLabel(hass: HomeAssistant, entityId: string, robotName: 
 
 /** The robot's favourites: from the vacuum attribute when present, else the
  *  button entities. */
+/** A firmware-internal routine, not one a user made in the app: its name
+ *  starts with an underscore (`_mission_init_config_<hex>`). The iRobot app
+ *  does not allow that prefix, so the integration filters these by it on
+ *  Prime (button_prime.py `_is_internal_favorite_name`); its Classic path
+ *  does not yet (field report @Geo26160, i7+), so the card filters both. */
+export function isInternalFavoriteName(name: string): boolean {
+  return name.trim().startsWith('_');
+}
+
 export function favoriteList(hass: HomeAssistant, robotName: string): FavoriteItem[] {
   const vac = hass.states[robot(hass, robotName).vacuumId];
   const attr = vac?.attributes?.favorites;
   if (Array.isArray(attr)) {
     return attr
       .filter((f): f is { id: unknown; name?: unknown } => !!f && typeof f === 'object' && 'id' in f)
+      .filter(f => !isInternalFavoriteName(String(f.name ?? '')))
       .map(f => ({ favoriteId: String(f.id), name: String(f.name ?? '').trim() || String(f.id) }))
       .filter(f => f.favoriteId !== '');
   }
-  return favoriteEntityIds(hass, robotName).map(id => ({ entityId: id, name: favoriteLabel(hass, id, robotName) }));
+  return favoriteEntityIds(hass, robotName)
+    .map(id => ({ entityId: id, name: favoriteLabel(hass, id, robotName) }))
+    .filter(f => !isInternalFavoriteName(f.name));
 }
 
 /**

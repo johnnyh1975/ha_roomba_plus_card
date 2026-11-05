@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '30 5 * * 1'   # weekly: the integration changes without this repo changing
+  workflow_dispatch:
 
 jobs:
   test:
@@ -53,3 +56,51 @@ jobs:
 
       - name: Check README badge vs. package.json
         run: python3 scripts/check_version_badge.py
+
+  # v3.0 A7 — contract guard v2. Clones the integration (public, no
+  # credentials) at `main` and at its newest `dev-*` beta branch, and checks
+  # that every translation_key, action and action field the card uses still
+  # exists (scripts/contract_check.py), and that every state slug the card
+  # compares against is still declared (tests/slugs.test.ts on a fixture
+  # refreshed from each branch). Runs weekly as well: the integration moves
+  # without the card's repo changing.
+  contract:
+    name: Integration contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - run: npm ci
+
+      - name: Clone integration (main + newest beta branch)
+        run: |
+          REPO=https://github.com/johnnyh1975/ha_roomba_plus.git
+          BETA=$(git ls-remote --heads "$REPO" 'dev-*' | sed 's#.*refs/heads/##' | sort -V | tail -n 1)
+          git clone --depth 1 --branch main "$REPO" int-main
+          if [ -n "$BETA" ]; then git clone --depth 1 --branch "$BETA" "$REPO" int-beta; fi
+          echo "beta branch: ${BETA:-none}"
+
+      - name: Keys, actions and fields the card uses
+        run: |
+          DIRS="int-main"; [ -d int-beta ] && DIRS="$DIRS int-beta"
+          python3 scripts/contract_check.py $DIRS
+
+      - name: State slugs (main)
+        run: |
+          python3 scripts/update_contract.py int-main
+          npx vitest run tests/slugs.test.ts
+
+      - name: State slugs (beta)
+        if: hashFiles('int-beta/custom_components/roomba_plus/manifest.json') != ''
+        run: |
+          python3 scripts/update_contract.py int-beta
+          npx vitest run tests/slugs.test.ts

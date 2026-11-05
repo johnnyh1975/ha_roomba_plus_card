@@ -242,6 +242,11 @@ show_dirt_events: false # dirt event count in day detail (cloud required)
 # param on map.png (integration ≥ 3.4.1), applied client-side here instead.
 # mission_map_rotate: 0  # 0 | 90 | 180 | 270
 
+# Room labels on the Map tab — for homes with many rooms, where the labels
+# crowd the map. Areas follow area_unit (m² or ft²).
+# map_room_labels: full   # full (icon, name, area) | name | none
+#                          # none: no labels; rooms stay tappable, name on hover
+
 # Units — auto follows your HA unit system
 area_unit: auto         # auto | sqft | m2
 

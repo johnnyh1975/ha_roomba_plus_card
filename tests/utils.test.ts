@@ -101,3 +101,19 @@ describe('isMetricSystem()', () => {
   it('HA US customary reports "mi"', () => expect(isMetricSystem(withLength('mi'))).toBe(false));
   it('"m" is accepted as metric too', () => expect(isMetricSystem(withLength('m'))).toBe(true));
 });
+
+// ── v3.0.1 roomLabelText ─────────────────────────────────────────────────
+import { roomLabelText } from '../src/utils';
+describe('roomLabelText', () => {
+  it('full (default), metric', () => expect(roomLabelText('Kitchen', 18.24, {}, true)).toBe('Kitchen / 18.2 m²'));
+  it('full, imperial HA → ft² (follows area_unit: auto)', () => expect(roomLabelText('Kitchen', 18.24, {}, false)).toBe('Kitchen / 196 ft²'));
+  it('area_unit overrides the HA unit system', () => {
+    expect(roomLabelText('K', 10, { area_unit: 'm2' }, false)).toBe('K / 10.0 m²');
+    expect(roomLabelText('K', 10, { area_unit: 'sqft' }, true)).toBe('K / 108 ft²');
+  });
+  it('name only, or no area known → just the name', () => {
+    expect(roomLabelText('Kitchen', 18, { map_room_labels: 'name' }, true)).toBe('Kitchen');
+    expect(roomLabelText('Kitchen', undefined, {}, true)).toBe('Kitchen');
+    expect(roomLabelText('Kitchen', NaN, {}, true)).toBe('Kitchen');
+  });
+});

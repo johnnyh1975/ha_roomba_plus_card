@@ -100,3 +100,22 @@ export function isMetricSystem(hass: HomeAssistant): boolean {
   const length = hass.config?.unit_system?.length;
   return length === 'km' || length === 'm';
 }
+
+/**
+ * v3.0.1: text of a room label on the map — name, and the area when
+ * `map_room_labels` is `full` (default). The area arrives in m²
+ * (`region_areas_m2`); it follows `area_unit` like every other area in the
+ * card (up to 3.0.0 the map always printed m²).
+ */
+export function roomLabelText(
+  name: string,
+  areaM2: unknown,
+  config: { map_room_labels?: 'full' | 'name' | 'none'; area_unit?: 'auto' | 'sqft' | 'm2' },
+  isMetric: boolean,
+): string {
+  const mode = config.map_room_labels ?? 'full';
+  if (mode !== 'full' || typeof areaM2 !== 'number' || !Number.isFinite(areaM2)) return name;
+  const unit = config.area_unit ?? 'auto';
+  const metric = unit === 'm2' || (unit === 'auto' && isMetric);
+  return metric ? `${name} / ${areaM2.toFixed(1)} m²` : `${name} / ${Math.round(areaM2 * 10.7639)} ft²`;
+}

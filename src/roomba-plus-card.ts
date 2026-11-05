@@ -676,6 +676,7 @@ const STYLES = `
   .rpc-diag-table td:first-child, .rpc-diag-table td:last-child { white-space: nowrap; }
   .rpc-diag-table code { font-size: 0.72rem; overflow-wrap: anywhere; }
   .rpc-diag-missing td { color: var(--secondary-text-color); }
+  .rpc-diag-need { font-style: italic; font-size: 0.72rem; }
   .rpc-diag-derived { color: var(--secondary-text-color); margin-bottom: 8px; }
   .rpc-map-layers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .rpc-map-floor { margin-bottom: 8px; }

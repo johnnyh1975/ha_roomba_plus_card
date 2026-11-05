@@ -32,7 +32,7 @@ import { robot, Generation } from '../registry.js';
 import { roomsRole } from '../robot-model.js';
 import { buildCalibrationTransform, CalibrationTransform, CalibrationPoint, CALIBRATION_CANVAS_PX } from '../calibration.js';
 import { coverageExtentFromAttrs, coverageContentBox } from '../heatmap.js';
-import { esc, timeSince } from '../utils.js';
+import { esc, timeSince, roomLabelText, isMetricSystem } from '../utils.js';
 import { mdiToEmoji } from '../const.js';
 import { t, resolveLang } from '../i18n/index.js';
 import { pinIcon, buildPinTip, roomAccessTips } from './history-zone.js';
@@ -225,22 +225,24 @@ export function renderMapZone(
     const pts = room.outline.map(([x, y]) => { const p = pct(x, y); return `${fmt(p.x)},${fmt(p.y)}`; }).join(' ');
     const sel = state.selectedRooms.has(room.name);
     return selectable(room.name)
-      ? `<polygon class="rpc-room-poly${sel ? ' rpc-room-poly--selected' : ''}" points="${pts}" data-room-poly="${esc(room.name)}" />`
-      : `<polygon class="rpc-room-poly rpc-room-poly--static" points="${pts}" />`;
+      ? `<polygon class="rpc-room-poly${sel ? ' rpc-room-poly--selected' : ''}" points="${pts}" data-room-poly="${esc(room.name)}"><title>${esc(room.name)}</title></polygon>`
+      : `<polygon class="rpc-room-poly rpc-room-poly--static" points="${pts}"><title>${esc(room.name)}</title></polygon>`;
   }).join('');
   const accessTips = roomAccessTips(hass, caps, n, lang);
-  const labels = model.rooms.map(room => {
+  // v3.0.1: `map_room_labels: none` — no labels; the polygons stay
+  // tappable and name the room on hover.
+  const labelMode = config.map_room_labels ?? 'full';
+  const isMetric = isMetricSystem(hass);
+  const labels = labelMode === 'none' ? '' : model.rooms.map(room => {
     const p = pct(room.cx, room.cy);
     if (!inBox(p)) return '';
     const sel = state.selectedRooms.has(room.name);
     const emoji = room.icon ? mdiToEmoji(room.icon) : (rr.icons[room.name] ? mdiToEmoji(rr.icons[room.name]) : '');
-    const area = rr.areasM2[room.name];
-    const areaSuffix = typeof area === 'number' && Number.isFinite(area) ? ` / ${area.toFixed(1)} m²` : '';
     const tip = accessTips[room.name];
     const attr = (selectable(room.name) ? ` data-room-label="${esc(room.name)}"` : '')
       + (tip ? ` title="${esc(tip)}"` : '');
     return `<div class="rpc-room-label${sel ? ' rpc-room-label--selected' : ''}${selectable(room.name) ? '' : ' rpc-room-label--static'}"
-      style="left:${fmt(p.x)}%;top:${fmt(p.y)}%"${attr}>${emoji ? `${emoji} ` : ''}${esc(room.name)}${esc(areaSuffix)}</div>`;
+      style="left:${fmt(p.x)}%;top:${fmt(p.y)}%"${attr}>${emoji ? `${emoji} ` : ''}${esc(roomLabelText(room.name, rr.areasM2[room.name], config, isMetric))}</div>`;
   }).join('');
 
   // ── coverage heatmap (Classic, aligned) ──────────────────────────────

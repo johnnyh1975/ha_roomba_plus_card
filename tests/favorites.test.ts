@@ -110,3 +110,31 @@ describe('favourites — v2.5.0 Prime naming', () => {
     expect(favoriteLabel(hass, `button.${n}_favorite_quick_kitchen`, n)).toBe('Quick Kitchen');
   });
 });
+
+// ── Field report @Geo26160 (i7+, FR): firmware-internal routine shown as a favourite ──
+import { favoriteList, isInternalFavoriteName } from '../src/favorites';
+describe('favourites — internal routines are not offered', () => {
+  const INTERNAL = '_mission_init_config_BB8583969BD64A96B6F9E6834852B45F';
+  it('name check', () => {
+    expect(isInternalFavoriteName(INTERNAL)).toBe(true);
+    expect(isInternalFavoriteName('Expert')).toBe(false);
+  });
+  it('vacuum attribute (Classic path of the integration does not filter them)', () => {
+    const hass = makeHass({ 'vacuum.i7': st('docked', { friendly_name: 'Roomba i7+',
+      favorites: [{ id: 'a', name: INTERNAL }, { id: 'b', name: 'Expert' }, { id: 'c', name: 'Aspirer partout' }] }) });
+    expect(favoriteList(hass, 'i7').map(f => f.name)).toEqual(['Expert', 'Aspirer partout']);
+  });
+  it('button fallback (no attribute): same filter on the label', () => {
+    const hass = makeHass({
+      'vacuum.i7': st('docked', { friendly_name: 'Roomba i7+' }),
+      'button.i7_fav_a': st('unknown', { friendly_name: `Roomba i7+ ${INTERNAL}` }),
+      'button.i7_fav_b': st('unknown', { friendly_name: 'Roomba i7+ Expert' }),
+    });
+    expect(favoriteList(hass, 'i7').map(f => f.name)).toEqual(['Expert']);
+  });
+  it('negative control: without the filter the internal one would be first', () => {
+    const hass = makeHass({ 'vacuum.i7': st('docked', { favorites: [{ id: 'a', name: INTERNAL }] }) });
+    expect(favoriteList(hass, 'i7')).toEqual([]);
+    expect((hass.states['vacuum.i7'].attributes.favorites as unknown[]).length).toBe(1);
+  });
+});

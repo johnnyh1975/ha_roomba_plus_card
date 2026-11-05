@@ -1108,7 +1108,7 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
             [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen', 'Hallway'], region_areas_m2: { Kitchen: 20.0 } }),
           }),
           baseConfig, { ...coverageCaps, hasAlignment: true, hasSmartZones: true }, n,
-          { ...emptyState, historyTab: 'coverage' }, false,
+          { ...emptyState, historyTab: 'coverage' }, true,   // metric HA
         );
         const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
         expect(kitchenLabel).toContain('20.0 m²');
@@ -1158,7 +1158,8 @@ describe('renderHistoryZone() — F7 coverage panel', () => {
           { ...emptyState, historyTab: 'coverage' }, false,
         );
         const kitchenLabel = html.match(/<div[^>]*data-room-label="Kitchen"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? '';
-        expect(kitchenLabel).toContain('15.5 m²');
+        // imperial HA (isMetric false): v3.0.1 follows area_unit like every other area
+        expect(kitchenLabel).toContain('167 ft²');
       });
 
       it('does not throw and shows name only when region_areas_m2 attribute is malformed (not an object)', () => {
@@ -1917,5 +1918,28 @@ describe('renderHistoryZone() — hazard pins by `space` (integration 4.2.19)', 
     const html = render([pin('stuck_events'), pin('keepout')]);
     expect(html).toContain('rpc-pin-stuck_events');
     expect(html).not.toContain('rpc-pin-keepout');
+  });
+});
+
+// ── v3.0.1 map_room_labels on the coverage view ─────────────────────────
+describe('renderHistoryZone() — v3.0.1 map_room_labels', () => {
+  const coverage = st('idle', { entity_picture: '/c.png', x_min_mm: 0, x_max_mm: 3000, y_min_mm: 0, y_max_mm: 3000, cell_size_mm: 100 });
+  const map = st('idle', { rooms: { Kitchen: { outline: [[0, 0], [2000, 0], [2000, 2000], [0, 2000]], name: 'Kitchen', room_id: 'kitchen', icon: 'mdi:fridge', x: 1000, y: 1000 } } });
+  const render = (cfg: Partial<typeof baseConfig>) => renderHistoryZone(
+    makeHass({ [`image.${n}_coverage_map`]: coverage, [`image.${n}_map`]: map,
+      [`select.${n}_smart_zone_select`]: st('Kitchen', { options: ['Kitchen'], region_areas_m2: { Kitchen: 20 } }) }),
+    { ...baseConfig, ...cfg }, { ...defaultCaps, hasCoverageImage: true, hasAlignment: true, hasSmartZones: true }, n,
+    { data: null, loading: false, error: null, openDay: null, dayMissions: null, openDaySummary: null,
+      lifetimeExpanded: false, historyTab: 'coverage', hazards: [] }, true);
+  it('default: name and area', () => expect(render({})).toContain('Kitchen / 20.0 m²'));
+  it('name: no area', () => {
+    const h = render({ map_room_labels: 'name' });
+    expect(h).toContain('data-room-label="Kitchen"');
+    expect(h).not.toContain('m²');
+  });
+  it('none: no labels, polygon still tappable and named on hover', () => {
+    const h = render({ map_room_labels: 'none' });
+    expect(h).not.toContain('data-room-label');
+    expect(h).toMatch(/data-room-poly="Kitchen"><title>Kitchen<\/title>/);
   });
 });

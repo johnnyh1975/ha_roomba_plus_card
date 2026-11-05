@@ -111,3 +111,11 @@ describe('v3.0 A6 editor', () => {
     expect(stubConfig(undefined)).toEqual({ entity: 'vacuum.roomba' });
   });
 });
+
+describe('v3.0.1 editor: room labels', () => {
+  it('offers map_room_labels with the three choices', () => {
+    const f = buildConfigFormSchema().find(x => x.name === 'map_room_labels')!;
+    const opts = (f.selector as { select: { options: { value: string }[] } }).select.options.map(o => o.value);
+    expect(opts).toEqual(['full', 'name', 'none']);
+  });
+});

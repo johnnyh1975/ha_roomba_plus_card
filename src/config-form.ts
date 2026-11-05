@@ -123,6 +123,21 @@ export function buildConfigFormSchema(): HAFormField[] {
       },
     },
     {
+      // v3.0.1 — for homes with many rooms (community request).
+      name: 'map_room_labels',
+      label: 'Room labels on the map',
+      selector: {
+        select: {
+          options: [
+            { value: 'full', label: 'Name and area' },
+            { value: 'name', label: 'Name only' },
+            { value: 'none', label: 'None (rooms stay tappable)' },
+          ],
+          mode: 'dropdown',
+        },
+      },
+    },
+    {
       name: 'presence_entities',
       label: 'Presence sensors (person.* entities)',
       selector: { entity: { domain: 'person', multiple: true } },
