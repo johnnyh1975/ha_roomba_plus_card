@@ -86,13 +86,14 @@ export function collectAlerts(
   // is unavailable (robot unreachable) decides "unknown" — no alert, rather
   // than a guess from an older readiness value.
   const readinessNow = robot(hass, n).st('sensor', 'readiness')?.state ?? '';
-  const binState = (key: 'bin_full' | 'bin_present'): 'on' | 'off' | 'unknown' | 'absent' => {
-    const s = robot(hass, n).st('binary_sensor', key);
+  // Literal keys in the robot().st() calls: scripts/contract_check.py finds
+  // the entity keys the card uses by that pattern.
+  const binState = (s: { state: string } | undefined): 'on' | 'off' | 'unknown' | 'absent' => {
     if (!s) return 'absent';
     return s.state === 'on' || s.state === 'off' ? s.state : 'unknown';
   };
-  const present = binState('bin_present');
-  const full = binState('bin_full');
+  const present = binState(robot(hass, n).st('binary_sensor', 'bin_present'));
+  const full = binState(robot(hass, n).st('binary_sensor', 'bin_full'));
   const binMissing = present === 'off' || (present === 'absent' && readinessNow === READINESS.NO_BIN);
   const binFull = !binMissing && (full === 'on' || (full === 'absent' && readinessNow === READINESS.BIN_FULL));
   if (binMissing) alerts.push({ priority: 2, text: t(lang, 'alert.binMissing'), category: 'health' });
