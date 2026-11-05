@@ -83,7 +83,7 @@ const STYLES = `
 
   /* ─── v2.0 Persistent header (was Zone 1 — Status) ─── */
   .rpc-header { padding: 0 0 12px; border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.08)); margin-bottom: 4px; }
-  .rpc-robot-identity { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .rpc-robot-identity { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; min-width: 0; overflow: hidden; }
   .rpc-robot-icon { font-size: 1.1rem; }
   .rpc-robot-name { font-size: 0.9rem; font-weight: 600; color: var(--secondary-text-color, #9ca3af); }
 
@@ -745,6 +745,9 @@ const STYLES = `
     color: var(--rpc-green, #4caf50);
     border: 1px solid var(--rpc-green, #4caf50); border-radius: 4px;
     padding: 1px 5px; margin-left: 6px; white-space: nowrap;
+    /* v3.0.1 (#32): never past the card edge — long versions are cut with
+       an ellipsis, the full one is in the tooltip. */
+    min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1;
   }
 
   /* ── v2.0 — tab bar ─────────────────────────────────────────────────────── */
