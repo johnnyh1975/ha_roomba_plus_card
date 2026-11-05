@@ -1,2 +1,4 @@
 node_modules/
 *.tsbuildinfo
+__pycache__/
+*.pyc
