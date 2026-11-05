@@ -138,6 +138,7 @@ export const en = {
   'alert.errorPrefixed': 'Error: {label}',
   'alert.maintenanceDue': 'Maintenance due',
   'alert.binFull': 'Bin full — empty to continue',
+  'alert.binMissing': 'Bin missing — put it back to continue',
   'alert.notReadyReason': 'Robot not ready: {reason}',
   'alert.filterWearing': 'Filter wearing {ratio}× faster than normal',
   'alert.filterWearingSub': 'Check for dust or debris buildup.',

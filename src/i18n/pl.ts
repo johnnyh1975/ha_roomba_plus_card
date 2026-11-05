@@ -134,6 +134,7 @@ export const pl: TranslationDict = {
   'alert.errorPrefixed': 'Błąd: {label}',
   'alert.maintenanceDue': 'Wymagana konserwacja',
   'alert.binFull': 'Pojemnik pełny — opróżnij, aby kontynuować',
+  'alert.binMissing': 'Brak pojemnika — włóż go, aby kontynuować',
   'alert.notReadyReason': 'Robot nie jest gotowy: {reason}',
   'alert.filterWearing': 'Filtr zużywa się {ratio}× szybciej niż zwykle',
   'alert.filterWearingSub': 'Sprawdź nagromadzenie kurzu lub zanieczyszczeń.',

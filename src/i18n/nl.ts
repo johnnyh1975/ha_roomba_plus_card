@@ -130,6 +130,7 @@ export const nl: TranslationDict = {
   'alert.errorPrefixed': 'Fout: {label}',
   'alert.maintenanceDue': 'Onderhoud nodig',
   'alert.binFull': 'Stofbak vol — leeg hem om door te gaan',
+  'alert.binMissing': 'Stofbak ontbreekt — plaats hem terug om door te gaan',
   'alert.notReadyReason': 'Robot niet gereed: {reason}',
   'alert.filterWearing': 'Filter slijt {ratio}× sneller dan normaal',
   'alert.filterWearingSub': 'Controleer op stof- of vuilophoping.',

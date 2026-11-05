@@ -130,6 +130,7 @@ export const es: TranslationDict = {
   'alert.errorPrefixed': 'Error: {label}',
   'alert.maintenanceDue': 'Mantenimiento pendiente',
   'alert.binFull': 'Depósito lleno — vacíalo para continuar',
+  'alert.binMissing': 'Falta el depósito — vuelve a colocarlo para continuar',
   'alert.notReadyReason': 'El robot no está listo: {reason}',
   'alert.filterWearing': 'El filtro se desgasta {ratio}× más rápido de lo normal',
   'alert.filterWearingSub': 'Comprueba si hay acumulación de polvo o suciedad.',
