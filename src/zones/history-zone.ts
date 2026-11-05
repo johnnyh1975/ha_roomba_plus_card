@@ -1,6 +1,6 @@
 import { HomeAssistant, CardConfig, RobotCapabilities, DaySummary, MissionRecord, HazardRecord, MissionExplain, MissionPath, MissionMapPayload } from '../types.js';
 import { robot } from '../registry.js';
-import { renderHeatmap, renderSkeletonHeatmap, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, coverageExtentFromAttrs, coverageToImagePct, coverageToImagePctNum, coverageFrameStyles } from '../heatmap.js';
+import { renderHeatmap, renderSkeletonHeatmap, firstWeekdayIndex, renderSparkline, normalisedWifiPct, wifiQualityFromHistogram, coverageExtentFromAttrs, coverageToImagePct, coverageToImagePctNum, coverageFrameStyles } from '../heatmap.js';
 import { renderMissionMapSvg } from '../mission-map.js';
 import { esc, timeSince, areaSqftFromEntity, roomLabelText } from '../utils.js';
 import { mapImageId, zoneSelectMapAttr } from '../entity-ids.js';
@@ -505,11 +505,11 @@ export function renderHistoryZone(
   // Heatmap area
   let heatmapHtml = '';
   if (state.loading && !state.data) {
-    heatmapHtml = renderSkeletonHeatmap(Math.ceil(days / 7), lang);
+    heatmapHtml = renderSkeletonHeatmap(Math.ceil(days / 7), lang, firstWeekdayIndex(hass));
   } else if (state.error) {
     heatmapHtml = `<div class="rpc-history-error">${esc(state.error)}</div>`;
   } else if (state.data) {
-    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language, caps.hasDirtDensity, lang);
+    heatmapHtml = renderHeatmap(state.data, days, unit, hass.language, caps.hasDirtDensity, lang, firstWeekdayIndex(hass));
     // Show partial message if API returned fewer calendar days than requested
     if (state.data.length < days) {
       heatmapHtml += `<div class="rpc-history-partial">${t(lang, 'history.partialDays', { shown: state.data.length, days })}</div>`;

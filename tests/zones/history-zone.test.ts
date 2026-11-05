@@ -1943,3 +1943,31 @@ describe('renderHistoryZone() — v3.0.1 map_room_labels', () => {
     expect(h).toMatch(/data-room-poly="Kitchen"><title>Kitchen<\/title>/);
   });
 });
+
+describe('renderHistoryZone() — calendar follows the HA first weekday (#30)', () => {
+  const hassWith = (first_weekday: string, language = 'en') => {
+    const h = makeHass({});
+    h.language = language;
+    h.locale = { language, first_weekday };
+    return h;
+  };
+  const firstHeader = (html: string) => html.match(/<text [^>]*y="13"[^>]*>([^<]+)<\/text>/)?.[1];
+
+  it('calendar starts on Sunday when the profile says sunday', () => {
+    const html = renderHistoryZone(hassWith('sunday'), baseConfig, fullCaps, n,
+      { ...emptyState, data: [] }, false);
+    expect(firstHeader(html)).toBe('Su');
+  });
+
+  it('loading skeleton starts on the same day', () => {
+    const html = renderHistoryZone(hassWith('sunday'), baseConfig, fullCaps, n,
+      { ...emptyState, loading: true }, false);
+    expect(firstHeader(html)).toBe('Su');
+  });
+
+  it('monday setting keeps the Monday-first layout', () => {
+    const html = renderHistoryZone(hassWith('monday', 'de'), baseConfig, fullCaps, n,
+      { ...emptyState, data: [] }, false);
+    expect(firstHeader(html)).toBe('Mo');
+  });
+});

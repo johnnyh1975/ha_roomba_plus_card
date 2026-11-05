@@ -433,6 +433,10 @@ export interface HomeAssistant {
   callWS(msg: Record<string, unknown>): Promise<unknown>;
   fetchWithAuth(url: string, init?: RequestInit): Promise<Response>;
   language: string;
+  /** v3.0.1 (#30): the user's locale profile settings. `first_weekday` is
+   *  'language' (follow the language's convention) or a day name
+   *  ('monday' … 'sunday'). Optional for test harnesses and old frontends. */
+  locale?: { language?: string; first_weekday?: string };
   /** `version` (HA core version) is part of HA's frontend config; optional
    *  only for test harnesses. Used by version-check.ts (v2.5.0). */
   config: { unit_system: { length: string }; version?: string };
